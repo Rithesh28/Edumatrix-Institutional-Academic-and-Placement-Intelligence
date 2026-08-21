@@ -1,0 +1,118 @@
+import re
+from datetime import datetime, date, time
+from typing import List, Dict, Any
+
+
+class DutyExtractor:
+    """Extract exam duty information from text"""
+    
+    def extract_duties(self, text: str) -> List[Dict[str, Any]]:
+        """Extract duty details from text"""
+        
+        duties = []
+        
+        # Pattern 1: Lecturer: Prof. Singh, Date: 2026-08-15, Time: 9:00 AM, Venue: Hall A
+        pattern1 = r'Lecturer:?\s*([^\n,]+)[,\n]\s*Date:?\s*([\d-]+)[,\n]\s*Time:?\s*([^\n,]+)[,\n]\s*Venue:?\s*([^\n]+)'
+        matches = re.findall(pattern1, text, re.IGNORECASE)
+        
+        for match in matches:
+            lecturer_name = match[0].strip()
+            date_str = match[1].strip()
+            time_str = match[2].strip()
+            venue = match[3].strip()
+            
+            duty = self._parse_duty(lecturer_name, date_str, time_str, venue, "exam")
+            if duty:
+                duties.append(duty)
+        
+        # Pattern 2: Table format
+        pattern2 = r'([^\n]+)\s+([\d-]+)\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s*[-–]\s*(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s+([^\n]+)'
+        matches = re.findall(pattern2, text, re.IGNORECASE)
+        
+        for match in matches:
+            lecturer_name = match[0].strip()
+            date_str = match[1].strip()
+            start_time_str = match[2].strip()
+            end_time_str = match[3].strip()
+            venue = match[4].strip()
+            
+            duty = self._parse_duty(lecturer_name, date_str, start_time_str, venue, "exam", end_time_str)
+            if duty:
+                duties.append(duty)
+        
+        # Pattern 3: Simple format
+        pattern3 = r'(\w+\s+\w+)\s+(\d{1,2}/\d{1,2}/\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?)\s+([^\n]+)'
+        matches = re.findall(pattern3, text, re.IGNORECASE)
+        
+        for match in matches:
+            lecturer_name = match[0].strip()
+            date_str = match[1].strip()
+            time_str = match[2].strip()
+            venue = match[3].strip()
+            
+            duty = self._parse_duty(lecturer_name, date_str, time_str, venue, "exam")
+            if duty:
+                duties.append(duty)
+        
+        return duties
+    
+    def _parse_duty(self, lecturer_name: str, date_str: str, time_str: str, venue: str, exam_name: str = "exam", end_time_str: str = None) -> Dict[str, Any]:
+        """Parse individual duty details"""
+        
+        # Parse date
+        try:
+            # Try YYYY-MM-DD
+            duty_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except ValueError:
+            try:
+                # Try DD/MM/YYYY
+                duty_date = datetime.strptime(date_str, "%d/%m/%Y").date()
+            except ValueError:
+                try:
+                    # Try MM/DD/YYYY
+                    duty_date = datetime.strptime(date_str, "%m/%d/%Y").date()
+                except ValueError:
+                    return None
+        
+        # Parse time
+        try:
+            # Handle AM/PM
+            if "AM" in time_str or "PM" in time_str:
+                start_time = datetime.strptime(time_str.strip(), "%I:%M %p").time()
+            else:
+                start_time = datetime.strptime(time_str.strip(), "%H:%M").time()
+        except ValueError:
+            try:
+                start_time = datetime.strptime(time_str.strip(), "%I %p").time()
+            except ValueError:
+                return None
+        
+        # Parse end time if provided
+        end_time = None
+        if end_time_str:
+            try:
+                if "AM" in end_time_str or "PM" in end_time_str:
+                    end_time = datetime.strptime(end_time_str.strip(), "%I:%M %p").time()
+                else:
+                    end_time = datetime.strptime(end_time_str.strip(), "%H:%M").time()
+            except ValueError:
+                pass
+        
+        # If no end time, add 2 hours
+        if not end_time:
+            from datetime import timedelta
+            start_datetime = datetime.combine(duty_date, start_time)
+            end_datetime = start_datetime + timedelta(hours=2)
+            end_time = end_datetime.time()
+        
+        return {
+            "lecturer_name": lecturer_name,
+            "date": duty_date,
+            "start_time": start_time,
+            "end_time": end_time,
+            "venue": venue,
+            "exam_name": exam_name
+        }
+
+
+duty_extractor = DutyExtractor()

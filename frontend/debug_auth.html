@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Auth</title>
+</head>
+<body>
+    <h2>EduMatrix Auth Debug</h2>
+    <button onclick="checkAuth()">Check Auth</button>
+    <pre id="output"></pre>
+    <script>
+        function checkAuth() {
+            const authData = localStorage.getItem('auth-storage');
+            const output = document.getElementById('output');
+            
+            if (!authData) {
+                output.textContent = 'No auth data found in localStorage';
+                return;
+            }
+            
+            try {
+                const parsed = JSON.parse(authData);
+                output.textContent = JSON.stringify(parsed, null, 2);
+                
+                if (parsed.state) {
+                    const user = parsed.state.user;
+                    console.log('User:', user);
+                    console.log('Role:', user?.role);
+                }
+            } catch (e) {
+                output.textContent = 'Error parsing: ' + e.message;
+            }
+        }
+    </script>
+</body>
+</html>

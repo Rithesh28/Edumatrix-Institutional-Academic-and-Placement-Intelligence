@@ -1,0 +1,173 @@
+# =========================================================
+# Environment Variables
+# =========================================================
+.env
+.env.*
+!.env.example
+
+# =========================================================
+# Python
+# =========================================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+testenv/
+backend/testenv/
+
+# Python Build
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# =========================================================
+# Backend
+# =========================================================
+backend/.env
+backend/__pycache__/
+backend/app/**/__pycache__/
+backend/alembic/versions/*.pyc
+
+# =========================================================
+# Frontend
+# =========================================================
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.env.local
+
+# =========================================================
+# React / Vite
+# =========================================================
+node_modules/
+dist/
+.vite/
+
+# =========================================================
+# Uploads
+# =========================================================
+uploads/
+backend/uploads/
+backend/app/uploads/
+
+# =========================================================
+# Machine Learning
+# =========================================================
+
+# Training datasets
+backend/app/ml/**/data/
+
+# Training data
+backend/app/ml/training_data/
+
+# Training checkpoints
+backend/app/ml/**/checkpoints/
+
+# TensorBoard logs
+backend/app/ml/**/logs/
+runs/
+logs/
+events.out.tfevents.*
+
+# Hugging Face cache
+cache/
+.huggingface/
+
+# Ignore all large model formats by default
+*.pth
+*.pt
+*.ckpt
+*.bin
+*.pkl
+*.onnx
+*.h5
+*.safetensors
+
+# =========================================================
+# KEEP THESE MODELS (Git LFS)
+# =========================================================
+
+!backend/app/ml/sentiment_model/model.safetensors
+
+!backend/app/ml/intent_model_sbert/embedding_model/model.safetensors
+
+!backend/app/ml/table_recognition/weights/best_model.pth
+
+# Tokenizers & configs
+!backend/app/ml/**/config.json
+!backend/app/ml/**/tokenizer.json
+!backend/app/ml/**/tokenizer_config.json
+!backend/app/ml/**/vocab.txt
+!backend/app/ml/**/special_tokens_map.json
+!backend/app/ml/**/modules.json
+!backend/app/ml/**/sentence_bert_config.json
+!backend/app/ml/**/README.md
+
+# =========================================================
+# Dataset Files
+# =========================================================
+*.csv
+*.tsv
+*.parquet
+*.zip
+*.7z
+*.tar
+*.gz
+
+# Keep sample datasets if required
+!sample_data/
+!sample_data/**
+
+# =========================================================
+# Logs
+# =========================================================
+*.log
+*.pid
+
+# =========================================================
+# Database
+# =========================================================
+*.db
+*.sqlite
+*.sqlite3
+
+# =========================================================
+# IDE
+# =========================================================
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# =========================================================
+# Jupyter
+# =========================================================
+.ipynb_checkpoints/
+
+# =========================================================
+# Docker
+# =========================================================
+docker-compose.override.yml
+
+# =========================================================
+# Operating System
+# =========================================================
+.DS_Store
+Thumbs.db
+
+# =========================================================
+# Misc
+# =========================================================
+*.tmp
+*.temp
