@@ -1,8 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import api from '../services/api'
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import api, { API_URL } from '../services/api'
 
 export const useAuthStore = create(
   persist(

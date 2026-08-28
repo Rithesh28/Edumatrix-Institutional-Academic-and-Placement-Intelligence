@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import { useAuthStore } from '../../store/authStore'
+import { API_URL } from '../../services/api'
 
 const HODDashboard = () => {
   const navigate = useNavigate()
@@ -16,7 +17,7 @@ const HODDashboard = () => {
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const response = await axios.get('http://localhost:8000/exam-duties/hod', {
+        const response = await axios.get(`${API_URL}/exam-duties/hod`, {
           headers: { Authorization: `Bearer ${token}` }
         })
         const duties = response.data

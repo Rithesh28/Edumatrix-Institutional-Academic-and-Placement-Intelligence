@@ -6,6 +6,7 @@ import ExamDutyUpload from '../../components/ExamDutyUpload'
 import ExamDutyCard from '../../components/ExamDutyCard'
 import ExamDutyList from '../../components/ExamDutyList'
 import ExamDutyConflict from '../../components/ExamDutyConflict'
+import { API_URL } from '../../services/api'
 
 const HODExamDuties = () => {
   const [loading, setLoading] = useState(false)
@@ -27,7 +28,7 @@ const HODExamDuties = () => {
     try {
       setFetching(true)
       console.log('🔍 Fetching duties from /exam-duties/hod...')
-      const response = await axios.get('http://localhost:8000/exam-duties/hod', {
+      const response = await axios.get(`${API_URL}/exam-duties/hod`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       console.log('✅ Duties fetched:', response.data.length)
@@ -95,7 +96,7 @@ const HODExamDuties = () => {
     try {
       if (action === 'confirm') {
         await axios.put(
-          `http://localhost:8000/exam-duties/${dutyId}/confirm`,
+          `${API_URL}/exam-duties/${dutyId}/confirm`,
           {},
           { headers: { Authorization: `Bearer ${token}` } }
         )
@@ -103,7 +104,7 @@ const HODExamDuties = () => {
       } else if (action === 'delete') {
         if (!window.confirm('Are you sure you want to delete this duty?')) return
         await axios.delete(
-          `http://localhost:8000/exam-duties/${dutyId}`,
+          `${API_URL}/exam-duties/${dutyId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         )
         toast.success('Duty deleted')

@@ -23,6 +23,7 @@ import {
 import { useResumeStore } from '../../store/resumeStore';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
+import { API_URL } from '../../services/api';
 import axios from 'axios';
 
 const ResumeAnalyzer = () => {
@@ -62,7 +63,7 @@ const ResumeAnalyzer = () => {
 
   const fetchStudents = async () => {
     try {
-      const res = await axios.get('http://localhost:8000/placement/students', {
+      const res = await axios.get(`${API_URL}/placement/students`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (Array.isArray(res.data)) {
@@ -126,7 +127,7 @@ const ResumeAnalyzer = () => {
   const handleViewDetails = async (resumeId) => {
     setLoadingDetail(true);
     try {
-      const res = await axios.get(`http://localhost:8000/resume/${resumeId}`, {
+      const res = await axios.get(`${API_URL}/resume/${resumeId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       setActiveResume(res.data);
@@ -151,7 +152,7 @@ const ResumeAnalyzer = () => {
 
   const handleExport = async (resumeId, format = 'json') => {
     try {
-      const res = await axios.get(`http://localhost:8000/resume/${resumeId}/export?format=${format}`, {
+      const res = await axios.get(`${API_URL}/resume/${resumeId}/export?format=${format}`, {
         headers: { Authorization: `Bearer ${token}` },
         responseType: 'blob'
       });
@@ -171,7 +172,7 @@ const ResumeAnalyzer = () => {
   const handleReanalyze = async (resumeId) => {
     try {
       toast.loading('Re-analyzing resume...', { id: `reanalyze-${resumeId}` });
-      const res = await axios.post(`http://localhost:8000/resume/${resumeId}/reanalyze`, {}, {
+      const res = await axios.post(`${API_URL}/resume/${resumeId}/reanalyze`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.data.success) {

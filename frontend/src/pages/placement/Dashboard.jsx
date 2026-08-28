@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import StatsCard from '../../components/placement/StatsCard';
+import { API_URL } from '../../services/api';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -32,7 +33,7 @@ const Dashboard = () => {
         : '';
       
       // Fetch recent jobs
-      const jobsRes = await fetch('http://localhost:8000/placement/jobs?limit=5', {
+      const jobsRes = await fetch(`${API_URL}/placement/jobs?limit=5`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (jobsRes.ok) {
@@ -41,7 +42,7 @@ const Dashboard = () => {
       }
 
       // Fetch recent companies
-      const companiesRes = await fetch('http://localhost:8000/placement/companies?limit=5', {
+      const companiesRes = await fetch(`${API_URL}/placement/companies?limit=5`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (companiesRes.ok) {
@@ -50,7 +51,7 @@ const Dashboard = () => {
       }
 
       // Fetch recent shortlists
-      const shortlistsRes = await fetch('http://localhost:8000/placement/shortlist?limit=5', {
+      const shortlistsRes = await fetch(`${API_URL}/placement/shortlist?limit=5`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (shortlistsRes.ok) {

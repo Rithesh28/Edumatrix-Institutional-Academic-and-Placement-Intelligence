@@ -19,7 +19,9 @@ export const useWebSocket = () => {
       wsRef.current.close()
     }
 
-    const wsUrl = `ws://localhost:8000/chat/ws/${token}`
+    const baseHttp = import.meta.env.VITE_API_URL || 'http://192.168.64.186:8000'
+    const baseWs = baseHttp.replace(/^http/, 'ws')
+    const wsUrl = `${baseWs}/chat/ws/${token}`
     console.log('Connecting WebSocket...', wsUrl.substring(0, 100) + '...')
     
     const ws = new WebSocket(wsUrl)

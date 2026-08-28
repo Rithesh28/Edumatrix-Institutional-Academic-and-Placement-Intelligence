@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { FileText, Download, TrendingUp, Building2, Users, Briefcase, Calendar, ArrowLeft } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import toast from 'react-hot-toast';
+import { API_URL } from '../../services/api';
 
 const Reports = () => {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ const Reports = () => {
         ? JSON.parse(localStorage.getItem('auth-storage')).state?.token 
         : '';
       
-      const response = await fetch('http://localhost:8000/placement/reports/export', {
+      const response = await fetch(`${API_URL}/placement/reports/export`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       

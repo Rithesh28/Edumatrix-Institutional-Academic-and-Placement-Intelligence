@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react'
 import { useAuthStore } from '../store/authStore'
 import axios from 'axios'
 import toast from 'react-hot-toast'
+import { API_URL } from '../services/api'
 
 const ExamDutyUpload = ({ onSuccess, onError, loading, setLoading }) => {
   const [file, setFile] = useState(null)
@@ -73,7 +74,7 @@ const ExamDutyUpload = ({ onSuccess, onError, loading, setLoading }) => {
     try {
       setUploadProgress(30)
       
-      const response = await axios.post('http://localhost:8000/exam-duties/upload', formData, {
+      const response = await axios.post(`${API_URL}/exam-duties/upload`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           Authorization: `Bearer ${token}`

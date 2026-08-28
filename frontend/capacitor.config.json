@@ -1,0 +1,9 @@
+{
+  "appId": "com.edumatrix.app",
+  "appName": "EduMatrix",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true
+  }
+}

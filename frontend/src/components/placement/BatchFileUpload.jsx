@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, File, X, CheckCircle, AlertCircle, Loader, Calendar } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { API_URL } from '../../services/api';
 
 const BatchFileUpload = ({ jobPostingId, onUploadComplete }) => {
   const [files, setFiles] = useState([]);
@@ -69,7 +70,7 @@ const BatchFileUpload = ({ jobPostingId, onUploadComplete }) => {
         });
       }, 300);
 
-      const response = await fetch('http://localhost:8000/placement/batch-upload', {
+      const response = await fetch(`${API_URL}/placement/batch-upload`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`

@@ -5,6 +5,7 @@ import toast from 'react-hot-toast'
 import ExamDutyCard from '../../components/ExamDutyCard'
 import ExamDutyConflict from '../../components/ExamDutyConflict'
 import useExamDuties from '../../hooks/useExamDuties'
+import { API_URL } from '../../services/api'
 
 const LecturerExamDuties = () => {
   const [duties, setDuties] = useState([])
@@ -16,7 +17,7 @@ const LecturerExamDuties = () => {
 
   const fetchDuties = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/exam-duties/me', {
+      const response = await axios.get(`${API_URL}/exam-duties/me`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       setDuties(response.data)
@@ -64,7 +65,7 @@ const LecturerExamDuties = () => {
   const handleConfirm = async (dutyId) => {
     try {
       await axios.put(
-        `http://localhost:8000/exam-duties/${dutyId}/confirm`,
+        `${API_URL}/exam-duties/${dutyId}/confirm`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       )
@@ -80,7 +81,7 @@ const LecturerExamDuties = () => {
     if (!window.confirm('Are you sure you want to cancel this duty?')) return
     try {
       await axios.put(
-        `http://localhost:8000/exam-duties/${dutyId}/cancel`,
+        `${API_URL}/exam-duties/${dutyId}/cancel`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       )

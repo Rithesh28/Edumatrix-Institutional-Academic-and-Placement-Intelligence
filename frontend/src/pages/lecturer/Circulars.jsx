@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuthStore } from '../../store/authStore'
 import toast from 'react-hot-toast'
+import { API_URL } from '../../services/api'
 
 const LecturerCirculars = () => {
   const { token } = useAuthStore()
@@ -20,7 +21,7 @@ const LecturerCirculars = () => {
 
   const fetchCirculars = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/circulars/', {
+      const response = await axios.get(`${API_URL}/circulars/`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       setCirculars(response.data)
@@ -67,7 +68,7 @@ const LecturerCirculars = () => {
       uploadFormData.append('file', file)
 
       const response = await axios.post(
-        'http://localhost:8000/upload/circular',
+        `${API_URL}/upload/circular`,
         uploadFormData,
         {
           headers: {
@@ -124,7 +125,7 @@ const LecturerCirculars = () => {
         toast.loading('Uploading circular with file...', { id: 'upload' })
 
         const response = await axios.post(
-          'http://localhost:8000/circulars/upload',
+          `${API_URL}/circulars/upload`,
           uploadFormData,
           {
             headers: {
@@ -156,7 +157,7 @@ const LecturerCirculars = () => {
         toast.loading('Posting circular...', { id: 'post' })
 
         const response = await axios.post(
-          'http://localhost:8000/circulars/',
+          `${API_URL}/circulars/`,
           submitData,
           {
             headers: {
@@ -169,21 +170,17 @@ const LecturerCirculars = () => {
         toast.dismiss('post')
 
         if (response.status === 200) {
-          toast.success('Circular created successfully!')
+          toast.success('Circular posted successfully!')
           resetForm()
           fetchCirculars()
         }
       }
     } catch (error) {
-      toast.dismiss()
-      console.error('Error:', error)
-      console.error('Response:', error.response?.data)
-      
-      if (error.response?.status === 401) {
-        toast.error('Session expired. Please login again.')
-      } else {
-        toast.error(error.response?.data?.detail || 'Failed to save circular')
-      }
+      toast.dismiss('upload')
+      toast.dismiss('post')
+      console.error('Failed to save circular:', error)
+      const errorMsg = error.response?.data?.detail || error.response?.data?.message || 'Failed to post circular'
+      toast.error(errorMsg)
     }
   }
 
@@ -208,7 +205,7 @@ const LecturerCirculars = () => {
   const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this circular?')) {
       try {
-        await axios.delete(`http://localhost:8000/circulars/${id}`, {
+        await axios.delete(`${API_URL}/circulars/${id}`, {
           headers: { Authorization: `Bearer ${token}` }
         })
         toast.success('Circular deleted successfully')
@@ -228,7 +225,7 @@ const LecturerCirculars = () => {
 
     try {
       const response = await axios.get(
-        `http://localhost:8000/files/${fileId}/download`,
+        `${API_URL}/files/${fileId}/download`,
         {
           headers: { Authorization: `Bearer ${token}` },
           responseType: 'blob'
@@ -252,7 +249,7 @@ const LecturerCirculars = () => {
   // Handle file preview
   const handlePreview = (fileId) => {
     if (!fileId) return
-    window.open(`http://localhost:8000/files/${fileId}/preview?token=${token}`, '_blank')
+    window.open(`${API_URL}/files/${fileId}/preview?token=${token}`, '_blank')
   }
 
   const renderFileAttachment = (circ) => {

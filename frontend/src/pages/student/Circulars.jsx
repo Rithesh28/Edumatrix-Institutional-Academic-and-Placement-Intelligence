@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import { useAuthStore } from '../../store/authStore'
 import toast from 'react-hot-toast'
+import { API_URL } from '../../services/api'
 
 const StudentCirculars = () => {
   const { token } = useAuthStore()
@@ -12,7 +13,7 @@ const StudentCirculars = () => {
 
   const fetchCirculars = async () => {
     try {
-      const response = await axios.get('http://localhost:8000/circulars/', {
+      const response = await axios.get(`${API_URL}/circulars/`, {
         headers: { Authorization: `Bearer ${token}` }
       })
       setCirculars(response.data)
@@ -39,7 +40,7 @@ const StudentCirculars = () => {
     try {
       // Use download endpoint to get the file
       const response = await axios.get(
-        `http://localhost:8000/files/${fileId}/download`,
+        `${API_URL}/files/${fileId}/download`,
         {
           headers: {
             Authorization: `Bearer ${token}`
@@ -48,37 +49,16 @@ const StudentCirculars = () => {
         }
       )
 
-      // Determine the correct MIME type
-      const contentType = mimeType || response.headers['content-type'] || 'application/octet-stream'
-      
-      // Create blob and URL
-      const blob = new Blob([response.data], { type: contentType })
+      // Create blob URL for preview
+      const blob = new Blob([response.data], { type: mimeType || 'application/pdf' })
       const url = window.URL.createObjectURL(blob)
-      
-      // Open in new tab
-      const newWindow = window.open(url, '_blank')
-      
-      // If popup is blocked, show a message
-      if (!newWindow) {
-        toast.error('Popup blocked! Please allow popups for this site.')
-        window.URL.revokeObjectURL(url)
-        setPreviewing(false)
-        return
-      }
+      window.open(url, '_blank')
       
       // Clean up after a delay
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url)
-      }, 30000)
-      
-      toast.success('Preview opened in new tab!')
+      setTimeout(() => window.URL.revokeObjectURL(url), 10000)
     } catch (error) {
-      console.error('Preview failed:', error)
-      if (error.response?.status === 401) {
-        toast.error('Please login again')
-      } else {
-        toast.error('Failed to preview file')
-      }
+      console.error('Failed to preview file:', error)
+      toast.error('Failed to preview file')
     } finally {
       setPreviewing(false)
     }
@@ -94,7 +74,7 @@ const StudentCirculars = () => {
     setDownloading(true)
     try {
       const response = await axios.get(
-        `http://localhost:8000/files/${fileId}/download`,
+        `${API_URL}/files/${fileId}/download`,
         {
           headers: {
             Authorization: `Bearer ${token}`

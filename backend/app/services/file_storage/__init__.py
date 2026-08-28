@@ -5,6 +5,7 @@ from .file_service import file_service
 from .search_service import search_service
 from .text_extractor import text_extractor
 
+
 __all__ = [
     'minio_client',
     'qdrant_client',

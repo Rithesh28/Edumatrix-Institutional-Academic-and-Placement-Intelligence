@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">EduMatrix</string>
+    <string name="title_activity_main">EduMatrix</string>
+    <string name="package_name">com.edumatrix.app</string>
+    <string name="custom_url_scheme">com.edumatrix.app</string>
+</resources>
