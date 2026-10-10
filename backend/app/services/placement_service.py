@@ -22,7 +22,7 @@ from ..models.job_posting import JobPosting, JobStatus
 from ..models.application import Application, ApplicationStatus
 from ..models.shortlist import Shortlist
 from ..models.user import User, UserRole
-from ..models.profile import StudentProfile, Skill
+from ..models.profile import StudentProfile, Skill, StudentProfileExtended, PlacementStatus
 from ..models.resume import Resume
 from ..schemas.placement import (
     CompanyCreate, CompanyUpdate,
@@ -549,6 +549,22 @@ class PlacementService:
             count = db.query(JobPosting).filter(JobPosting.status == status).count()
             jobs_by_status[status.value] = count
         
+        # Placed / Selected students calculation:
+        # A student is considered placed if they have at least one Application with status SELECTED
+        # OR their StudentProfileExtended has placement_status PLACED.
+        # Intermediate shortlisting (ApplicationStatus.SHORTLISTED or Shortlist entry) is tracked
+        # separately and NOT counted as a final placement.
+        selected_student_ids = set(
+            r[0] for r in db.query(Application.student_id).filter(Application.status == ApplicationStatus.SELECTED).all()
+        )
+        profile_placed_ids = set(
+            r[0] for r in db.query(StudentProfileExtended.user_id).filter(StudentProfileExtended.placement_status == PlacementStatus.PLACED).all()
+        )
+        placed_student_ids = selected_student_ids.union(profile_placed_ids)
+        total_placed = len(placed_student_ids)
+
+        placement_rate = (total_placed / total_students * 100.0) if total_students > 0 else 0.0
+
         return PlacementStatistics(
             total_companies=total_companies,
             active_companies=active_companies,
@@ -557,7 +573,8 @@ class PlacementService:
             total_applications=total_applications,
             total_shortlists=total_shortlists,
             total_students=total_students,
-            placement_rate=(total_shortlists / total_students * 100) if total_students > 0 else 0,
+            total_placed=total_placed,
+            placement_rate=round(placement_rate, 2),
             applications_by_status=apps_by_status,
             jobs_by_status=jobs_by_status
         )

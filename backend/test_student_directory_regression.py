@@ -153,6 +153,30 @@ class TestStudentDirectoryRegression(unittest.TestCase):
         s_other_res = requests.get(f"{BASE_URL}/placement/students/68", headers=self.s_headers)
         self.assertEqual(s_other_res.status_code, 403)
 
+    def test_09_students_without_applications_appear_and_render_correctly(self):
+        """Verify registered students who have not applied to any job still appear in directory."""
+        res = requests.get(f"{BASE_URL}/placement/students", headers=self.po_headers)
+        self.assertEqual(res.status_code, 200)
+        students = res.json()
+        students_without_apps = [s for s in students if s.get("total_applications", 0) == 0]
+        self.assertGreater(
+            len(students_without_apps), 0,
+            "Expected at least one student without applications in the database"
+        )
+        for s in students_without_apps:
+            self.assertEqual(s["total_applications"], 0)
+            self.assertEqual(s["applications"], [])
+            self.assertIn("name", s)
+            self.assertIn("status", s)
+
+    def test_10_api_failure_invalid_auth_token_rejected(self):
+        """Verify API failure handling: malformed or invalid token returns HTTP 401."""
+        res = requests.get(
+            f"{BASE_URL}/placement/students",
+            headers={"Authorization": "Bearer invalid_tampered_token_xyz"}
+        )
+        self.assertEqual(res.status_code, 401)
+
 
 if __name__ == "__main__":
     unittest.main()

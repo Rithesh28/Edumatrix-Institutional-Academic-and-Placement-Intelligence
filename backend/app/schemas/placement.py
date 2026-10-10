@@ -261,6 +261,7 @@ class PlacementStatistics(BaseModel):
     total_applications: int
     total_shortlists: int
     total_students: int
+    total_placed: int = Field(0, description="Unique students placed/selected")
     placement_rate: Optional[float] = Field(None, description="Placement rate percentage")
     
     # Breakdowns

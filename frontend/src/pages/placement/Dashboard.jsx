@@ -64,7 +64,7 @@ const Dashboard = () => {
   };
 
   // Get real stats for students placed
-  const studentsPlaced = stats?.total_students || 0;
+  const studentsPlaced = stats?.total_placed !== undefined ? stats.total_placed : (stats?.applications_by_status?.selected || 0);
   const placementRate = stats?.placement_rate || 0;
 
   if (isLoading) {

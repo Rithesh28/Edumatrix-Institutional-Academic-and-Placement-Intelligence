@@ -44,7 +44,6 @@ const JobDetails = () => {
     applications,
     fetchApplications,
     publishJobPosting,
-    createShortlist,
     shortlists,
     fetchShortlists,
   } = usePlacementStore();
@@ -134,39 +133,6 @@ const JobDetails = () => {
     );
     return (studentId) => shortlistedSet.has(studentId);
   }, [shortlists, id]);
-
-  const handleShortlistCandidate = async (candidate) => {
-    const companyId = selectedJob?.company_id || selectedJob?.company?.id;
-    if (!companyId) {
-      toast.error('Unable to determine company for this job posting. Please refresh and try again.');
-      return;
-    }
-
-    try {
-      await createShortlist({
-        job_posting_id: parseInt(id),
-        company_id: companyId,
-        student_id: candidate.student_id,
-        reason: `Matched via Skill Match Engine (Score: ${
-          candidate.match_score !== null ? candidate.match_score.toFixed(1) + '%' : 'N/A'
-        })`,
-      });
-      toast.success(`${candidate.student_name} shortlisted successfully!`);
-      if (id) {
-        fetchShortlists({ job_posting_id: id });
-        fetchApplications({ job_posting_id: id });
-      }
-    } catch (err) {
-      const detail = err.response?.data?.detail;
-      const message =
-        typeof detail === 'string'
-          ? detail
-          : Array.isArray(detail)
-          ? detail.map((d) => d.msg || d).join(', ')
-          : err.message;
-      toast.error(message || 'Failed to shortlist candidate');
-    }
-  };
 
   // Build full candidate list from backend response
   const candidateList = useMemo(() => {
@@ -763,20 +729,11 @@ const JobDetails = () => {
                             <span>Inspect Match</span>
                             <ChevronRight className="w-3.5 h-3.5" />
                           </button>
-                          {candidate.is_eligible && (
-                            isCandidateShortlisted(candidate.student_id) ? (
-                              <span className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 shadow-xs">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                Shortlisted
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => handleShortlistCandidate(candidate)}
-                                className="px-3 py-1.5 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 rounded-lg text-xs font-medium transition-colors cursor-pointer text-center"
-                              >
-                                + Shortlist
-                              </button>
-                            )
+                          {candidate.is_eligible && isCandidateShortlisted(candidate.student_id) && (
+                            <span className="px-3 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 shadow-xs">
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Shortlisted
+                            </span>
                           )}
                         </div>
                       </div>
@@ -1063,23 +1020,11 @@ const JobDetails = () => {
               >
                 View Full Student Profile
               </button>
-              {selectedCandidate.is_eligible && (
-                isCandidateShortlisted(selectedCandidate.student_id) ? (
-                  <span className="px-4 py-2 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs">
-                    <CheckCircle2 className="w-4 h-4" />
-                    Already Shortlisted
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => {
-                      handleShortlistCandidate(selectedCandidate);
-                      setSelectedCandidate(null);
-                    }}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold transition-colors shadow-sm cursor-pointer"
-                  >
-                    Shortlist Candidate
-                  </button>
-                )
+              {selectedCandidate.is_eligible && isCandidateShortlisted(selectedCandidate.student_id) && (
+                <span className="px-4 py-2 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-xs">
+                  <CheckCircle2 className="w-4 h-4" />
+                  Already Shortlisted
+                </span>
               )}
             </div>
           </div>
