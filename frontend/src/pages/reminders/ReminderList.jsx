@@ -84,63 +84,63 @@ const ReminderList = () => {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Reminders</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Reminders</h1>
 
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-sm text-gray-500">Total</p>
-          <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Total</p>
+          <p className="text-2xl font-bold text-gray-900 dark:text-white">{stats.total}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-sm text-gray-500">Unread</p>
-          <p className="text-2xl font-bold text-yellow-600">{stats.pending}</p>
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Unread</p>
+          <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-sm text-gray-500">Read</p>
-          <p className="text-2xl font-bold text-green-600">{stats.sent}</p>
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Read</p>
+          <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.sent}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-sm text-gray-500">Overdue</p>
-          <p className="text-2xl font-bold text-red-600">{stats.overdue || 0}</p>
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Overdue</p>
+          <p className="text-2xl font-bold text-red-600 dark:text-red-400">{stats.overdue || 0}</p>
         </div>
       </div>
 
       {/* Unread Reminders */}
       {unreadReminders.length > 0 && (
         <>
-          <h2 className="text-lg font-semibold text-gray-800 mb-3">Unread Reminders</h2>
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3">Unread Reminders</h2>
           <div className="space-y-3 mb-6">
             {unreadReminders.map((reminder) => (
               <div
                 key={reminder.id}
-                className="p-4 bg-white rounded-lg shadow-sm border border-yellow-300 bg-yellow-50"
+                className="p-4 bg-yellow-50 dark:bg-yellow-950/30 rounded-xl shadow-sm border border-yellow-300 dark:border-yellow-700/60"
               >
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-2xl">{getReminderEmoji(reminder.reminder_type)}</span>
-                      <span className="font-medium text-gray-900">
+                      <span className="font-medium text-gray-900 dark:text-white">
                         {getReminderLabel(reminder.reminder_type)}
                       </span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-100 dark:bg-yellow-900/60 text-yellow-700 dark:text-yellow-300">
                         Unread
                       </span>
                     </div>
-                    <p className="text-sm text-gray-600 mt-1">
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
                       {reminder.circular_title || 'Reminder'}
                     </p>
                     {reminder.circular_due_date && (
-                      <p className="text-sm text-red-600 mt-1">
+                      <p className="text-sm text-red-600 dark:text-red-400 mt-1">
                         Due: {new Date(reminder.circular_due_date).toLocaleDateString()}
                       </p>
                     )}
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                       Scheduled: {new Date(reminder.scheduled_at).toLocaleString()}
                     </p>
                   </div>
                   <button
                     onClick={() => handleMarkAsRead(reminder.id)}
-                    className="px-3 py-1 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                    className="px-3 py-1 text-sm text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors cursor-pointer"
                   >
                     Mark as Read
                   </button>
@@ -154,39 +154,39 @@ const ReminderList = () => {
       {/* Read Reminders */}
       {readReminders.length > 0 && (
         <>
-          <h2 className="text-lg font-semibold text-gray-800 mb-3">Read Reminders</h2>
+          <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3">Read Reminders</h2>
           <div className="space-y-3">
             {readReminders.map((reminder) => (
               <div
                 key={reminder.id}
-                className="p-4 bg-white rounded-lg shadow-sm border border-gray-200"
+                className="p-4 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800"
               >
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="text-2xl">{getReminderEmoji(reminder.reminder_type)}</span>
-                      <span className="font-medium text-gray-900">
+                      <span className="font-medium text-gray-900 dark:text-white">
                         {getReminderLabel(reminder.reminder_type)}
                       </span>
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/60 text-green-700 dark:text-green-300">
                         Read
                       </span>
                     </div>
-                    <p className="text-sm text-gray-600 mt-1">
+                    <p className="text-sm text-gray-600 dark:text-gray-300 mt-1">
                       {reminder.circular_title || 'Reminder'}
                     </p>
                     {reminder.circular_due_date && (
-                      <p className="text-sm text-red-600 mt-1">
+                      <p className="text-sm text-red-600 dark:text-red-400 mt-1">
                         Due: {new Date(reminder.circular_due_date).toLocaleDateString()}
                       </p>
                     )}
-                    <p className="text-xs text-gray-400 mt-1">
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                       Read on: {new Date(reminder.sent_at || reminder.updated_at).toLocaleString()}
                     </p>
                   </div>
                   <button
                     onClick={() => handleDelete(reminder.id)}
-                    className="text-sm text-red-600 hover:text-red-800"
+                    className="text-sm text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 cursor-pointer"
                   >
                     Delete
                   </button>
@@ -198,7 +198,7 @@ const ReminderList = () => {
       )}
 
       {reminders.length === 0 && (
-        <p className="text-gray-500 text-center py-10">No reminders yet</p>
+        <p className="text-gray-500 dark:text-gray-400 text-center py-10">No reminders yet</p>
       )}
     </div>
   )

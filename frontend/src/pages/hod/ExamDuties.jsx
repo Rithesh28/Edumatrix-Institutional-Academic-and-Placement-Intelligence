@@ -129,7 +129,7 @@ const HODExamDuties = () => {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Exam Duties</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Exam Duties</h1>
 
       {/* Upload Section */}
       <ExamDutyUpload
@@ -141,15 +141,15 @@ const HODExamDuties = () => {
 
       {/* Upload Result Summary */}
       {uploadResult && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 p-4 mb-6">
           <div className="flex items-center gap-4 flex-wrap">
-            <span className="text-sm font-medium text-gray-700">Upload Result:</span>
-            <span className="text-sm text-green-600">✅ Created: {uploadResult.created || 0}</span>
-            <span className="text-sm text-yellow-600">⏭️ Skipped: {uploadResult.skipped || 0}</span>
-            <span className="text-sm text-red-600">⚠️ Conflicts: {uploadResult.conflicts?.length || 0}</span>
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Upload Result:</span>
+            <span className="text-sm text-green-600 dark:text-green-400">✅ Created: {uploadResult.created || 0}</span>
+            <span className="text-sm text-yellow-600 dark:text-yellow-400">⏭️ Skipped: {uploadResult.skipped || 0}</span>
+            <span className="text-sm text-red-600 dark:text-red-400">⚠️ Conflicts: {uploadResult.conflicts?.length || 0}</span>
             <button
               onClick={() => setShowConflicts(true)}
-              className="text-sm text-red-600 hover:text-red-800 underline"
+              className="text-sm text-red-600 dark:text-red-400 hover:text-red-800 underline"
             >
               View Conflicts
             </button>
@@ -173,10 +173,10 @@ const HODExamDuties = () => {
 
       {/* Conflicts Warning */}
       {conflicts.length > 0 && !showConflicts && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center justify-between">
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6 flex items-center justify-between">
           <div>
-            <span className="text-red-700 font-medium">⚠️ {conflicts.length} conflicts detected</span>
-            <span className="text-red-600 text-sm ml-2">Some lecturers have overlapping duties</span>
+            <span className="text-red-700 dark:text-red-300 font-medium">⚠️ {conflicts.length} conflicts detected</span>
+            <span className="text-red-600 dark:text-red-400 text-sm ml-2">Some lecturers have overlapping duties</span>
           </div>
           <button
             onClick={() => setShowConflicts(true)}

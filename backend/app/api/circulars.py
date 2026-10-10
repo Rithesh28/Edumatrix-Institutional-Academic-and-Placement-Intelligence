@@ -471,10 +471,15 @@ async def update_circular(
     if not circular:
         raise HTTPException(status_code=404, detail="Circular not found")
     
-    if current_user.role != UserRole.ADMIN and circular.lecturer_id != current_user.id:
+    creator = db.query(User).filter(User.id == circular.lecturer_id).first()
+    is_owner = circular.lecturer_id == current_user.id
+    is_admin = current_user.role == UserRole.ADMIN
+    is_hod_dept = current_user.role == UserRole.HOD and creator and creator.department == current_user.department
+    
+    if not (is_owner or is_admin or is_hod_dept):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only update your own circulars"
+            detail="You can only update your own circulars or department circulars as HOD"
         )
     
     if circular_update.type is not None:
@@ -537,10 +542,15 @@ async def delete_circular(
     if not circular:
         raise HTTPException(status_code=404, detail="Circular not found")
     
-    if current_user.role != UserRole.ADMIN and circular.lecturer_id != current_user.id:
+    creator = db.query(User).filter(User.id == circular.lecturer_id).first()
+    is_owner = circular.lecturer_id == current_user.id
+    is_admin = current_user.role == UserRole.ADMIN
+    is_hod_dept = current_user.role == UserRole.HOD and creator and creator.department == current_user.department
+    
+    if not (is_owner or is_admin or is_hod_dept):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only delete your own circulars"
+            detail="You can only delete your own circulars or department circulars as HOD"
         )
     
     # Delete reminders

@@ -168,9 +168,9 @@ const ExamDutyUpload = ({ onSuccess, onError, loading, setLoading }) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-      <h2 className="text-lg font-semibold text-gray-800 mb-4">Upload Exam Duty Schedule</h2>
-      <p className="text-sm text-gray-500 mb-4">
+    <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 p-6 mb-6 transition-colors">
+      <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">Upload Exam Duty Schedule</h2>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
         Upload a PDF, Image, or DOCX file containing the exam duty schedule.
         The system will automatically extract and assign duties to lecturers.
       </p>
@@ -178,7 +178,9 @@ const ExamDutyUpload = ({ onSuccess, onError, loading, setLoading }) => {
       {/* Drag & Drop Zone */}
       <div
         className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-          dragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300 hover:border-gray-400'
+          dragActive 
+            ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' 
+            : 'border-gray-300 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-600 bg-transparent dark:bg-gray-800/30'
         }`}
         onDragEnter={handleDrag}
         onDragLeave={handleDrag}
@@ -197,20 +199,20 @@ const ExamDutyUpload = ({ onSuccess, onError, loading, setLoading }) => {
         <label htmlFor="file-input" className="cursor-pointer">
           <div className="flex flex-col items-center">
             <span className="text-4xl mb-2">📤</span>
-            <p className="text-gray-600">
+            <p className="text-gray-600 dark:text-gray-300">
               {file ? (
-                <span className="text-green-600 font-medium">📎 {file.name}</span>
+                <span className="text-green-600 dark:text-green-400 font-medium">📎 {file.name}</span>
               ) : (
                 <>
-                  <span className="font-medium">Click to upload</span> or drag and drop
+                  <span className="font-medium text-gray-800 dark:text-gray-200">Click to upload</span> or drag and drop
                 </>
               )}
             </p>
-            <p className="text-xs text-gray-400 mt-1">
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
               PDF, JPG, PNG, DOCX (Max 5MB)
             </p>
             {file && (
-              <p className="text-xs text-gray-400 mt-1">
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
                 ({(file.size / 1024).toFixed(1)} KB)
               </p>
             )}
@@ -221,11 +223,11 @@ const ExamDutyUpload = ({ onSuccess, onError, loading, setLoading }) => {
       {/* Upload Progress */}
       {uploadProgress > 0 && uploadProgress < 100 && (
         <div className="mt-4">
-          <div className="flex justify-between text-sm text-gray-600 mb-1">
+          <div className="flex justify-between text-sm text-gray-600 dark:text-gray-300 mb-1">
             <span>{uploadProgress >= 90 ? '🤖 Extracting & processing schedule...' : 'Uploading file...'}</span>
             <span>{uploadProgress}%</span>
           </div>
-          <div className="w-full bg-gray-200 rounded-full h-2">
+          <div className="w-full bg-gray-200 dark:bg-gray-800 rounded-full h-2">
             <div
               className="bg-blue-600 h-2 rounded-full transition-all duration-300"
               style={{ width: `${uploadProgress}%` }}
@@ -251,7 +253,7 @@ const ExamDutyUpload = ({ onSuccess, onError, loading, setLoading }) => {
                 fileInputRef.current.value = ''
               }
             }}
-            className="px-3 py-2 text-sm text-gray-600 hover:text-gray-800"
+            className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
           >
             Remove
           </button>

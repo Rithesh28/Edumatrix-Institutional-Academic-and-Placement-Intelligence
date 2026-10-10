@@ -1,0 +1,237 @@
+{
+  "loginToggle": {
+    "light": {
+      "isDarkClass": true,
+      "dataTheme": "dark",
+      "bodyBg": "rgba(0, 0, 0, 0)",
+      "storedTheme": null
+    },
+    "dark": {
+      "isDarkClass": true,
+      "dataTheme": "dark",
+      "bodyBg": "rgba(0, 0, 0, 0)",
+      "storedTheme": null
+    }
+  },
+  "roles": {
+    "student": {
+      "dashState": {
+        "url": "http://localhost:5173/login",
+        "htmlClass": "dark",
+        "isDark": true,
+        "dataTheme": "dark",
+        "bodyBg": "rgba(0, 0, 0, 0)",
+        "toggleFound": false,
+        "bellFound": false,
+        "welcomeFound": false,
+        "logoutFound": false,
+        "navbarActionsOrder": []
+      },
+      "lightDashState": {
+        "isDark": true,
+        "dataTheme": "dark",
+        "bodyBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": null
+      },
+      "subpageState": {
+        "url": "http://localhost:5173/student/profile",
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": null
+      },
+      "refreshState": {
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": null
+      }
+    },
+    "lecturer": {
+      "dashState": {
+        "url": "http://localhost:5173/lecturer/dashboard",
+        "htmlClass": "dark",
+        "isDark": true,
+        "dataTheme": "dark",
+        "bodyBg": "rgb(3, 7, 18)",
+        "toggleFound": true,
+        "toggleId": "navbar-theme-toggle",
+        "toggleText": "🌙 Dark",
+        "bellFound": true,
+        "welcomeFound": true,
+        "logoutFound": true,
+        "navbarActionsOrder": [
+          "DIV",
+          "BUTTON#navbar-theme-toggle:🌙 Dark",
+          "SPAN:Welcome, l",
+          "BUTTON:Logout"
+        ],
+        "sampleCardBg": "rgb(17, 24, 39)"
+      },
+      "lightDashState": {
+        "isDark": false,
+        "dataTheme": "light",
+        "toggleText": "☀️ Light",
+        "bodyBg": "rgb(249, 250, 251)",
+        "sampleCardBg": "rgb(255, 255, 255)",
+        "storedTheme": "light"
+      },
+      "subpageState": {
+        "url": "http://localhost:5173/lecturer/circulars",
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": true,
+        "bodyBg": "rgb(3, 7, 18)",
+        "sampleCardBg": "rgb(17, 24, 39)",
+        "storedTheme": "dark"
+      },
+      "refreshState": {
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": "dark"
+      }
+    },
+    "hod": {
+      "dashState": {
+        "url": "http://localhost:5173/lecturer/dashboard",
+        "htmlClass": "dark",
+        "isDark": true,
+        "dataTheme": "dark",
+        "bodyBg": "rgb(3, 7, 18)",
+        "toggleFound": true,
+        "toggleId": "navbar-theme-toggle",
+        "toggleText": "🌙 Dark",
+        "bellFound": true,
+        "welcomeFound": true,
+        "logoutFound": true,
+        "navbarActionsOrder": [
+          "DIV",
+          "BUTTON#navbar-theme-toggle:🌙 Dark",
+          "SPAN:Welcome, l",
+          "BUTTON:Logout"
+        ],
+        "sampleCardBg": "rgb(17, 24, 39)"
+      },
+      "lightDashState": {
+        "isDark": false,
+        "dataTheme": "light",
+        "toggleText": "☀️ Light",
+        "bodyBg": "rgb(249, 250, 251)",
+        "sampleCardBg": "rgb(255, 255, 255)",
+        "storedTheme": "light"
+      },
+      "subpageState": {
+        "url": "http://localhost:5173/unauthorized",
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgb(3, 7, 18)",
+        "sampleCardBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": "dark"
+      },
+      "refreshState": {
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": "dark"
+      }
+    },
+    "placement_officer": {
+      "dashState": {
+        "url": "http://localhost:5173/lecturer/dashboard",
+        "htmlClass": "dark",
+        "isDark": true,
+        "dataTheme": "dark",
+        "bodyBg": "rgb(3, 7, 18)",
+        "toggleFound": true,
+        "toggleId": "navbar-theme-toggle",
+        "toggleText": "🌙 Dark",
+        "bellFound": true,
+        "welcomeFound": true,
+        "logoutFound": true,
+        "navbarActionsOrder": [
+          "DIV",
+          "BUTTON#navbar-theme-toggle:🌙 Dark",
+          "SPAN:Welcome, l",
+          "BUTTON:Logout"
+        ],
+        "sampleCardBg": "rgb(17, 24, 39)"
+      },
+      "lightDashState": {
+        "isDark": false,
+        "dataTheme": "light",
+        "toggleText": "☀️ Light",
+        "bodyBg": "rgb(249, 250, 251)",
+        "sampleCardBg": "rgb(255, 255, 255)",
+        "storedTheme": "light"
+      },
+      "subpageState": {
+        "url": "http://localhost:5173/unauthorized",
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgb(3, 7, 18)",
+        "sampleCardBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": "dark"
+      },
+      "refreshState": {
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": "dark"
+      }
+    },
+    "admin": {
+      "dashState": {
+        "url": "http://localhost:5173/lecturer/dashboard",
+        "htmlClass": "dark",
+        "isDark": true,
+        "dataTheme": "dark",
+        "bodyBg": "rgb(3, 7, 18)",
+        "toggleFound": true,
+        "toggleId": "navbar-theme-toggle",
+        "toggleText": "🌙 Dark",
+        "bellFound": true,
+        "welcomeFound": true,
+        "logoutFound": true,
+        "navbarActionsOrder": [
+          "DIV",
+          "BUTTON#navbar-theme-toggle:🌙 Dark",
+          "SPAN:Welcome, l",
+          "BUTTON:Logout"
+        ],
+        "sampleCardBg": "rgb(17, 24, 39)"
+      },
+      "lightDashState": {
+        "isDark": false,
+        "dataTheme": "light",
+        "toggleText": "☀️ Light",
+        "bodyBg": "rgb(249, 250, 251)",
+        "sampleCardBg": "rgb(255, 255, 255)",
+        "storedTheme": "light"
+      },
+      "subpageState": {
+        "url": "http://localhost:5173/unauthorized",
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgb(3, 7, 18)",
+        "sampleCardBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": "dark"
+      },
+      "refreshState": {
+        "isDark": true,
+        "dataTheme": "dark",
+        "toggleFound": false,
+        "bodyBg": "rgba(0, 0, 0, 0)",
+        "storedTheme": "dark"
+      }
+    }
+  }
+}

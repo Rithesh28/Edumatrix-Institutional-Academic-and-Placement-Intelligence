@@ -1,0 +1,1018 @@
+import React, { useEffect, useState, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import {
+  ArrowLeft,
+  Building2,
+  MapPin,
+  Calendar,
+  Clock,
+  Banknote,
+  Award,
+  GraduationCap,
+  Briefcase,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  AlertCircle,
+  Sparkles,
+  Send,
+  RefreshCw,
+  FileText,
+  Info,
+  ChevronRight,
+  ExternalLink,
+  X,
+} from 'lucide-react';
+import usePlacementStore from '../../store/placementStore';
+import { useAuthStore } from '../../store/authStore';
+import toast from 'react-hot-toast';
+
+function StudentJobDetails() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const { user } = useAuthStore();
+  const {
+    selectedJob,
+    isLoading: isJobLoading,
+    error: jobError,
+    fetchJobPosting,
+    jobEligibility,
+    eligibilityJobId,
+    isEligibilityLoading,
+    eligibilityError,
+    checkJobEligibility,
+    clearJobEligibility,
+    myApplications,
+    isMyApplicationsLoading,
+    fetchMyApplications,
+    createApplication,
+    isSubmittingApplication,
+    applicationSubmitError,
+  } = usePlacementStore();
+
+  // Modal and submission state
+  const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
+  const [candidateNotes, setCandidateNotes] = useState('');
+  const [submittedApplication, setSubmittedApplication] = useState(null);
+
+  const jobIdNum = useMemo(() => (id ? parseInt(id, 10) : null), [id]);
+
+  // Load Job and Eligibility data on mount / ID change
+  useEffect(() => {
+    if (jobIdNum) {
+      // Clear any previous eligibility immediately to prevent stale display
+      clearJobEligibility();
+      setSubmittedApplication(null);
+
+      // Fetch job details
+      fetchJobPosting(jobIdNum).catch(() => {});
+
+      // Fetch eligibility for current authenticated student
+      if (user?.id) {
+        checkJobEligibility(jobIdNum, user.id).catch(() => {});
+      }
+
+      // Fetch current student applications to detect if already applied
+      if (user?.id) {
+        fetchMyApplications(user.id).catch(() => {});
+      }
+    }
+
+    return () => {
+      clearJobEligibility();
+    };
+  }, [jobIdNum, user?.id]);
+
+  // Check if student has already applied to this job
+  const existingApplication = useMemo(() => {
+    if (!jobIdNum || !Array.isArray(myApplications)) return null;
+    return myApplications.find((app) => app.job_posting_id === jobIdNum) || null;
+  }, [jobIdNum, myApplications]);
+
+  const activeApplication = submittedApplication || existingApplication;
+  const isAlreadyApplied = Boolean(activeApplication);
+
+  // Guard: Verify eligibility data belongs to the currently viewed job
+  const isEligibilityForCurrentJob =
+    jobEligibility && eligibilityJobId === jobIdNum;
+
+  // Deadline calculation helper
+  const deadlineMeta = useMemo(() => {
+    if (!selectedJob?.application_deadline) return null;
+    try {
+      const deadline = new Date(selectedJob.application_deadline);
+      if (isNaN(deadline.getTime())) return null;
+
+      const now = new Date();
+      const diffMs = deadline.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+      return {
+        formatted: deadline.toLocaleDateString(),
+        fullDate: deadline.toLocaleString(),
+        diffDays,
+        isPassed: diffDays < 0,
+        isUrgent: diffDays >= 0 && diffDays <= 3,
+        badge:
+          diffDays < 0
+            ? 'Deadline Passed'
+            : diffDays === 0
+            ? 'Ends Today'
+            : diffDays === 1
+            ? '1 day left'
+            : `${diffDays} days left`,
+      };
+    } catch {
+      return null;
+    }
+  }, [selectedJob?.application_deadline]);
+
+  // Handle application submission
+  const handleOpenApplyModal = () => {
+    if (isAlreadyApplied) {
+      navigate('/student/applications');
+      return;
+    }
+
+    if (isEligibilityForCurrentJob && !jobEligibility.is_eligible) {
+      toast.error('You do not meet the minimum academic criteria for this position.');
+      return;
+    }
+
+    setIsApplyModalOpen(true);
+  };
+
+  const handleConfirmSubmit = async () => {
+    if (!jobIdNum) return;
+
+    try {
+      const payload = {
+        job_posting_id: jobIdNum,
+        ...(candidateNotes.trim() ? { notes: candidateNotes.trim() } : {}),
+      };
+
+      const result = await createApplication(payload);
+      setSubmittedApplication(result);
+      setIsApplyModalOpen(false);
+      setCandidateNotes('');
+      toast.success('Application submitted successfully!');
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.detail || err.message || 'Failed to submit application';
+      toast.error(typeof errMsg === 'string' ? errMsg : 'Application submission failed');
+    }
+  };
+
+  // 1. Loading State
+  if (isJobLoading && !selectedJob) {
+    return (
+      <div className="space-y-6 pb-12">
+        <button
+          onClick={() => navigate('/student/jobs')}
+          className="flex items-center space-x-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors text-sm cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Campus Jobs</span>
+        </button>
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-8 shadow-sm animate-pulse space-y-6">
+          <div className="h-6 bg-gray-200 dark:bg-gray-800 rounded w-1/4"></div>
+          <div className="h-8 bg-gray-300 dark:bg-gray-700 rounded w-1/2"></div>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div className="h-16 bg-gray-200 dark:bg-gray-800 rounded-xl"></div>
+            <div className="h-16 bg-gray-200 dark:bg-gray-800 rounded-xl"></div>
+            <div className="h-16 bg-gray-200 dark:bg-gray-800 rounded-xl"></div>
+            <div className="h-16 bg-gray-200 dark:bg-gray-800 rounded-xl"></div>
+          </div>
+          <div className="h-32 bg-gray-200 dark:bg-gray-800 rounded-xl"></div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. Error / Unavailable Job State
+  if (jobError || (!isJobLoading && !selectedJob)) {
+    return (
+      <div className="space-y-6 pb-12">
+        <button
+          onClick={() => navigate('/student/jobs')}
+          className="flex items-center space-x-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors text-sm cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Campus Jobs</span>
+        </button>
+        <div className="text-center py-16 bg-white dark:bg-gray-900 rounded-2xl border border-red-200 dark:border-red-900/60 p-8 shadow-sm">
+          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Job Posting Not Found or Unavailable</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-md mx-auto">
+            {typeof jobError === 'string'
+              ? jobError
+              : 'This campus drive may be closed, in draft state, or does not exist.'}
+          </p>
+          <button
+            onClick={() => navigate('/student/jobs')}
+            className="mt-5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
+          >
+            <span>Return to Campus Jobs</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 pb-16">
+      {/* Back Navigation & Breadcrumb */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={() => navigate('/student/jobs')}
+          className="flex items-center space-x-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors text-sm cursor-pointer"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Campus Jobs</span>
+        </button>
+
+        <div className="flex items-center gap-2">
+          {isAlreadyApplied ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Applied</span>
+            </span>
+          ) : isEligibilityForCurrentJob && jobEligibility.is_eligible ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Eligible to Apply</span>
+            </span>
+          ) : isEligibilityForCurrentJob && !jobEligibility.is_eligible ? (
+            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+              <XCircle className="w-3.5 h-3.5" />
+              <span>Ineligible</span>
+            </span>
+          ) : null}
+
+          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+            ● Open Drive
+          </span>
+        </div>
+      </div>
+
+      {/* Main Header Card */}
+      <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 sm:p-8 shadow-sm">
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+          <div className="flex-1 space-y-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-blue-600 dark:text-blue-400">
+              <Building2 className="w-4 h-4" />
+              <span>{selectedJob.company_name || 'Assigned Company'}</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-gray-900 dark:text-white tracking-tight">
+              {selectedJob.title}
+            </h1>
+            <p className="text-xs text-gray-400 dark:text-gray-500">
+              Drive Reference #{selectedJob.id} • Posted{' '}
+              {selectedJob.created_at ? new Date(selectedJob.created_at).toLocaleDateString() : 'Recently'}
+            </p>
+          </div>
+
+          {/* Quick CTA on Header */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
+            {isAlreadyApplied ? (
+              <button
+                onClick={() => navigate('/student/applications')}
+                className="px-5 py-2.5 bg-blue-50 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-700/60 rounded-xl text-sm font-semibold transition-colors flex items-center justify-center gap-2 cursor-pointer hover:bg-blue-100 dark:hover:bg-blue-900/60"
+              >
+                <CheckCircle2 className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>View in My Applications</span>
+              </button>
+            ) : isEligibilityForCurrentJob && !jobEligibility.is_eligible ? (
+              <button
+                disabled
+                className="px-5 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-400 dark:text-gray-500 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 cursor-not-allowed border border-gray-200 dark:border-gray-700"
+                title="You do not meet the minimum eligibility requirements"
+              >
+                <XCircle className="w-4 h-4" />
+                <span>Ineligible to Apply</span>
+              </button>
+            ) : (
+              <button
+                onClick={handleOpenApplyModal}
+                disabled={isSubmittingApplication}
+                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+                <span>{jobEligibility?.has_low_match_warning ? 'Apply with Skill Advisory' : 'Apply Now'}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Highlighted Meta Strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-gray-100 dark:border-gray-800">
+          <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl">
+            <div className="p-2 bg-blue-100 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400 rounded-lg">
+              <MapPin className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase">Location</p>
+              <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">
+                {selectedJob.location || 'Not Specified'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl">
+            <div className="p-2 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 rounded-lg">
+              <Banknote className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase">Salary / CTC</p>
+              <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">
+                {selectedJob.salary_range || 'Not Disclosed'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl">
+            <div className="p-2 bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 rounded-lg">
+              <Clock className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase">Deadline</p>
+              <p
+                className={`text-xs font-semibold truncate ${
+                  deadlineMeta?.isUrgent
+                    ? 'text-amber-600 dark:text-amber-400'
+                    : 'text-gray-900 dark:text-white'
+                }`}
+                title={deadlineMeta?.fullDate || 'No deadline specified'}
+              >
+                {deadlineMeta ? deadlineMeta.formatted : 'Open'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl">
+            <div className="p-2 bg-purple-100 dark:bg-purple-950/60 text-purple-600 dark:text-purple-400 rounded-lg">
+              <Award className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase">Experience</p>
+              <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">
+                {selectedJob.experience_level || 'Freshers / Any'}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content Layout: 2 Columns */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column (Job Details & Requirements): 7 Columns */}
+        <div className="lg:col-span-7 space-y-6">
+          {/* Job Description Card */}
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm space-y-3">
+            <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>Job Description & Role Overview</span>
+            </h2>
+            <div className="text-sm text-gray-700 dark:text-gray-300 leading-relaxed whitespace-pre-line">
+              {selectedJob.description && selectedJob.description.trim() ? (
+                selectedJob.description
+              ) : (
+                <p className="italic text-gray-400 dark:text-gray-500">
+                  No detailed description has been provided for this drive posting.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Academic Criteria Card */}
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm space-y-4">
+            <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <GraduationCap className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+              <span>Academic Eligibility Requirements</span>
+            </h2>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="p-4 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-200 dark:border-gray-800">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                  Minimum CGPA Cutoff
+                </span>
+                <p className="text-lg font-bold text-gray-900 dark:text-white mt-1">
+                  {selectedJob.cgpa_criteria !== null && selectedJob.cgpa_criteria !== undefined
+                    ? `${selectedJob.cgpa_criteria} / 10.0`
+                    : 'No CGPA Cutoff (Open)'}
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  Your academic record must meet or exceed this value.
+                </p>
+              </div>
+
+              <div className="p-4 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-200 dark:border-gray-800">
+                <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
+                  Eligible Branches
+                </span>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {selectedJob.branch_eligibility && selectedJob.branch_eligibility.length > 0 ? (
+                    selectedJob.branch_eligibility.map((branch, idx) => (
+                      <span
+                        key={idx}
+                        className="text-xs px-2 py-0.5 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded-md font-semibold"
+                      >
+                        {branch}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                      All Academic Branches Eligible
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {selectedJob.drive_date && (
+              <div className="p-3 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-100 dark:border-blue-900/60 flex items-center gap-2.5 text-xs text-blue-900 dark:text-blue-200">
+                <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                <span>
+                  <strong>On-Campus Drive Date:</strong>{' '}
+                  {new Date(selectedJob.drive_date).toLocaleDateString()}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {/* Skill Requirements Catalog Card */}
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm space-y-4">
+            <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span>Configured Skill Requirements (80% / 20% Formula)</span>
+            </h2>
+
+            {/* Required Skills */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-gray-700 dark:text-gray-300">
+                  Required Skills (80% Weightage)
+                </span>
+                <span className="text-gray-400">
+                  {selectedJob.required_skills?.length || 0} skills
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedJob.required_skills && selectedJob.required_skills.length > 0 ? (
+                  selectedJob.required_skills.map((skill, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-medium"
+                    >
+                      {skill}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-gray-400 italic">None specified</span>
+                )}
+              </div>
+            </div>
+
+            {/* Preferred Skills */}
+            <div className="space-y-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-gray-700 dark:text-gray-300">
+                  Preferred / Bonus Skills (20% Weightage)
+                </span>
+                <span className="text-gray-400">
+                  {selectedJob.preferred_skills?.length || 0} skills
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {selectedJob.preferred_skills && selectedJob.preferred_skills.length > 0 ? (
+                  selectedJob.preferred_skills.map((skill, idx) => (
+                    <span
+                      key={idx}
+                      className="px-2.5 py-1 bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded-lg text-xs font-medium"
+                    >
+                      {skill}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-gray-400 italic">None specified</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column (Eligibility & Skill-Match Analysis Card): 5 Columns */}
+        <div className="lg:col-span-5 space-y-6">
+          {/* Main Analysis Card */}
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm space-y-5">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>Your Skill-Match & Eligibility</span>
+              </h2>
+
+              <button
+                onClick={() => {
+                  if (jobIdNum && user?.id) {
+                    checkJobEligibility(jobIdNum, user.id).catch(() => {});
+                  }
+                }}
+                disabled={isEligibilityLoading}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                title="Re-run matching check"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isEligibilityLoading ? 'animate-spin' : ''}`} />
+                <span>Re-check</span>
+              </button>
+            </div>
+
+            {/* Eligibility State: Loading */}
+            {isEligibilityLoading && !isEligibilityForCurrentJob ? (
+              <div className="py-12 text-center space-y-3">
+                <div className="w-9 h-9 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                  Evaluating skill alignment and criteria...
+                </p>
+                <p className="text-[11px] text-gray-400">
+                  Comparing profile and latest uploaded resume against requirements
+                </p>
+              </div>
+            ) : eligibilityError ? (
+              // Eligibility State: Error
+              <div className="p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 rounded-xl text-center space-y-2">
+                <AlertCircle className="w-6 h-6 text-red-500 mx-auto" />
+                <p className="text-xs font-semibold text-red-900 dark:text-red-200">
+                  Failed to evaluate eligibility
+                </p>
+                <p className="text-[11px] text-red-700 dark:text-red-300">{eligibilityError}</p>
+                <button
+                  onClick={() => checkJobEligibility(jobIdNum, user?.id)}
+                  className="px-3 py-1 bg-red-600 text-white rounded-md text-xs font-semibold cursor-pointer"
+                >
+                  Retry Analysis
+                </button>
+              </div>
+            ) : isEligibilityForCurrentJob ? (
+              // Eligibility State: Populated
+              <div className="space-y-5">
+                {/* Score Hero Banner */}
+                <div className="p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-950/40 dark:to-indigo-950/40 border border-blue-200 dark:border-blue-800/60 rounded-xl">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wider">
+                        Overall Match Score
+                      </p>
+                      <p className="text-3xl font-black text-gray-900 dark:text-white mt-1">
+                        {jobEligibility.overall_skill_match !== null &&
+                        jobEligibility.overall_skill_match !== undefined
+                          ? `${Math.round(jobEligibility.overall_skill_match)}%`
+                          : jobEligibility.skill_match !== null &&
+                            jobEligibility.skill_match !== undefined
+                          ? `${Math.round(jobEligibility.skill_match)}%`
+                          : 'Not calculated'}
+                      </p>
+                    </div>
+
+                    <div className="text-right space-y-1 text-xs">
+                      <div className="font-medium text-gray-600 dark:text-gray-300">
+                        Required Match:{' '}
+                        <span className="font-bold text-indigo-700 dark:text-indigo-300">
+                          {jobEligibility.required_score !== null &&
+                          jobEligibility.required_score !== undefined
+                            ? `${Math.round(jobEligibility.required_score)}%`
+                            : 'N/A'}
+                        </span>
+                      </div>
+                      <div className="font-medium text-gray-600 dark:text-gray-300">
+                        Preferred Match:{' '}
+                        <span className="font-bold text-teal-700 dark:text-teal-300">
+                          {jobEligibility.preferred_score !== null &&
+                          jobEligibility.preferred_score !== undefined
+                            ? `${Math.round(jobEligibility.preferred_score)}%`
+                            : 'Not applicable'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {jobEligibility.resume_filename && (
+                    <div className="mt-3 pt-2.5 border-t border-blue-200/60 dark:border-blue-800/60 flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                      <FileText className="w-3.5 h-3.5 text-blue-500" />
+                      <span className="truncate">
+                        Profile & Resume Source: <strong>{jobEligibility.resume_filename}</strong>
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Explicit Academic Criteria Status */}
+                <div className="space-y-2">
+                  <p className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                    Academic Criteria Verification
+                  </p>
+                  <div className="space-y-2 text-xs">
+                    {/* CGPA Check */}
+                    <div className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-2">
+                        {jobEligibility.cgpa_match ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+                        )}
+                        <span className="text-gray-700 dark:text-gray-300">
+                          CGPA Criteria ({selectedJob.cgpa_criteria !== null ? selectedJob.cgpa_criteria : 'None'})
+                        </span>
+                      </div>
+                      <span
+                        className={`font-semibold ${
+                          jobEligibility.cgpa_match
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-rose-700 dark:text-rose-400'
+                        }`}
+                      >
+                        {jobEligibility.cgpa_match ? `Met (${jobEligibility.cgpa})` : `Failed (${jobEligibility.cgpa})`}
+                      </span>
+                    </div>
+
+                    {/* Branch Check */}
+                    <div className="flex items-center justify-between p-2.5 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-100 dark:border-gray-800">
+                      <div className="flex items-center gap-2">
+                        {jobEligibility.branch_match ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                        ) : (
+                          <XCircle className="w-4 h-4 text-rose-500 flex-shrink-0" />
+                        )}
+                        <span className="text-gray-700 dark:text-gray-300">
+                          Branch Criteria ({selectedJob.branch_eligibility?.length ? selectedJob.branch_eligibility.join(', ') : 'All'})
+                        </span>
+                      </div>
+                      <span
+                        className={`font-semibold ${
+                          jobEligibility.branch_match
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-rose-700 dark:text-rose-400'
+                        }`}
+                      >
+                        {jobEligibility.branch_match ? `Eligible (${jobEligibility.branch})` : `Ineligible (${jobEligibility.branch})`}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Explicit Eligibility Banner */}
+                  {jobEligibility.is_eligible ? (
+                    <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 rounded-xl text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Eligible to Apply:</strong> You meet all mandatory academic eligibility requirements for this drive.
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/80 rounded-xl text-xs text-rose-900 dark:text-rose-200 flex items-start gap-2">
+                      <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Ineligible to Apply:</strong>
+                        <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                          {jobEligibility.eligibility_reasons?.length > 0 ? (
+                            jobEligibility.eligibility_reasons.map((r, i) => <li key={i}>{r}</li>)
+                          ) : (
+                            <li>You do not meet the academic criteria configured for this drive.</li>
+                          )}
+                        </ul>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Low Match Warning Banner (<50% required skill match) */}
+                {jobEligibility.has_low_match_warning && (
+                  <div className="p-3.5 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-800 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block font-bold">Skill Advisory Warning:</strong>
+                      <span>
+                        {jobEligibility.low_match_warning ||
+                          `Your required skill match is currently ${jobEligibility.required_score}%, which is below the 50% threshold.`}
+                      </span>
+                      <p className="mt-1 text-[11px] text-amber-800 dark:text-amber-300">
+                        You meet academic eligibility and <strong>are permitted to apply</strong>, but strengthening your missing skills prior to interviews is strongly recommended.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Matched vs Missing Skills Breakdown */}
+                <div className="space-y-3 pt-2 border-t border-gray-100 dark:border-gray-800">
+                  <p className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                    Skills Breakdown
+                  </p>
+
+                  {/* Matched Required Skills */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Matched Required Skills ({jobEligibility.matched_required_skills?.length || 0})</span>
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {jobEligibility.matched_required_skills?.length > 0 ? (
+                        jobEligibility.matched_required_skills.map((s, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-md text-[11px] font-medium"
+                          >
+                            ✓ {s}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-[11px] text-gray-400 italic">No required skills matched</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Missing Required Skills */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-400 flex items-center gap-1">
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Missing Required Skills ({jobEligibility.missing_required_skills?.length || 0})</span>
+                    </span>
+                    <div className="flex flex-wrap gap-1">
+                      {jobEligibility.missing_required_skills?.length > 0 ? (
+                        jobEligibility.missing_required_skills.map((s, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-0.5 bg-rose-50 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-md text-[11px] font-medium"
+                          >
+                            ✗ {s}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                          All required skills matched!
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Preferred Skills */}
+                  {(jobEligibility.matched_preferred_skills?.length > 0 ||
+                    jobEligibility.missing_preferred_skills?.length > 0) && (
+                    <div className="space-y-1.5 pt-2">
+                      <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400 flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5" />
+                        <span>Preferred / Bonus Skills</span>
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {jobEligibility.matched_preferred_skills?.map((s, idx) => (
+                          <span
+                            key={`p-m-${idx}`}
+                            className="px-2 py-0.5 bg-teal-50 dark:bg-teal-950/60 text-teal-800 dark:text-teal-300 border border-teal-200 dark:border-teal-800 rounded-md text-[11px] font-medium"
+                          >
+                            ✓ {s}
+                          </span>
+                        ))}
+                        {jobEligibility.missing_preferred_skills?.map((s, idx) => (
+                          <span
+                            key={`p-mis-${idx}`}
+                            className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded-md text-[11px]"
+                          >
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Semantic Skill Alignments */}
+                  {jobEligibility.semantic_matches?.length > 0 && (
+                    <div className="mt-2 p-2.5 bg-indigo-50/60 dark:bg-indigo-950/30 rounded-lg border border-indigo-100 dark:border-indigo-900/40 text-[11px] space-y-1 text-indigo-900 dark:text-indigo-200">
+                      <p className="font-semibold flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-indigo-600 dark:text-indigo-400" />
+                        <span>Semantic Skill Matches (MiniLM):</span>
+                      </p>
+                      {jobEligibility.semantic_matches.map((sm, i) => (
+                        <p key={i} className="text-gray-600 dark:text-gray-300 pl-4">
+                          • {sm.required_skill || sm.skill} matched with{' '}
+                          <strong>"{sm.matched_with || sm.student_skill}"</strong> ({Math.round((sm.similarity || 0) * 100)}% similarity)
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-6 text-xs text-gray-500">
+                Click "Re-check" to evaluate your skill alignment.
+              </div>
+            )}
+
+            {/* Application Action Button (Sticky in sidebar) */}
+            <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
+              {isAlreadyApplied ? (
+                <div className="space-y-2">
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-xl text-center">
+                    <p className="text-xs font-semibold text-blue-900 dark:text-blue-200">
+                      Application Submitted
+                    </p>
+                    <p className="text-[11px] text-blue-700 dark:text-blue-300 mt-0.5">
+                      Status: <strong>{activeApplication.status?.toUpperCase() || 'APPLIED'}</strong>
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => navigate('/student/applications')}
+                    className="w-full py-2.5 px-4 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <span>View Application History</span>
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : isEligibilityForCurrentJob && !jobEligibility.is_eligible ? (
+                <div className="space-y-2">
+                  <button
+                    disabled
+                    className="w-full py-2.5 px-4 bg-gray-200 dark:bg-gray-800 text-gray-400 dark:text-gray-500 rounded-xl text-xs font-semibold cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <XCircle className="w-4 h-4" />
+                    <span>Ineligible to Apply</span>
+                  </button>
+                  <p className="text-[11px] text-gray-400 text-center">
+                    Cannot apply due to unmet CGPA or branch requirements.
+                  </p>
+                </div>
+              ) : (
+                <button
+                  onClick={handleOpenApplyModal}
+                  disabled={isSubmittingApplication}
+                  className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>
+                    {jobEligibility?.has_low_match_warning ? 'Apply with Skill Advisory' : 'Apply for this Job'}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Application Submission Confirmation Modal */}
+      {isApplyModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full p-6 shadow-xl border border-gray-200 dark:border-gray-800 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-2 text-gray-900 dark:text-white font-bold text-lg">
+                <Send className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                <span>Confirm Placement Application</span>
+              </div>
+              <button
+                onClick={() => setIsApplyModalOpen(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Target Job Summary */}
+            <div className="p-3.5 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/60 space-y-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Position:</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedJob.title}</p>
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                Company: <strong>{selectedJob.company_name || 'Assigned Company'}</strong>
+              </p>
+            </div>
+
+            {/* Student Candidate Identification */}
+            <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 dark:text-gray-300 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl">
+              <div>
+                <span className="text-gray-400">Applicant:</span>{' '}
+                <strong>{user?.name || 'Current Student'}</strong>
+              </div>
+              <div>
+                <span className="text-gray-400">Branch:</span>{' '}
+                <strong>{jobEligibility?.branch || user?.department || 'Student'}</strong>
+              </div>
+              <div>
+                <span className="text-gray-400">CGPA:</span>{' '}
+                <strong>{jobEligibility?.cgpa || 'On File'}</strong>
+              </div>
+              <div>
+                <span className="text-gray-400">Preview Match:</span>{' '}
+                <strong>
+                  {jobEligibility?.overall_skill_match !== null && jobEligibility?.overall_skill_match !== undefined
+                    ? `${Math.round(jobEligibility.overall_skill_match)}%`
+                    : 'Server authoritative'}
+                </strong>
+              </div>
+            </div>
+
+            {/* Low Match Advisory Box if Applicable */}
+            {jobEligibility?.has_low_match_warning && (
+              <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                <div className="flex items-center gap-1.5 font-bold">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                  <span>Low Required-Skill Advisory</span>
+                </div>
+                <p>
+                  Your required skill match is <strong>{jobEligibility.required_score}%</strong>, below the 50% threshold.
+                  Your application will be submitted and server-scored.
+                </p>
+              </div>
+            )}
+
+            {/* Candidate Notes (Optional) */}
+            <div className="space-y-1">
+              <label
+                htmlFor="student-application-notes"
+                className="text-xs font-semibold text-gray-700 dark:text-gray-300"
+              >
+                Cover Note / Message to Placement Team (Optional)
+              </label>
+              <textarea
+                id="student-application-notes"
+                rows={3}
+                placeholder="Mention relevant project links, certifications, or key strengths..."
+                value={candidateNotes}
+                onChange={(e) => setCandidateNotes(e.target.value)}
+                className="w-full p-2.5 text-xs border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
+              />
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setIsApplyModalOpen(false)}
+                disabled={isSubmittingApplication}
+                className="px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSubmit}
+                disabled={isSubmittingApplication}
+                className="px-5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isSubmittingApplication ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Submitting Application...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Confirm & Apply</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Post-Submission Confirmation Card / Banner */}
+      {submittedApplication && (
+        <div className="fixed bottom-6 right-6 z-40 max-w-md w-full bg-white dark:bg-gray-900 rounded-2xl border border-emerald-300 dark:border-emerald-800 p-5 shadow-2xl animate-in slide-in-from-bottom duration-300 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 font-bold text-sm">
+              <CheckCircle2 className="w-5 h-5" />
+              <span>Application Successfully Recorded</span>
+            </div>
+            <button
+              onClick={() => setSubmittedApplication(null)}
+              className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <p className="text-xs text-gray-600 dark:text-gray-300">
+            Application ID <strong>#{submittedApplication.id}</strong> recorded. Authoritative server match score:{' '}
+            <strong>
+              {submittedApplication.match_percentage !== null && submittedApplication.match_percentage !== undefined
+                ? `${Math.round(submittedApplication.match_percentage)}%`
+                : 'Recorded'}
+            </strong>
+          </p>
+
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={() => navigate('/student/applications')}
+              className="flex-1 py-1.5 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1 cursor-pointer"
+            >
+              <span>View in Applications</span>
+              <ExternalLink className="w-3 h-3" />
+            </button>
+            <button
+              onClick={() => setSubmittedApplication(null)}
+              className="py-1.5 px-3 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg text-xs font-medium cursor-pointer"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default StudentJobDetails;

@@ -75,12 +75,12 @@ const SkillsManager = () => {
           value={newSkill.name}
           onChange={(e) => setNewSkill({ ...newSkill, name: e.target.value })}
           placeholder="Enter skill (e.g., Python)"
-          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <select
           value={newSkill.proficiency}
           onChange={(e) => setNewSkill({ ...newSkill, proficiency: e.target.value })}
-          className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="beginner">Beginner</option>
           <option value="intermediate">Intermediate</option>
@@ -98,14 +98,14 @@ const SkillsManager = () => {
       {/* Skills List */}
       <div className="flex flex-wrap gap-2">
         {skills.length === 0 ? (
-          <p className="text-gray-500 text-sm">No skills added yet</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">No skills added yet</p>
         ) : (
           skills.map((skill) => (
             <div
               key={skill.id}
-              className="flex items-center gap-2 px-3 py-1 bg-gray-100 rounded-full"
+              className="flex items-center gap-2 px-3 py-1 bg-gray-100 dark:bg-gray-800 border border-transparent dark:border-gray-700 rounded-full"
             >
-              <span className="font-medium text-gray-800">{skill.name}</span>
+              <span className="font-medium text-gray-800 dark:text-gray-200">{skill.name}</span>
               <span className={`text-xs px-2 py-0.5 rounded-full ${getProficiencyColor(skill.proficiency)}`}>
                 {skill.proficiency}
               </span>

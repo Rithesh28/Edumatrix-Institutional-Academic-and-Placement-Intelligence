@@ -6,6 +6,7 @@ import {
   getFile,
   downloadFile,
   deleteFile,
+  bulkDeleteFiles,
   updateFile,
   getFileStats,
   getRecentFiles,
@@ -16,6 +17,7 @@ const useFileStore = create((set, get) => ({
   // State
   files: [],
   selectedFile: null,
+  selectedFileIds: [],
   recentFiles: [],
   searchResults: [],
   searchQuery: '',
@@ -122,6 +124,9 @@ const useFileStore = create((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       await deleteFile(fileId, permanent);
+      // Remove from selectedFileIds if present
+      const { selectedFileIds } = get();
+      set({ selectedFileIds: selectedFileIds.filter(id => id !== fileId) });
       // Refresh list
       await get().listFiles();
       set({ isLoading: false });
@@ -132,6 +137,50 @@ const useFileStore = create((set, get) => ({
       });
       throw error;
     }
+  },
+
+  bulkDeleteSelected: async (permanent = false) => {
+    const { selectedFileIds } = get();
+    if (!selectedFileIds || selectedFileIds.length === 0) return { deleted_count: 0, failed_ids: [] };
+    
+    set({ isLoading: true, error: null });
+    try {
+      const result = await bulkDeleteFiles(selectedFileIds, permanent);
+      // Clear selection after deletion
+      set({ selectedFileIds: [], isLoading: false });
+      // Refresh list
+      await get().listFiles();
+      return result;
+    } catch (error) {
+      set({ 
+        isLoading: false, 
+        error: error.response?.data?.detail || error.message 
+      });
+      throw error;
+    }
+  },
+
+  toggleSelectFile: (fileId) => {
+    const { selectedFileIds } = get();
+    if (selectedFileIds.includes(fileId)) {
+      set({ selectedFileIds: selectedFileIds.filter(id => id !== fileId) });
+    } else {
+      set({ selectedFileIds: [...selectedFileIds, fileId] });
+    }
+  },
+
+  selectAllFiles: () => {
+    const { files, searchResults, searchQuery } = get();
+    const list = searchQuery ? searchResults : files;
+    set({ selectedFileIds: list.map(f => f.id) });
+  },
+
+  deselectAllFiles: () => {
+    set({ selectedFileIds: [] });
+  },
+
+  clearSelection: () => {
+    set({ selectedFileIds: [] });
   },
 
   updateFile: async (fileId, data) => {

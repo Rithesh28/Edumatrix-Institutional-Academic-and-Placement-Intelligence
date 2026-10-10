@@ -33,9 +33,9 @@ const Profile = () => {
 
   return (
     <div className="max-w-4xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">My Profile</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">My Profile</h1>
 
-      <div className="flex border-b border-gray-200 mb-6 overflow-x-auto">
+      <div className="flex border-b border-gray-200 dark:border-gray-800 mb-6 overflow-x-auto">
         {[
           { id: 'personal', label: 'Personal Info' },
           { id: 'skills', label: 'Skills' },
@@ -45,10 +45,10 @@ const Profile = () => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap cursor-pointer ${
               activeTab === tab.id
-                ? 'border-blue-500 text-blue-600'
-                : 'border-transparent text-gray-500 hover:text-gray-700'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400 font-semibold'
+                : 'border-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
             }`}
           >
             {tab.label}
@@ -56,7 +56,7 @@ const Profile = () => {
         ))}
       </div>
 
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
         {activeTab === 'personal' && <ProfileForm profile={profile} onUpdate={setProfile} />}
         {activeTab === 'skills' && <SkillsManager />}
         {activeTab === 'certifications' && <CertificationUpload />}

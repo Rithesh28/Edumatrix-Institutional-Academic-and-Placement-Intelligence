@@ -72,7 +72,7 @@ const CertificationUpload = () => {
       </button>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-4 p-4 bg-gray-50 rounded-lg space-y-3">
+        <form onSubmit={handleSubmit} className="mb-4 p-4 bg-gray-50 dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-lg space-y-3">
           <div>
             <input
               type="text"
@@ -81,7 +81,7 @@ const CertificationUpload = () => {
               onChange={handleChange}
               placeholder="Certification Name"
               required
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
@@ -91,7 +91,7 @@ const CertificationUpload = () => {
               value={formData.issuer}
               onChange={handleChange}
               placeholder="Issuing Organization"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div>
@@ -101,28 +101,28 @@ const CertificationUpload = () => {
               value={formData.credential_id}
               onChange={handleChange}
               placeholder="Credential ID (Optional)"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <label className="text-sm text-gray-600">Issue Date</label>
+              <label className="text-sm text-gray-600 dark:text-gray-300">Issue Date</label>
               <input
                 type="date"
                 name="issue_date"
                 value={formData.issue_date}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
             <div>
-              <label className="text-sm text-gray-600">Expiry Date</label>
+              <label className="text-sm text-gray-600 dark:text-gray-300">Expiry Date</label>
               <input
                 type="date"
                 name="expiry_date"
                 value={formData.expiry_date}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
@@ -138,25 +138,25 @@ const CertificationUpload = () => {
       {/* Certifications List */}
       <div className="space-y-2">
         {certifications.length === 0 ? (
-          <p className="text-gray-500 text-sm">No certifications added yet</p>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">No certifications added yet</p>
         ) : (
           certifications.map((cert) => (
             <div
               key={cert.id}
-              className="flex justify-between items-center p-3 border border-gray-200 rounded-lg"
+              className="flex justify-between items-center p-3 border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40 rounded-lg"
             >
               <div>
-                <p className="font-medium text-gray-900">{cert.name}</p>
-                <p className="text-sm text-gray-500">{cert.issuer}</p>
+                <p className="font-medium text-gray-900 dark:text-gray-100">{cert.name}</p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">{cert.issuer}</p>
                 {cert.issue_date && (
-                  <p className="text-xs text-gray-400">
+                  <p className="text-xs text-gray-400 dark:text-gray-500">
                     Issued: {new Date(cert.issue_date).toLocaleDateString()}
                   </p>
                 )}
               </div>
               <button
                 onClick={() => handleDelete(cert.id)}
-                className="text-red-600 hover:text-red-800 text-sm"
+                className="text-red-600 dark:text-red-400 hover:text-red-800 dark:hover:text-red-300 text-sm cursor-pointer"
               >
                 Delete
               </button>

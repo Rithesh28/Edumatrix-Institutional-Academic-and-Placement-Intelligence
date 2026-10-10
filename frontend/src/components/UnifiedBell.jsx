@@ -132,10 +132,10 @@ const UnifiedBell = () => {
   const role = user?.role?.toLowerCase() || 'student'
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative flex-shrink-0" ref={dropdownRef}>
       <button
         onClick={handleToggleDropdown}
-        className="relative p-2 text-gray-600 hover:text-gray-900 focus:outline-none hover:bg-gray-100 rounded-full transition-colors"
+        className="relative p-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white focus:outline-none hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors cursor-pointer"
         title="Notifications"
       >
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -149,12 +149,12 @@ const UnifiedBell = () => {
       </button>
 
       {showDropdown && (
-        <div className="absolute right-0 mt-2 w-96 bg-white rounded-xl shadow-2xl z-50 border border-gray-200 max-h-[520px] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-          <div className="p-3.5 border-b border-gray-200 flex justify-between items-center bg-gray-50/80 backdrop-blur-sm">
+        <div className="absolute right-0 mt-2 w-96 bg-white dark:bg-gray-900 rounded-xl shadow-2xl z-50 border border-gray-200 dark:border-gray-800 max-h-[520px] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+          <div className="p-3.5 border-b border-gray-200 dark:border-gray-800 flex justify-between items-center bg-gray-50/80 dark:bg-gray-800/80 backdrop-blur-sm">
             <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-gray-900 text-sm">Notifications</h3>
+              <h3 className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Notifications</h3>
               {unreadCount > 0 && (
-                <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium">
+                <span className="bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 text-xs px-2 py-0.5 rounded-full font-medium">
                   {unreadCount} unread
                 </span>
               )}
@@ -162,16 +162,16 @@ const UnifiedBell = () => {
             {unreadCount > 0 && (
               <button
                 onClick={handleMarkAllAsRead}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium hover:underline"
+                className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium hover:underline"
               >
                 Mark all read
               </button>
             )}
           </div>
 
-          <div className="overflow-y-auto flex-1 divide-y divide-gray-100">
+          <div className="overflow-y-auto flex-1 divide-y divide-gray-100 dark:divide-gray-800">
             {totalItems === 0 ? (
-              <div className="p-8 text-center text-gray-400 text-sm">
+              <div className="p-8 text-center text-gray-400 dark:text-gray-500 text-sm">
                 <p className="text-2xl mb-1">📭</p>
                 No notifications yet
               </div>
@@ -183,25 +183,25 @@ const UnifiedBell = () => {
                     {notifications.slice(0, 8).map((notif) => (
                       <div
                         key={`notif-${notif.id}`}
-                        className={`p-3.5 hover:bg-gray-50 cursor-pointer transition-colors border-l-4 ${
+                        className={`p-3.5 hover:bg-gray-50 dark:hover:bg-gray-800/70 cursor-pointer transition-colors border-l-4 ${
                           !notif.is_read 
-                            ? 'bg-blue-50/70 border-blue-500 font-normal' 
+                            ? 'bg-blue-50/70 dark:bg-blue-950/40 border-blue-500 font-normal' 
                             : 'border-transparent opacity-85'
                         }`}
                         onClick={() => handleNotificationClick(notif)}
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <p className={`text-sm ${!notif.is_read ? 'font-semibold text-gray-900' : 'font-medium text-gray-700'}`}>
+                          <p className={`text-sm ${!notif.is_read ? 'font-semibold text-gray-900 dark:text-gray-100' : 'font-medium text-gray-700 dark:text-gray-300'}`}>
                             {notif.title}
                           </p>
                           {!notif.is_read && (
-                            <span className="w-2 h-2 rounded-full bg-blue-600 shrink-0 mt-1.5" />
+                            <span className="w-2 h-2 rounded-full bg-blue-600 dark:bg-blue-400 shrink-0 mt-1.5" />
                           )}
                         </div>
-                        <p className="text-gray-600 text-xs mt-1 line-clamp-2 whitespace-pre-line leading-relaxed">
+                        <p className="text-gray-600 dark:text-gray-400 text-xs mt-1 line-clamp-2 whitespace-pre-line leading-relaxed">
                           {notif.message}
                         </p>
-                        <p className="text-gray-400 text-[11px] mt-1.5 flex items-center gap-1">
+                        <p className="text-gray-400 dark:text-gray-500 text-[11px] mt-1.5 flex items-center gap-1">
                           <span>🕒</span>
                           {notif.created_at ? new Date(notif.created_at).toLocaleString() : 'Recent'}
                         </p>
@@ -213,24 +213,24 @@ const UnifiedBell = () => {
                 {/* Reminders List */}
                 {reminders.length > 0 && (
                   <div>
-                    <div className="px-3 py-1.5 bg-gray-100/70 text-[11px] text-gray-500 font-semibold uppercase tracking-wider">
+                    <div className="px-3 py-1.5 bg-gray-100/70 dark:bg-gray-800/70 text-[11px] text-gray-500 dark:text-gray-400 font-semibold uppercase tracking-wider">
                       Upcoming Reminders ({reminders.length})
                     </div>
                     {reminders.slice(0, 4).map((reminder) => (
                       <div
                         key={`rem-${reminder.id}`}
-                        className={`p-3 hover:bg-gray-50 cursor-pointer transition-colors ${
-                          reminder.status === 'pending' ? 'bg-amber-50/50' : ''
+                        className={`p-3 hover:bg-gray-50 dark:hover:bg-gray-800/70 cursor-pointer transition-colors ${
+                          reminder.status === 'pending' ? 'bg-amber-50/50 dark:bg-amber-950/30' : ''
                         }`}
                         onClick={() => handleMarkReminderAsRead(reminder.id)}
                       >
-                        <p className="font-medium text-gray-900 text-xs">
+                        <p className="font-medium text-gray-900 dark:text-gray-100 text-xs">
                           {reminder.circular_title || 'Exam Duty Reminder'}
                         </p>
-                        <p className="text-amber-700 text-[11px] font-semibold mt-0.5">
+                        <p className="text-amber-700 dark:text-amber-400 text-[11px] font-semibold mt-0.5">
                           ⏰ {reminder.reminder_type?.replace('_', ' ').toUpperCase()}
                         </p>
-                        <p className="text-gray-400 text-[11px] mt-1">
+                        <p className="text-gray-400 dark:text-gray-500 text-[11px] mt-1">
                           Due: {reminder.scheduled_at ? new Date(reminder.scheduled_at).toLocaleString() : 'Soon'}
                         </p>
                       </div>
@@ -243,7 +243,7 @@ const UnifiedBell = () => {
 
           {/* Footer view all link */}
           {notifications.length > 0 && (
-            <div className="p-2 bg-gray-50 border-t border-gray-200 text-center">
+            <div className="p-2 bg-gray-50 dark:bg-gray-800/90 border-t border-gray-200 dark:border-gray-800 text-center">
               <button
                 onClick={() => {
                   setShowDropdown(false)
@@ -251,7 +251,7 @@ const UnifiedBell = () => {
                   else if (role === 'hod') navigate('/hod/exam-duties')
                   else navigate(`/${role}/circulars`)
                 }}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium py-1"
+                className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium py-1"
               >
                 Go to {role === 'lecturer' ? 'Exam Duties' : 'Dashboard'} →
               </button>

@@ -18,10 +18,28 @@ import {
   removeFromShortlist,
   matchStudentsForJob,
   getPlacementStats,
+  publishJobPosting,
+  parseJdText,
+  uploadJdFile,
+  checkStudentEligibility,
+  getStudentPlacementStatus,
 } from '../services/placementService';
+import { useAuthStore } from './authStore';
+
+const formatErrorMessage = (error) => {
+  const detail = error.response?.data?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((d) => (typeof d === 'string' ? d : d.msg || JSON.stringify(d))).join(', ');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.message || JSON.stringify(detail);
+  }
+  return error.message || 'An error occurred';
+};
 
 const usePlacementStore = create((set, get) => ({
-  // State
+  // Placement Officer & General State
   companies: [],
   jobs: [],
   applications: [],
@@ -31,6 +49,23 @@ const usePlacementStore = create((set, get) => ({
   selectedJob: null,
   isLoading: false,
   error: null,
+
+  // Student-specific placement state (isolated from Officer screens)
+  jobEligibility: null,
+  eligibilityJobId: null,
+  isEligibilityLoading: false,
+  eligibilityError: null,
+
+  myApplications: [],
+  isMyApplicationsLoading: false,
+  myApplicationsError: null,
+
+  myPlacementStatus: null,
+  isPlacementStatusLoading: false,
+  placementStatusError: null,
+
+  isSubmittingApplication: false,
+  applicationSubmitError: null,
 
   // ============================================
   // COMPANY ACTIONS
@@ -149,12 +184,30 @@ const usePlacementStore = create((set, get) => ({
             job.company_name = company.name;
         }
         }
-        set({ selectedJob: job, isLoading: false });
+        const currentJobId = parseInt(id, 10);
+        const updates = { selectedJob: job, isLoading: false };
+        if (get().eligibilityJobId !== currentJobId) {
+          updates.jobEligibility = null;
+          updates.eligibilityJobId = null;
+          updates.eligibilityError = null;
+        }
+        set(updates);
         return job;
     } catch (error) {
-        set({ isLoading: false, error: error.response?.data?.detail || error.message });
+        set({ isLoading: false, error: formatErrorMessage(error) });
         throw error;
     }
+  },
+
+  setSelectedJob: (job) => {
+    const currentJobId = job ? parseInt(job.id, 10) : null;
+    const updates = { selectedJob: job };
+    if (get().eligibilityJobId !== currentJobId) {
+      updates.jobEligibility = null;
+      updates.eligibilityJobId = null;
+      updates.eligibilityError = null;
+    }
+    set(updates);
   },
 
   updateJobPosting: async (id, data) => {
@@ -187,21 +240,123 @@ const usePlacementStore = create((set, get) => ({
     }
   },
 
+  publishJobPosting: async (id, confirmNoSkills = false) => {
+    set({ isLoading: true, error: null });
+    try {
+      const job = await publishJobPosting(id, confirmNoSkills);
+      set((state) => ({
+        jobs: state.jobs.map((j) => (j.id === id ? job : j)),
+        selectedJob: state.selectedJob?.id === id ? job : state.selectedJob,
+        isLoading: false,
+      }));
+      return job;
+    } catch (error) {
+      set({ isLoading: false, error: error.response?.data?.detail || error.message });
+      throw error;
+    }
+  },
+
+  parseJdText: async (text) => {
+    set({ isLoading: true, error: null });
+    try {
+      const parsed = await parseJdText(text);
+      set({ isLoading: false });
+      return parsed;
+    } catch (error) {
+      set({ isLoading: false, error: error.response?.data?.detail || error.message });
+      throw error;
+    }
+  },
+
+  uploadJdFile: async (file) => {
+    set({ isLoading: true, error: null });
+    try {
+      const parsed = await uploadJdFile(file);
+      set({ isLoading: false });
+      return parsed;
+    } catch (error) {
+      set({ isLoading: false, error: error.response?.data?.detail || error.message });
+      throw error;
+    }
+  },
+
   // ============================================
   // APPLICATION ACTIONS
   // ============================================
 
   createApplication: async (data) => {
-    set({ isLoading: true, error: null });
+    set({
+      isSubmittingApplication: true,
+      applicationSubmitError: null,
+      isLoading: true,
+      error: null,
+    });
     try {
-      const application = await createApplication(data);
-      set((state) => ({
-        applications: [application, ...state.applications],
-        isLoading: false,
-      }));
+      // Strictly sanitize payload to only include job_posting_id and optional notes
+      const jobPostingId = typeof data === 'number' || typeof data === 'string'
+        ? parseInt(data, 10)
+        : (data?.job_posting_id || data?.jobId || data?.id);
+
+      if (!jobPostingId || isNaN(jobPostingId)) {
+        throw new Error('A valid job_posting_id is required to submit an application');
+      }
+
+      const payload = {
+        job_posting_id: parseInt(jobPostingId, 10),
+      };
+      if (data && typeof data === 'object' && data.notes && typeof data.notes === 'string') {
+        payload.notes = data.notes.trim();
+      }
+
+      const application = await createApplication(payload);
+
+      set((state) => {
+        // Update officer-facing applications list
+        const updatedApplications = [application, ...state.applications];
+
+        // Update student-facing myApplications list without duplicates
+        const updatedMyApplications = [
+          application,
+          ...state.myApplications.filter(
+            (a) => a.job_posting_id !== application.job_posting_id && a.id !== application.id
+          ),
+        ];
+
+        // Update placement status if already loaded
+        let updatedStatus = state.myPlacementStatus;
+        if (state.myPlacementStatus) {
+          const prevApps = state.myPlacementStatus.applications || [];
+          const filteredPrev = prevApps.filter(
+            (a) => a.job_posting_id !== application.job_posting_id && a.id !== application.id
+          );
+          updatedStatus = {
+            ...state.myPlacementStatus,
+            total_applications: (state.myPlacementStatus.total_applications || 0) + 1,
+            status: state.myPlacementStatus.status === 'not_applied' ? 'applied' : state.myPlacementStatus.status,
+            applications: [application, ...filteredPrev],
+          };
+        }
+
+        return {
+          applications: updatedApplications,
+          myApplications: updatedMyApplications,
+          myPlacementStatus: updatedStatus,
+          isSubmittingApplication: false,
+          isLoading: false,
+          applicationSubmitError: null,
+          error: null,
+        };
+      });
+
       return application;
     } catch (error) {
-      set({ isLoading: false, error: error.response?.data?.detail || error.message });
+      const errMsg = formatErrorMessage(error);
+      set({
+        isSubmittingApplication: false,
+        applicationSubmitError: errMsg,
+        isLoading: false,
+        error: errMsg,
+      });
       throw error;
     }
   },
@@ -213,7 +368,7 @@ const usePlacementStore = create((set, get) => ({
       set({ applications, isLoading: false });
       return applications;
     } catch (error) {
-      set({ isLoading: false, error: error.response?.data?.detail || error.message });
+      set({ isLoading: false, error: formatErrorMessage(error) });
       throw error;
     }
   },
@@ -224,14 +379,139 @@ const usePlacementStore = create((set, get) => ({
       const application = await updateApplication(id, data);
       set((state) => ({
         applications: state.applications.map((a) => (a.id === id ? application : a)),
+        myApplications: state.myApplications.map((a) => (a.id === id ? application : a)),
         isLoading: false,
       }));
       return application;
     } catch (error) {
-      set({ isLoading: false, error: error.response?.data?.detail || error.message });
+      set({ isLoading: false, error: formatErrorMessage(error) });
       throw error;
     }
   },
+
+  // ============================================
+  // STUDENT PLACEMENT & ELIGIBILITY ACTIONS
+  // ============================================
+
+  checkJobEligibility: async (jobId, studentId = null) => {
+    const parsedJobId = parseInt(jobId, 10);
+    if (!parsedJobId || isNaN(parsedJobId)) {
+      const errMsg = 'A valid jobId is required to check eligibility';
+      set({ eligibilityError: errMsg, isEligibilityLoading: false });
+      throw new Error(errMsg);
+    }
+
+    // Derive student identity from authStore if not explicitly provided
+    const authUser = useAuthStore.getState().user;
+    const currentStudentId = studentId || authUser?.id;
+
+    if (!currentStudentId) {
+      const errMsg = 'Student authentication is required to check eligibility';
+      set({ eligibilityError: errMsg, isEligibilityLoading: false });
+      throw new Error(errMsg);
+    }
+
+    // Reset previous eligibility and record active jobId to avoid stale data
+    set({
+      jobEligibility: null,
+      eligibilityJobId: parsedJobId,
+      isEligibilityLoading: true,
+      eligibilityError: null,
+    });
+
+    try {
+      const result = await checkStudentEligibility(parsedJobId, currentStudentId);
+
+      // Ensure results are only committed if the user is still querying this job
+      if (get().eligibilityJobId === parsedJobId) {
+        set({
+          jobEligibility: result,
+          isEligibilityLoading: false,
+          eligibilityError: null,
+        });
+      }
+      return result;
+    } catch (error) {
+      const errMsg = formatErrorMessage(error);
+      if (get().eligibilityJobId === parsedJobId) {
+        set({
+          isEligibilityLoading: false,
+          eligibilityError: errMsg,
+        });
+      }
+      throw error;
+    }
+  },
+
+  clearJobEligibility: () => set({
+    jobEligibility: null,
+    eligibilityJobId: null,
+    isEligibilityLoading: false,
+    eligibilityError: null,
+  }),
+
+  fetchMyApplications: async (studentId = null) => {
+    const authUser = useAuthStore.getState().user;
+    const currentStudentId = studentId || authUser?.id;
+
+    set({ isMyApplicationsLoading: true, myApplicationsError: null });
+    try {
+      const params = currentStudentId ? { student_id: currentStudentId } : {};
+      const apps = await getApplications(params);
+      set({
+        myApplications: apps,
+        isMyApplicationsLoading: false,
+        myApplicationsError: null,
+      });
+      return apps;
+    } catch (error) {
+      const errMsg = formatErrorMessage(error);
+      set({
+        isMyApplicationsLoading: false,
+        myApplicationsError: errMsg,
+      });
+      throw error;
+    }
+  },
+
+  fetchMyPlacementStatus: async (studentId = null) => {
+    const authUser = useAuthStore.getState().user;
+    const currentStudentId = studentId || authUser?.id;
+
+    if (!currentStudentId) {
+      const errMsg = 'Student authentication is required to view placement status';
+      set({ placementStatusError: errMsg, isPlacementStatusLoading: false });
+      throw new Error(errMsg);
+    }
+
+    set({ isPlacementStatusLoading: true, placementStatusError: null });
+    try {
+      const statusData = await getStudentPlacementStatus(currentStudentId);
+      set({
+        myPlacementStatus: statusData,
+        myApplications: statusData.applications && statusData.applications.length > 0
+          ? statusData.applications
+          : get().myApplications,
+        isPlacementStatusLoading: false,
+        placementStatusError: null,
+      });
+      return statusData;
+    } catch (error) {
+      const errMsg = formatErrorMessage(error);
+      set({
+        isPlacementStatusLoading: false,
+        placementStatusError: errMsg,
+      });
+      throw error;
+    }
+  },
+
+  clearStudentErrors: () => set({
+    eligibilityError: null,
+    myApplicationsError: null,
+    placementStatusError: null,
+    applicationSubmitError: null,
+  }),
 
   // ============================================
   // SHORTLIST ACTIONS
@@ -325,6 +605,18 @@ const usePlacementStore = create((set, get) => ({
     selectedJob: null,
     isLoading: false,
     error: null,
+    jobEligibility: null,
+    eligibilityJobId: null,
+    isEligibilityLoading: false,
+    eligibilityError: null,
+    myApplications: [],
+    isMyApplicationsLoading: false,
+    myApplicationsError: null,
+    myPlacementStatus: null,
+    isPlacementStatusLoading: false,
+    placementStatusError: null,
+    isSubmittingApplication: false,
+    applicationSubmitError: null,
   }),
 }));
 

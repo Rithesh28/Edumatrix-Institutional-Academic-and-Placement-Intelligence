@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Users, Search, Filter, UserCheck, ArrowLeft, RefreshCw, FileText, Award, GraduationCap, ChevronRight } from 'lucide-react';
+import { Users, Search, Filter, UserCheck, ArrowLeft, RefreshCw, FileText, Award, GraduationCap, ChevronRight, AlertTriangle } from 'lucide-react';
 import { getStudents } from '../../services/placementService';
 import toast from 'react-hot-toast';
 
@@ -9,6 +9,7 @@ const Students = () => {
   const [students, setStudents] = useState([]);
   const [filteredStudents, setFilteredStudents] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filter, setFilter] = useState('all');
 
@@ -18,14 +19,17 @@ const Students = () => {
 
   const fetchStudents = async () => {
     setIsLoading(true);
+    setError(null);
     try {
       const data = await getStudents();
       const studentList = Array.isArray(data) ? data : [];
       setStudents(studentList);
       setFilteredStudents(studentList);
-    } catch (error) {
-      console.error('Failed to fetch students:', error);
-      toast.error('Failed to fetch students');
+    } catch (err) {
+      console.error('Failed to fetch students:', err);
+      const errMsg = err?.response?.data?.detail || 'Failed to fetch students';
+      setError(errMsg);
+      toast.error('Failed to fetch students', { id: 'fetch-students-error' });
     } finally {
       setIsLoading(false);
     }
@@ -137,6 +141,21 @@ const Students = () => {
         <div className="flex justify-center items-center py-16">
           <RefreshCw className="w-8 h-8 text-indigo-600 animate-spin" />
           <span className="ml-3 text-sm font-medium text-gray-600">Loading student directory...</span>
+        </div>
+      ) : error ? (
+        <div className="text-center py-12 bg-white rounded-xl border border-rose-200 p-6 shadow-sm">
+          <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-3">
+            <AlertTriangle className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-gray-900">Failed to load student directory</h3>
+          <p className="text-xs text-rose-600 mt-1 max-w-md mx-auto">{error}</p>
+          <button
+            onClick={fetchStudents}
+            className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 inline-flex items-center gap-2 text-sm font-medium shadow-sm transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span>Try Again</span>
+          </button>
         </div>
       ) : filteredStudents.length === 0 ? (
         <div className="text-center py-16 bg-white rounded-xl border border-gray-200">

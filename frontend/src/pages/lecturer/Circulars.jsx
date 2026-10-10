@@ -298,7 +298,7 @@ const LecturerCirculars = () => {
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Manage Circulars</h1>
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Manage Circulars</h1>
         <button
           onClick={() => {
             setShowForm(!showForm)
@@ -307,22 +307,22 @@ const LecturerCirculars = () => {
               setFormData({ type: 'general', title: '', content: '', due_date: '' })
             }
           }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
         >
           {showForm ? 'Cancel' : '+ Post Circular'}
         </button>
       </div>
 
       {showForm && (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
-          <h2 className="text-lg font-semibold mb-4">
+        <div className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 p-6 mb-6 transition-colors">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
             {editingId ? 'Edit Circular' : 'Post New Circular'}
           </h2>
           
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* File Upload Section */}
-            <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+            <div className="p-4 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700">
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Upload File (PDF, Image, DOCX, TXT - Optional)
               </label>
               <div className="flex items-center space-x-4">
@@ -331,17 +331,17 @@ const LecturerCirculars = () => {
                   accept=".pdf,.jpg,.jpeg,.png,.docx,.doc,.txt"
                   onChange={handleFileSelect}
                   disabled={uploadingFile}
-                  className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                  className="block w-full text-sm text-gray-500 dark:text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 dark:file:bg-blue-950/40 file:text-blue-700 dark:file:text-blue-300 hover:file:bg-blue-100"
                 />
                 {uploadingFile && (
                   <div className="flex items-center space-x-2">
                     <div className="animate-spin rounded-full h-5 w-5 border-2 border-blue-600 border-t-transparent"></div>
-                    <span className="text-sm text-gray-600">Processing...</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Processing...</span>
                   </div>
                 )}
               </div>
               {selectedFile && (
-                <div className="mt-2 text-sm text-green-600">
+                <div className="mt-2 text-sm text-green-600 dark:text-green-400">
                   ✅ File selected: {selectedFile.name} ({(selectedFile.size / 1024).toFixed(1)} KB)
                 </div>
               )}
@@ -349,12 +349,12 @@ const LecturerCirculars = () => {
 
             {/* Type Field */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Type</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
               <select
                 name="type"
                 value={formData.type}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="general">General</option>
                 <option value="exam">Exam</option>
@@ -364,40 +364,40 @@ const LecturerCirculars = () => {
 
             {/* Title Field */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
               <input
                 type="text"
                 name="title"
                 value={formData.title}
                 onChange={handleChange}
                 required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Enter circular title"
               />
             </div>
 
             {/* Content Field */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Content</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Content</label>
               <textarea
                 name="content"
                 value={formData.content}
                 onChange={handleChange}
                 rows="4"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 placeholder="Enter circular content"
               />
             </div>
 
             {/* Due Date Field */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Due Date (Optional)</label>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Due Date (Optional)</label>
               <input
                 type="datetime-local"
                 name="due_date"
                 value={formData.due_date}
                 onChange={handleChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
@@ -412,7 +412,7 @@ const LecturerCirculars = () => {
               <button
                 type="button"
                 onClick={resetForm}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-700"
               >
                 Cancel
               </button>
@@ -424,29 +424,29 @@ const LecturerCirculars = () => {
       {/* Circulars List */}
       <div className="space-y-4">
         {circulars.length === 0 ? (
-          <p className="text-gray-500 text-center py-10">No circulars yet</p>
+          <p className="text-gray-500 dark:text-gray-400 text-center py-10">No circulars yet</p>
         ) : (
           circulars.map((circ) => (
-            <div key={circ.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div key={circ.id} className="bg-white dark:bg-gray-900 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800 p-4 transition-colors">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <span className={`text-xs px-2 py-1 rounded-full ${
-                    circ.type === 'exam' ? 'bg-red-100 text-red-700' :
-                    circ.type === 'assignment' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-blue-100 text-blue-700'
+                    circ.type === 'exam' ? 'bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-300' :
+                    circ.type === 'assignment' ? 'bg-yellow-100 text-yellow-700 dark:bg-amber-950/40 dark:text-amber-300' :
+                    'bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300'
                   }`}>
                     {circ.type.toUpperCase()}
                   </span>
-                  <h3 className="text-lg font-semibold text-gray-900 mt-2">{circ.title}</h3>
-                  <p className="text-gray-600 mt-1 whitespace-pre-wrap">{circ.content}</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mt-2">{circ.title}</h3>
+                  <p className="text-gray-600 dark:text-gray-300 mt-1 whitespace-pre-wrap">{circ.content}</p>
                   
                   {/* File Attachment */}
                   {renderFileAttachment(circ)}
                   
                   {circ.due_date && (
-                    <p className="text-sm text-red-600 mt-2">Due: {new Date(circ.due_date).toLocaleDateString()}</p>
+                    <p className="text-sm text-red-600 dark:text-red-400 mt-2">Due: {new Date(circ.due_date).toLocaleDateString()}</p>
                   )}
-                  <p className="text-xs text-gray-400 mt-2">
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                     Posted: {new Date(circ.created_at).toLocaleString()}
                     {circ.lecturer_name && ` by ${circ.lecturer_name}`}
                   </p>

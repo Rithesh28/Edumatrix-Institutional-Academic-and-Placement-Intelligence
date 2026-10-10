@@ -4,6 +4,7 @@ import { useAuthStore } from '../store/authStore'
 export const useWebSocket = () => {
   const [isConnected, setIsConnected] = useState(false)
   const [messages, setMessages] = useState([])
+  const [error, setError] = useState(null)
   const wsRef = useRef(null)
   const reconnectTimeoutRef = useRef(null)
   const { token, user } = useAuthStore()
@@ -61,6 +62,9 @@ export const useWebSocket = () => {
             if (exists) return prev
             return [...prev, data]
           })
+        } else if (data.type === 'error') {
+          console.error('WebSocket error message:', data.message)
+          setError(data.message)
         }
       } catch (e) {
         console.error('Failed to parse WebSocket message:', e)
@@ -96,5 +100,5 @@ export const useWebSocket = () => {
     return () => disconnect()
   }, [connect, disconnect])
 
-  return { isConnected, sendMessage, messages, setMessages }
+  return { isConnected, sendMessage, messages, setMessages, error, setError }
 }

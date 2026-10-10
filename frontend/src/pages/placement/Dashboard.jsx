@@ -115,27 +115,27 @@ const Dashboard = () => {
     <div>
       <div className="flex justify-between items-center mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Placement Dashboard</h1>
-          <p className="text-gray-500 text-sm">Manage placements, companies, and student applications</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Placement Dashboard</h1>
+          <p className="text-gray-500 dark:text-gray-400 text-sm">Manage placements, companies, and student applications</p>
         </div>
         <div className="flex space-x-3">
           <button
             onClick={() => navigate('/placement/resume-analyzer')}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center space-x-2 shadow-sm"
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center space-x-2 shadow-sm transition-colors cursor-pointer"
           >
             <FileText className="w-4 h-4" />
             <span>AI Resume Analyzer</span>
           </button>
           <button
             onClick={() => navigate('/placement/companies/add')}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center space-x-2 shadow-sm"
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center space-x-2 shadow-sm transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Add Company</span>
           </button>
           <button
             onClick={() => navigate('/placement/jobs/post')}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2 shadow-sm"
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2 shadow-sm transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
             <span>Post Job</span>
@@ -179,67 +179,67 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
         <button
           onClick={() => navigate('/placement/resume-analyzer')}
-          className="bg-gradient-to-br from-purple-50 to-indigo-50 p-4 rounded-lg shadow-sm border border-purple-200 hover:shadow-md hover:border-purple-400 transition-all text-left group"
+          className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950/40 dark:to-indigo-950/40 p-4 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800/60 hover:shadow-md hover:border-purple-400 dark:hover:border-purple-600 transition-all text-left group cursor-pointer"
         >
           <div className="w-10 h-10 bg-purple-600 text-white rounded-lg flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
             <FileText className="w-5 h-5" />
           </div>
-          <h3 className="font-semibold text-gray-900">AI Resume Analyzer</h3>
-          <p className="text-xs text-gray-500 mt-1">Upload & score resumes with ATS insights</p>
+          <h3 className="font-semibold text-gray-900 dark:text-white">AI Resume Analyzer</h3>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Upload & score resumes with ATS insights</p>
         </button>
         <button
           onClick={() => navigate('/placement/companies')}
-          className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow text-left"
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-blue-300 dark:hover:border-blue-700 transition-all text-left cursor-pointer"
         >
           <Building2 className="w-6 h-6 text-blue-600 mb-2" />
-          <h3 className="font-medium text-gray-900">Manage Companies</h3>
-          <p className="text-sm text-gray-500">Add or view companies</p>
+          <h3 className="font-medium text-gray-900 dark:text-white">Manage Companies</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Add or view companies</p>
         </button>
         <button
           onClick={() => navigate('/placement/jobs')}
-          className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow text-left"
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-green-300 dark:hover:border-green-700 transition-all text-left cursor-pointer"
         >
           <Briefcase className="w-6 h-6 text-green-600 mb-2" />
-          <h3 className="font-medium text-gray-900">Manage Jobs</h3>
-          <p className="text-sm text-gray-500">Post or view jobs</p>
+          <h3 className="font-medium text-gray-900 dark:text-white">Manage Jobs</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Post or view jobs</p>
         </button>
         <button
           onClick={() => navigate('/placement/students')}
-          className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow text-left"
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700 transition-all text-left cursor-pointer"
         >
           <Users className="w-6 h-6 text-purple-600 mb-2" />
-          <h3 className="font-medium text-gray-900">View Students</h3>
-          <p className="text-sm text-gray-500">Browse student profiles</p>
+          <h3 className="font-medium text-gray-900 dark:text-white">View Students</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Browse student profiles</p>
         </button>
         <button
           onClick={() => navigate('/placement/shortlist')}
-          className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow text-left"
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-orange-300 dark:hover:border-orange-700 transition-all text-left cursor-pointer"
         >
           <UserCheck className="w-6 h-6 text-orange-600 mb-2" />
-          <h3 className="font-medium text-gray-900">Shortlists</h3>
-          <p className="text-sm text-gray-500">View shortlisted students</p>
+          <h3 className="font-medium text-gray-900 dark:text-white">Shortlists</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">View shortlisted students</p>
         </button>
       </div>
 
       {/* Recent Activity */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Activity</h3>
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Activity</h3>
         {recentActivity.length === 0 ? (
-          <p className="text-gray-500 text-center py-4">No recent activity</p>
+          <p className="text-gray-500 dark:text-gray-400 text-center py-4">No recent activity</p>
         ) : (
           <div className="space-y-3">
             {recentActivity.map((item, index) => (
-              <div key={index} className="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+              <div key={index} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-800 last:border-0">
                 <div className="flex items-center space-x-3">
                   <div className={`p-2 rounded-full ${item.bgColor}`}>
                     {item.icon}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{item.title}</p>
-                    <p className="text-xs text-gray-500">{item.description}</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{item.title}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{item.description}</p>
                   </div>
                 </div>
-                <span className="text-xs text-gray-400">{item.time}</span>
+                <span className="text-xs text-gray-400 dark:text-gray-500">{item.time}</span>
               </div>
             ))}
           </div>

@@ -38,6 +38,7 @@ from ..schemas.file import (
 from ..services.file_storage.file_service import file_service
 from ..services.file_storage.minio_client import minio_client
 from ..services.file_storage.search_service import search_service
+from ..services.audit_service import audit_service
 from ..core.config import settings
 
 # Import for direct embedding generation
@@ -410,22 +411,44 @@ async def delete_file(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Delete a file."""
-    
+    """
+    Delete a file.
+    Admin can delete any file; HOD can delete files belonging to their department;
+    Faculty and students can delete their own uploaded files.
+    """
     file = file_service.get_file(db, file_id)
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     
     # Check permissions
-    if file.uploaded_by != current_user.id and current_user.role not in [UserRole.ADMIN, UserRole.HOD]:
+    is_owner = file.uploaded_by == current_user.id
+    is_admin = current_user.role == UserRole.ADMIN
+    is_hod_dept = current_user.role == UserRole.HOD and file.department == current_user.department
+    
+    if not (is_owner or is_admin or is_hod_dept):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only delete your own files"
+            detail="Permission denied: You can only delete your own files or department files as HOD"
         )
     
     result = file_service.delete_file(db, file_id, permanent)
     if not result:
-        raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=500, detail="Failed to delete file from storage or database")
+    
+    # Record audit log
+    audit_service.log_action(
+        db=db,
+        action="FILE_DELETE",
+        actor=current_user,
+        target_type="file",
+        target_id=str(file_id),
+        outcome="SUCCESS",
+        details={
+            "filename": file.filename,
+            "department": file.department,
+            "permanent": permanent
+        }
+    )
     
     return {"message": "File deleted successfully", "permanent": permanent}
 
@@ -433,34 +456,75 @@ async def delete_file(
 @router.post("/bulk-delete", response_model=FileBulkDeleteResponse)
 async def bulk_delete_files(
     request: FileBulkDeleteRequest,
-    permanent: bool = Query(False),
+    permanent: bool = Query(False, description="Permanently delete files"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Bulk delete files."""
-    
-    if current_user.role not in [UserRole.ADMIN, UserRole.HOD]:
+    """
+    Bulk delete files with per-file authorization check.
+    Admin can delete any file; HOD can delete department or own files;
+    Other users can bulk delete files they uploaded.
+    """
+    if not request.file_ids:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Admins and HODs can bulk delete files"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="file_ids list cannot be empty"
         )
     
-    deleted_count = 0
-    failed_ids = []
+    # Deduplicate requested IDs
+    unique_file_ids = list(dict.fromkeys(request.file_ids))
     
-    for file_id in request.file_ids:
+    deleted_count = 0
+    deleted_ids = []
+    failed_ids = []
+    failed_reasons = {}
+    
+    for file_id in unique_file_ids:
         try:
             file = file_service.get_file(db, file_id)
-            if file and (file.uploaded_by == current_user.id or current_user.role == UserRole.ADMIN):
-                if file_service.delete_file(db, file_id, permanent):
-                    deleted_count += 1
-                else:
-                    failed_ids.append(file_id)
+            if not file:
+                failed_ids.append(file_id)
+                failed_reasons[str(file_id)] = "File not found"
+                continue
+            
+            is_owner = file.uploaded_by == current_user.id
+            is_admin = current_user.role == UserRole.ADMIN
+            is_hod_dept = current_user.role == UserRole.HOD and file.department == current_user.department
+            
+            if not (is_owner or is_admin or is_hod_dept):
+                failed_ids.append(file_id)
+                failed_reasons[str(file_id)] = "Permission denied: unauthorized for this file"
+                continue
+            
+            if file_service.delete_file(db, file_id, permanent):
+                deleted_count += 1
+                deleted_ids.append(file_id)
             else:
                 failed_ids.append(file_id)
+                failed_reasons[str(file_id)] = "Storage or database deletion failed"
         except Exception as e:
-            logger.error(f"Failed to delete {file_id}: {str(e)}")
+            logger.error(f"Error bulk deleting {file_id}: {str(e)}")
             failed_ids.append(file_id)
+            failed_reasons[str(file_id)] = str(e)
+    
+    outcome = "SUCCESS" if len(failed_ids) == 0 else ("PARTIAL_FAILURE" if deleted_count > 0 else "FAILURE")
+    
+    audit_service.log_action(
+        db=db,
+        action="FILE_BULK_DELETE",
+        actor=current_user,
+        target_type="file",
+        target_id="multiple",
+        outcome=outcome,
+        details={
+            "total_requested": len(unique_file_ids),
+            "deleted_count": deleted_count,
+            "failed_count": len(failed_ids),
+            "permanent": permanent,
+            "deleted_ids": [str(fid) for fid in deleted_ids],
+            "failed_reasons": failed_reasons
+        }
+    )
     
     return FileBulkDeleteResponse(
         deleted_count=deleted_count,

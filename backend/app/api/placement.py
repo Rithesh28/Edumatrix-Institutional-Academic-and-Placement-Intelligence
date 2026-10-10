@@ -10,14 +10,19 @@ Provides REST API for placement operations:
 - Statistics and reports
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, File, UploadFile
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import io
+import csv
+from datetime import datetime
 import logging
 
 from ..core.database import get_db
 from ..api.auth import get_current_user, get_current_placement_officer
 from ..models.user import User, UserRole
+from ..models.company import Company
+from ..models.job_posting import JobPosting, JobStatus
 from ..models.application import Application
 from ..models.shortlist import Shortlist
 from ..models.profile import StudentProfileExtended, Skill, Project
@@ -29,9 +34,11 @@ from ..schemas.placement import (
     ApplicationCreate, ApplicationUpdate, ApplicationResponse,
     ShortlistCreate, ShortlistUpdate, ShortlistResponse,
     PlacementStatistics, CompanyStatistics, StudentPlacementStatus,
-    StudentEligibility, JobMatchRequest, JobMatchResponse
+    StudentEligibility, JobMatchRequest, JobMatchResponse,
+    JdParseRequest, JdParseResponse
 )
 from ..services.placement_service import placement_service
+from ..services.jd_parser_service import jd_parser_service
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +155,10 @@ async def get_job_postings(
     db: Session = Depends(get_db)
 ):
     """Get all job postings."""
+    # RBAC: Students can ONLY view OPEN jobs (drafts are hidden from students)
+    if current_user.role == UserRole.STUDENT:
+        status = JobStatus.OPEN.value
+
     jobs = placement_service.get_job_postings(db, skip, limit, company_id, status)
     responses = []
     for job in jobs:
@@ -168,6 +179,11 @@ async def get_job_posting(
     job = placement_service.get_job_posting(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job posting not found")
+    
+    # RBAC: Students cannot view draft jobs
+    if current_user.role == UserRole.STUDENT and job.status != JobStatus.OPEN:
+        raise HTTPException(status_code=404, detail="Job posting not found")
+
     response = JobPostingResponse.model_validate(job)
     if job.company:
         response.company_name = job.company.name
@@ -204,6 +220,79 @@ async def delete_job_posting(
     return {"message": "Job posting deleted successfully"}
 
 
+@router.post("/jobs/parse-jd", response_model=JdParseResponse)
+async def parse_job_description(
+    request: JdParseRequest,
+    current_user: User = Depends(get_current_placement_officer),
+    db: Session = Depends(get_db)
+):
+    """
+    Parse a raw Job Description text to extract structured requirements:
+    - Required skills
+    - Preferred skills
+    - Minimum CGPA
+    - Eligible branches
+    - Experience level, location, salary range
+    Allows Placement Officer to review and edit before creating/publishing the job.
+    """
+    raw_text = request.text.strip() if request and request.text else ""
+    if not raw_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job description text is required"
+        )
+    parsed = jd_parser_service.parse_jd_text(raw_text)
+    return JdParseResponse(**parsed)
+
+
+@router.post("/jobs/upload-jd", response_model=JdParseResponse)
+async def upload_job_description(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_placement_officer),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload a Job Description file (PDF, DOCX, TXT) to extract structured requirements.
+    Allows Placement Officer to review and edit before creating/publishing the job.
+    """
+    try:
+        content = await file.read()
+        extracted_text = jd_parser_service.extract_text_from_file(
+            content=content,
+            filename=file.filename
+        )
+        parsed = jd_parser_service.parse_jd_text(extracted_text)
+        return JdParseResponse(**parsed)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+
+@router.post("/jobs/{job_id}/publish", response_model=JobPostingResponse)
+async def publish_job_posting(
+    job_id: int,
+    confirm_no_skills: bool = Query(False, description="Explicit confirmation if publishing without skills"),
+    current_user: User = Depends(get_current_placement_officer),
+    db: Session = Depends(get_db)
+):
+    """
+    Publish a draft job posting (status -> OPEN), making it active for matching.
+    Validates that skills exist unless confirm_no_skills=True is explicitly passed.
+    """
+    try:
+        job = placement_service.publish_job_posting(db, job_id, confirm_no_skills=confirm_no_skills)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        response = JobPostingResponse.model_validate(job)
+        if job.company:
+            response.company_name = job.company.name
+        return response
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 # ============================================
 # APPLICATION ENDPOINTS
 # ============================================
@@ -214,27 +303,33 @@ async def create_application(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create a new application (student applies for a job)."""
+    """Create a new application with server-authoritative scoring and eligibility."""
     # Check if student is applying for themselves
-    if current_user.role == UserRole.STUDENT and current_user.id != app_data.student_id:
+    if current_user.role == UserRole.STUDENT and app_data.student_id and app_data.student_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only apply on your own behalf"
         )
     
-    # Check if application already exists
-    existing = db.query(Application).filter(
-        Application.student_id == app_data.student_id,
-        Application.job_posting_id == app_data.job_posting_id
-    ).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You have already applied for this job"
-        )
-    
-    application = placement_service.create_application(db, app_data)
-    return ApplicationResponse.model_validate(application)
+    try:
+        application = placement_service.create_application(db, app_data, current_user)
+        resp = ApplicationResponse.model_validate(application)
+        if application.match_snapshot:
+            resp.has_low_match_warning = application.match_snapshot.get("has_low_match_warning", False)
+            resp.low_match_warning = application.match_snapshot.get("low_match_warning")
+        return resp
+    except ValueError as e:
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
+        elif "already applied" in error_msg.lower():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        elif "not open" in error_msg.lower() or "deadline" in error_msg.lower():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        elif "rejected" in error_msg.lower():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
 
 @router.get("/applications", response_model=List[ApplicationResponse])
@@ -253,7 +348,14 @@ async def get_applications(
         student_id = current_user.id
     
     applications = placement_service.get_applications(db, student_id, job_posting_id, status, skip, limit)
-    return [ApplicationResponse.model_validate(a) for a in applications]
+    results = []
+    for a in applications:
+        resp = ApplicationResponse.model_validate(a)
+        if a.match_snapshot:
+            resp.has_low_match_warning = a.match_snapshot.get("has_low_match_warning", False)
+            resp.low_match_warning = a.match_snapshot.get("low_match_warning")
+        results.append(resp)
+    return results
 
 
 @router.get("/applications/{app_id}", response_model=ApplicationResponse)
@@ -274,7 +376,11 @@ async def get_application(
             detail="You can only view your own applications"
         )
     
-    return ApplicationResponse.model_validate(application)
+    resp = ApplicationResponse.model_validate(application)
+    if application.match_snapshot:
+        resp.has_low_match_warning = application.match_snapshot.get("has_low_match_warning", False)
+        resp.low_match_warning = application.match_snapshot.get("low_match_warning")
+    return resp
 
 
 @router.put("/applications/{app_id}", response_model=ApplicationResponse)
@@ -302,8 +408,15 @@ async def create_shortlist(
     db: Session = Depends(get_db)
 ):
     """Shortlist a student for a job."""
-    shortlist = placement_service.create_shortlist(db, shortlist_data)
-    return ShortlistResponse.model_validate(shortlist)
+    try:
+        shortlist = placement_service.create_shortlist(db, shortlist_data, current_user_id=current_user.id)
+        return ShortlistResponse.model_validate(shortlist)
+    except ValueError as e:
+        error_msg = str(e)
+        if "not found" in error_msg.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=error_msg)
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_msg)
 
 
 @router.get("/shortlist", response_model=List[ShortlistResponse])
@@ -343,6 +456,7 @@ async def remove_from_shortlist(
 # ============================================
 
 @router.post("/match", response_model=JobMatchResponse)
+@router.post("/jobs/match", response_model=JobMatchResponse)
 async def match_students_for_job(
     request: JobMatchRequest,
     current_user: User = Depends(get_current_placement_officer),
@@ -371,6 +485,12 @@ async def check_student_eligibility(
             detail="You can only check your own eligibility"
         )
     
+    # RBAC: Students can only check eligibility for OPEN jobs
+    if current_user.role == UserRole.STUDENT:
+        job = placement_service.get_job_posting(db, job_id)
+        if not job or job.status != JobStatus.OPEN:
+            raise HTTPException(status_code=404, detail="Job posting not found or not open for applications")
+
     try:
         result = placement_service.check_student_eligibility(db, student_id, job_id)
         return result
@@ -379,8 +499,100 @@ async def check_student_eligibility(
 
 
 # ============================================
-# STATISTICS ENDPOINTS
+# STATISTICS & REPORT ENDPOINTS
 # ============================================
+
+@router.get("/reports/export")
+async def export_placement_report(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Export institutional placement report as a downloadable CSV.
+    Accessible by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    
+    users = db.query(User).filter(User.role == UserRole.STUDENT).all()
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # CSV Header
+    writer.writerow([
+        "Student ID",
+        "Student Name",
+        "Enrollment Number",
+        "Email",
+        "Department / Branch",
+        "Year",
+        "Semester",
+        "CGPA",
+        "Placement Status",
+        "ATS Score",
+        "Total Applications",
+        "Total Shortlists",
+        "Applied Job Titles",
+        "Skills"
+    ])
+    
+    for u in users:
+        profile = db.query(StudentProfileExtended).filter(StudentProfileExtended.user_id == u.id).first()
+        skills = db.query(Skill).filter(Skill.student_id == profile.id).all() if profile else []
+        latest_resume = db.query(Resume).filter(Resume.student_id == u.id).order_by(Resume.created_at.desc()).first()
+        apps = db.query(Application).filter(Application.student_id == u.id).all()
+        shortlists = db.query(Shortlist).filter(Shortlist.student_id == u.id).all()
+        
+        # Determine placement status
+        status_val = "not_applied"
+        if any(a.status == "selected" or (hasattr(a.status, "value") and a.status.value == "selected") for a in apps):
+            status_val = "selected"
+        elif len(shortlists) > 0 or any(a.status == "shortlisted" or (hasattr(a.status, "value") and a.status.value == "shortlisted") for a in apps):
+            status_val = "shortlisted"
+        elif len(apps) > 0:
+            status_val = "applied"
+        elif profile and profile.placement_status:
+            status_val = profile.placement_status.value if hasattr(profile.placement_status, "value") else str(profile.placement_status)
+        
+        student_skills_list = [s.name for s in skills] + (latest_resume.skills if (latest_resume and latest_resume.skills) else [])
+        skills_str = ", ".join(dict.fromkeys(student_skills_list))
+        
+        applied_jobs = []
+        for a in apps:
+            job = db.query(JobPosting).filter(JobPosting.id == a.job_posting_id).first()
+            if job and job.title:
+                applied_jobs.append(job.title)
+        jobs_str = "; ".join(applied_jobs)
+        
+        writer.writerow([
+            u.id,
+            profile.full_name if (profile and profile.full_name) else u.name,
+            profile.enrollment_number if profile else "",
+            u.email,
+            profile.branch if (profile and profile.branch) else (u.department or "General"),
+            profile.year if profile else "",
+            profile.semester if profile else "",
+            f"{profile.cgpa:.2f}" if (profile and profile.cgpa is not None) else "",
+            status_val,
+            f"{latest_resume.ats_score:.1f}" if (latest_resume and latest_resume.ats_score is not None) else "",
+            len(apps),
+            len(shortlists),
+            jobs_str,
+            skills_str
+        ])
+    
+    csv_content = output.getvalue()
+    filename = f"placement_report_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
+    
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Access-Control-Expose-Headers": "Content-Disposition"
+        }
+    )
+
 
 @router.get("/stats", response_model=PlacementStatistics)
 async def get_placement_statistics(
@@ -467,7 +679,7 @@ async def get_all_placement_students(
         status_val = "not_applied"
         if any(a.status == "selected" for a in apps):
             status_val = "selected"
-        elif any(s.status == "shortlisted" for s in shortlists) or any(a.status == "shortlisted" for a in apps):
+        elif len(shortlists) > 0 or any(a.status == "shortlisted" for a in apps):
             status_val = "shortlisted"
         elif len(apps) > 0:
             status_val = "applied"
@@ -477,6 +689,9 @@ async def get_all_placement_students(
         if placement_status and status_val.lower() != placement_status.lower():
             continue
         
+        resume_skills = latest_resume.skills if (latest_resume and isinstance(latest_resume.skills, list)) else []
+        combined_skills = [s.name for s in skills] + [sk for sk in resume_skills if isinstance(sk, str)]
+
         results.append({
             "id": u.id,
             "user_id": u.id,
@@ -491,7 +706,7 @@ async def get_all_placement_students(
             "enrollment_number": profile.enrollment_number if profile else "",
             "status": status_val,
             "placement_status": status_val,
-            "skills": [s.name for s in skills] + (latest_resume.skills if (latest_resume and latest_resume.skills) else []),
+            "skills": combined_skills,
             "ats_score": latest_resume.ats_score if latest_resume else None,
             "resume_id": latest_resume.id if latest_resume else None,
             "total_applications": len(apps),
@@ -499,7 +714,8 @@ async def get_all_placement_students(
                 "id": a.id,
                 "job_id": a.job_posting_id,
                 "status": a.status.value if hasattr(a.status, "value") else str(a.status),
-                "created_at": a.created_at
+                "created_at": a.applied_at.isoformat() if getattr(a, "applied_at", None) else None,
+                "applied_at": a.applied_at.isoformat() if getattr(a, "applied_at", None) else None
             } for a in apps]
         })
     
@@ -515,9 +731,14 @@ async def get_student_details_for_placement(
     """
     Get detailed student profile, applications, and resume data.
     """
-    # Permission check: student viewing own profile OR placement officer/admin
-    if current_user.role == UserRole.STUDENT and current_user.id != student_id:
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Permission check: student viewing own profile OR placement officer / admin / hod
+    is_self = current_user.role == UserRole.STUDENT and current_user.id == student_id
+    is_staff = current_user.role in [UserRole.PLACEMENT_OFFICER, UserRole.ADMIN, UserRole.HOD]
+    if not (is_self or is_staff):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You can only view your own placement profile"
+        )
     
     user = db.query(User).filter(User.id == student_id).first()
     if not user:
@@ -537,7 +758,7 @@ async def get_student_details_for_placement(
     status_val = "not_applied"
     if any(a.status == "selected" for a in apps):
         status_val = "selected"
-    elif any(s.status == "shortlisted" for s in shortlists) or any(a.status == "shortlisted" for a in apps):
+    elif len(shortlists) > 0 or any(a.status == "shortlisted" for a in apps):
         status_val = "shortlisted"
     elif len(apps) > 0:
         status_val = "applied"
@@ -589,7 +810,13 @@ async def get_student_details_for_placement(
             "job_title": a.job_posting.title if a.job_posting else f"Job #{a.job_posting_id}",
             "company_name": a.job_posting.company.name if (a.job_posting and a.job_posting.company) else "Company",
             "status": a.status.value if hasattr(a.status, "value") else str(a.status),
-            "applied_at": a.created_at
+            "match_percentage": a.match_percentage,
+            "eligibility_score": a.eligibility_score,
+            "match_snapshot": a.match_snapshot,
+            "has_low_match_warning": a.match_snapshot.get("has_low_match_warning", False) if a.match_snapshot else False,
+            "low_match_warning": a.match_snapshot.get("low_match_warning") if a.match_snapshot else None,
+            "created_at": a.applied_at.isoformat() if a.applied_at else None,
+            "applied_at": a.applied_at.isoformat() if a.applied_at else None
         } for a in apps],
         "total_applications": len(apps),
         "total_shortlists": len(shortlists)

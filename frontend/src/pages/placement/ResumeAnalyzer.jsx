@@ -216,11 +216,11 @@ const ResumeAnalyzer = () => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Sparkles className="w-7 h-7 text-purple-600" />
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <Sparkles className="w-7 h-7 text-purple-600 dark:text-purple-400" />
             {isStudent ? 'My Resume Analyzer & ATS Scorer' : 'Placement AI Resume Intelligence'}
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             {isStudent 
               ? 'Upload your resume to check your ATS compatibility score, extract detected skills, and view personalized improvement tips.'
               : 'Review and analyze student uploaded resumes, evaluate ATS readiness, and test new resumes.'}
@@ -228,7 +228,7 @@ const ResumeAnalyzer = () => {
         </div>
         <button
           onClick={() => fetchResumes()}
-          className="self-start sm:self-auto px-4 py-2 bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 flex items-center gap-2 shadow-sm"
+          className="self-start sm:self-auto px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 flex items-center gap-2 shadow-sm transition-colors"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           <span>Refresh</span>
@@ -237,60 +237,62 @@ const ResumeAnalyzer = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Total Resumes</p>
-            <p className="text-2xl font-bold text-gray-900 mt-1">{total || resumes.length}</p>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Total Resumes</p>
+            <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{total || resumes.length}</p>
           </div>
-          <div className="p-3 bg-purple-50 text-purple-600 rounded-xl">
+          <div className="p-3 bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 rounded-xl">
             <FileText className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Avg. ATS Score</p>
-            <p className="text-2xl font-bold text-indigo-600 mt-1">{avgScore}%</p>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Avg. ATS Score</p>
+            <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">{avgScore}%</p>
           </div>
-          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+          <div className="p-3 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 rounded-xl">
             <TrendingUp className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">High Match (≥75%)</p>
-            <p className="text-2xl font-bold text-emerald-600 mt-1">{topScoring}</p>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">High Match (≥75%)</p>
+            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">{topScoring}</p>
           </div>
-          <div className="p-3 bg-emerald-50 text-emerald-600 rounded-xl">
+          <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-xl">
             <Award className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-gray-900 p-5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm flex items-center justify-between">
           <div>
-            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">Needs Work (&lt;50%)</p>
-            <p className="text-2xl font-bold text-rose-600 mt-1">{needsWork}</p>
+            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Needs Work (&lt;50%)</p>
+            <p className="text-2xl font-bold text-rose-600 dark:text-rose-400 mt-1">{needsWork}</p>
           </div>
-          <div className="p-3 bg-rose-50 text-rose-600 rounded-xl">
+          <div className="p-3 bg-rose-50 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 rounded-xl">
             <AlertCircle className="w-6 h-6" />
           </div>
         </div>
       </div>
 
       {/* Upload Box */}
-      <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
-        <h2 className="text-base font-semibold text-gray-900 mb-2 flex items-center gap-2">
-          <Upload className="w-5 h-5 text-purple-600" />
+      <div className="bg-white dark:bg-gray-900 p-6 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+        <h2 className="text-base font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
+          <Upload className="w-5 h-5 text-purple-600 dark:text-purple-400" />
           Upload & Analyze Resume
         </h2>
-        <p className="text-sm text-gray-500 mb-4">
+        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
           Upload any student resume in PDF, DOCX, or Image format for real-time ATS scoring, NLP entity extraction, and actionable tips.
         </p>
 
         <div
           className={`border-2 border-dashed rounded-xl p-6 text-center transition-all ${
-            dragActive ? 'border-purple-500 bg-purple-50' : 'border-gray-300 hover:border-purple-400 bg-gray-50/50'
+            dragActive 
+              ? 'border-purple-500 bg-purple-50 dark:bg-purple-950/30' 
+              : 'border-gray-300 dark:border-gray-700 hover:border-purple-400 bg-gray-50/50 dark:bg-gray-800/30'
           }`}
           onDragEnter={handleDrag}
           onDragLeave={handleDrag}
@@ -307,20 +309,20 @@ const ResumeAnalyzer = () => {
           />
 
           <label htmlFor="resume-file-input" className="cursor-pointer flex flex-col items-center justify-center">
-            <div className="w-12 h-12 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center mb-3">
+            <div className="w-12 h-12 bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400 rounded-full flex items-center justify-center mb-3">
               <Upload className="w-6 h-6" />
             </div>
             {selectedFile ? (
               <div className="text-center">
-                <p className="text-sm font-semibold text-purple-700">📎 {selectedFile.name}</p>
-                <p className="text-xs text-gray-400 mt-1">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                <p className="text-sm font-semibold text-purple-700 dark:text-purple-400">📎 {selectedFile.name}</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{(selectedFile.size / 1024).toFixed(1)} KB</p>
               </div>
             ) : (
               <div>
-                <p className="text-sm font-medium text-gray-700">
-                  <span className="text-purple-600 font-semibold underline">Click to choose</span> or drag and drop resume here
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  <span className="text-purple-600 dark:text-purple-400 font-semibold underline">Click to choose</span> or drag and drop resume here
                 </p>
-                <p className="text-xs text-gray-400 mt-1">Supports PDF, DOCX, JPG, PNG (Max 10MB)</p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Supports PDF, DOCX, JPG, PNG (Max 10MB)</p>
               </div>
             )}
           </label>
@@ -343,11 +345,11 @@ const ResumeAnalyzer = () => {
         <div className="mt-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           {students.length > 0 && (
             <div className="flex items-center gap-2 flex-1 max-w-md">
-              <label className="text-xs text-gray-500 whitespace-nowrap">Assign to Student (Optional):</label>
+              <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">Assign to Student (Optional):</label>
               <select
                 value={selectedStudentId}
                 onChange={(e) => setSelectedStudentId(e.target.value)}
-                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                className="w-full text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-purple-500 focus:outline-none"
               >
                 <option value="">-- General / Current User --</option>
                 {students.map((s) => (
@@ -367,7 +369,7 @@ const ResumeAnalyzer = () => {
                   setSelectedFile(null);
                   if (fileInputRef.current) fileInputRef.current.value = '';
                 }}
-                className="px-3 py-2 text-sm text-gray-500 hover:text-gray-700"
+                className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
               >
                 Cancel
               </button>
@@ -384,7 +386,7 @@ const ResumeAnalyzer = () => {
       </div>
 
       {/* Resumes List Table */}
-      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-6">
+      <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4">
           <div className="relative flex-1 max-w-md">
             <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
@@ -393,7 +395,7 @@ const ResumeAnalyzer = () => {
               placeholder="Search by student, name, or skill..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
+              className="w-full pl-9 pr-4 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none"
             />
           </div>
 
@@ -401,7 +403,7 @@ const ResumeAnalyzer = () => {
             <button
               onClick={() => setShowFilters(!showFilters)}
               className={`p-2 rounded-lg border text-sm flex items-center gap-1.5 transition-colors ${
-                showFilters ? 'bg-purple-50 text-purple-700 border-purple-300' : 'text-gray-600 border-gray-300 hover:bg-gray-50'
+                showFilters ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800' : 'text-gray-600 dark:text-gray-300 border-gray-300 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800'
               }`}
             >
               <Filter className="w-4 h-4" />
@@ -412,16 +414,16 @@ const ResumeAnalyzer = () => {
 
         {/* Filter Controls */}
         {showFilters && (
-          <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="mb-4 p-4 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Status</label>
               <select
                 value={filters.status}
                 onChange={(e) => {
                   setFilters({ status: e.target.value });
                   fetchResumes();
                 }}
-                className="w-full text-sm border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-purple-500"
+                className="w-full text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg p-2 focus:ring-2 focus:ring-purple-500"
               >
                 <option value="">All Statuses</option>
                 <option value="completed">Completed</option>
@@ -431,7 +433,7 @@ const ResumeAnalyzer = () => {
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Min ATS Score</label>
+              <label className="block text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">Min ATS Score</label>
               <input
                 type="number"
                 min="0"
@@ -442,9 +444,8 @@ const ResumeAnalyzer = () => {
                   setFilters({ minScore: e.target.value });
                   fetchResumes();
                 }}
-                className="w-full text-sm border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-purple-500"
-              >
-              </input>
+                className="w-full text-sm border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg p-2 focus:ring-2 focus:ring-purple-500"
+              />
             </div>
             <div className="flex items-end">
               <button
@@ -452,7 +453,7 @@ const ResumeAnalyzer = () => {
                   clearFilters();
                   fetchResumes();
                 }}
-                className="w-full p-2 bg-gray-200 hover:bg-gray-300 rounded-lg text-sm font-medium text-gray-700"
+                className="w-full p-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200"
               >
                 Reset Filters
               </button>
@@ -464,18 +465,18 @@ const ResumeAnalyzer = () => {
         {loading ? (
           <div className="flex justify-center items-center py-12">
             <RefreshCw className="w-6 h-6 text-purple-600 animate-spin" />
-            <span className="ml-2 text-sm text-gray-500">Loading resumes...</span>
+            <span className="ml-2 text-sm text-gray-500 dark:text-gray-400">Loading resumes...</span>
           </div>
         ) : filteredResumes.length === 0 ? (
           <div className="text-center py-12">
-            <FileText className="w-12 h-12 text-gray-300 mx-auto mb-2" />
-            <p className="text-gray-500 font-medium">No resumes found</p>
-            <p className="text-xs text-gray-400 mt-1">Upload a resume above to start AI analysis</p>
+            <FileText className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+            <p className="text-gray-500 dark:text-gray-400 font-medium">No resumes found</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Upload a resume above to start AI analysis</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50 text-gray-500 text-left font-medium">
+            <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-800 text-sm">
+              <thead className="bg-gray-50 dark:bg-gray-800/60 text-gray-500 dark:text-gray-400 text-left font-medium">
                 <tr>
                   <th className="py-3 px-4">Candidate / Student</th>
                   <th className="py-3 px-4">Skills Highlight</th>
@@ -485,68 +486,68 @@ const ResumeAnalyzer = () => {
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200">
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                 {filteredResumes.map((resume) => (
-                  <tr key={resume.id} className="hover:bg-purple-50/40 transition-colors">
+                  <tr key={resume.id} className="hover:bg-purple-50/40 dark:hover:bg-purple-950/20 transition-colors">
                     <td className="py-3.5 px-4">
-                      <div className="font-medium text-gray-900">{resume.name || 'Unnamed Candidate'}</div>
-                      <div className="text-xs text-gray-500">{resume.student_name || resume.email || `ID #${resume.student_id}`}</div>
+                      <div className="font-medium text-gray-900 dark:text-white">{resume.name || 'Unnamed Candidate'}</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">{resume.student_name || resume.email || `ID #${resume.student_id}`}</div>
                     </td>
                     <td className="py-3.5 px-4 max-w-xs truncate">
                       {Array.isArray(resume.skills) && resume.skills.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
                           {resume.skills.slice(0, 3).map((skill, idx) => (
-                            <span key={idx} className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded text-xs">
+                            <span key={idx} className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 px-2 py-0.5 rounded text-xs border border-transparent dark:border-gray-700">
                               {typeof skill === 'string' ? skill : skill.name || ''}
                             </span>
                           ))}
                           {resume.skills.length > 3 && (
-                            <span className="text-xs text-gray-400">+{resume.skills.length - 3}</span>
+                            <span className="text-xs text-gray-400 dark:text-gray-500">+{resume.skills.length - 3}</span>
                           )}
                         </div>
                       ) : (
-                        <span className="text-gray-400 text-xs">None detected</span>
+                        <span className="text-gray-400 dark:text-gray-500 text-xs">None detected</span>
                       )}
                     </td>
                     <td className="py-3.5 px-4">{getScoreBadge(resume.ats_score)}</td>
                     <td className="py-3.5 px-4">
                       <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
-                        resume.status === 'completed' ? 'bg-green-100 text-green-800' :
-                        resume.status === 'processing' ? 'bg-amber-100 text-amber-800' :
-                        'bg-red-100 text-red-800'
+                        resume.status === 'completed' ? 'bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-300' :
+                        resume.status === 'processing' ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300' :
+                        'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300'
                       }`}>
                         {resume.status || 'pending'}
                       </span>
                     </td>
-                    <td className="py-3.5 px-4 text-gray-500 text-xs">
+                    <td className="py-3.5 px-4 text-gray-500 dark:text-gray-400 text-xs">
                       {resume.created_at ? new Date(resume.created_at).toLocaleDateString() : 'N/A'}
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button
                           onClick={() => handleReanalyze(resume.id)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg"
+                          className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg"
                           title="Re-analyze & Score ATS"
                         >
                           <RefreshCw className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleViewDetails(resume.id)}
-                          className="p-1.5 text-purple-600 hover:bg-purple-50 rounded-lg"
+                          className="p-1.5 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 rounded-lg"
                           title="View Full Analysis"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleExport(resume.id, 'json')}
-                          className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                          className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 rounded-lg"
                           title="Export JSON"
                         >
                           <Download className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDelete(resume.id)}
-                          className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"
+                          className="p-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg"
                           title="Delete Resume"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -563,22 +564,22 @@ const ResumeAnalyzer = () => {
 
       {/* Full Resume Details Modal */}
       {activeResume && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-200">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-gray-200 dark:border-gray-800">
             {/* Modal Header */}
-            <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex items-center justify-between z-10">
+            <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 p-6 flex items-center justify-between z-10">
               <div>
-                <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                   <span>📄 {activeResume.name || 'Candidate Resume'}</span>
                   {getScoreBadge(activeResume.ats_score)}
                 </h2>
-                <p className="text-xs text-gray-500 mt-0.5">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {activeResume.email} • {activeResume.phone || 'No phone'}
                 </p>
               </div>
               <button
                 onClick={() => setActiveResume(null)}
-                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+                className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -587,17 +588,17 @@ const ResumeAnalyzer = () => {
             {/* Modal Body */}
             <div className="p-6 space-y-6">
               {/* ATS Score & Score Breakdown */}
-              <div className="bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 p-5 rounded-xl border border-purple-100">
+              <div className="bg-gradient-to-r from-purple-50 via-indigo-50 to-blue-50 dark:from-purple-950/30 dark:via-indigo-950/30 dark:to-blue-950/30 p-5 rounded-xl border border-purple-100 dark:border-purple-900/40">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   <div>
-                    <h3 className="text-sm font-semibold text-purple-900 uppercase tracking-wider">Overall ATS Readiness</h3>
-                    <p className="text-xs text-purple-700 mt-1">
+                    <h3 className="text-sm font-semibold text-purple-900 dark:text-purple-300 uppercase tracking-wider">Overall ATS Readiness</h3>
+                    <p className="text-xs text-purple-700 dark:text-purple-400 mt-1">
                       Calculated using industry standard keyword density, semantic headings, and skill taxonomy.
                     </p>
                   </div>
-                  <div className="text-center bg-white px-5 py-3 rounded-xl shadow-sm border border-purple-200">
-                    <p className="text-3xl font-extrabold text-purple-600">{Math.round(activeResume.ats_score || 0)}%</p>
-                    <p className="text-[10px] font-semibold uppercase text-gray-500 mt-0.5">
+                  <div className="text-center bg-white dark:bg-gray-800 px-5 py-3 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800">
+                    <p className="text-3xl font-extrabold text-purple-600 dark:text-purple-400">{Math.round(activeResume.ats_score || 0)}%</p>
+                    <p className="text-[10px] font-semibold uppercase text-gray-500 dark:text-gray-400 mt-0.5">
                       {(activeResume.ats_score || 0) >= 75 ? '🔥 Strong Match' : (activeResume.ats_score || 0) >= 50 ? '⚡ Average' : '⚠️ Needs Polish'}
                     </p>
                   </div>
@@ -606,31 +607,31 @@ const ResumeAnalyzer = () => {
 
               {/* Skills Found */}
               <div>
-                <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-2">
-                  <Award className="w-4 h-4 text-purple-600" />
+                <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-2">
+                  <Award className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                   Extracted Technical & Domain Skills ({activeResume.skills?.length || 0})
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {activeResume.skills && activeResume.skills.length > 0 ? (
                     activeResume.skills.map((skill, i) => (
-                      <span key={i} className="px-3 py-1 bg-purple-50 border border-purple-200 text-purple-700 text-xs rounded-lg font-medium">
+                      <span key={i} className="px-3 py-1 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-xs rounded-lg font-medium">
                         {typeof skill === 'string' ? skill : skill.name || JSON.stringify(skill)}
                       </span>
                     ))
                   ) : (
-                    <p className="text-xs text-gray-400">No skills recognized.</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">No skills recognized.</p>
                   )}
                 </div>
               </div>
 
               {/* Suggestions & Recommendations */}
               {activeResume.suggestions && activeResume.suggestions.length > 0 && (
-                <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-4">
-                  <h4 className="text-sm font-bold text-amber-900 flex items-center gap-2 mb-2">
-                    <Sparkles className="w-4 h-4 text-amber-600" />
+                <div className="bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-xl p-4">
+                  <h4 className="text-sm font-bold text-amber-900 dark:text-amber-300 flex items-center gap-2 mb-2">
+                    <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                     AI Resume Improvement Suggestions
                   </h4>
-                  <ul className="space-y-1.5 text-xs text-amber-900">
+                  <ul className="space-y-1.5 text-xs text-amber-900 dark:text-amber-200">
                     {activeResume.suggestions.map((sug, i) => (
                       <li key={i} className="flex items-start gap-1.5">
                         <span className="text-amber-500 font-bold">•</span>
@@ -644,15 +645,15 @@ const ResumeAnalyzer = () => {
               {/* Education */}
               {activeResume.education && activeResume.education.length > 0 && (
                 <div>
-                  <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-2">
-                    <GraduationCap className="w-4 h-4 text-indigo-600" />
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-2">
+                    <GraduationCap className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                     Education History
                   </h4>
                   <div className="space-y-2">
                     {activeResume.education.map((edu, idx) => (
-                      <div key={idx} className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs">
-                        <p className="font-semibold text-gray-800">{edu.degree || edu.institution || 'Degree'}</p>
-                        <p className="text-gray-500">{edu.institution || edu.branch || ''} {edu.year ? `(${edu.year})` : ''}</p>
+                      <div key={idx} className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 text-xs">
+                        <p className="font-semibold text-gray-800 dark:text-gray-200">{edu.degree || edu.institution || 'Degree'}</p>
+                        <p className="text-gray-500 dark:text-gray-400">{edu.institution || edu.branch || ''} {edu.year ? `(${edu.year})` : ''}</p>
                       </div>
                     ))}
                   </div>
@@ -662,16 +663,16 @@ const ResumeAnalyzer = () => {
               {/* Experience / Projects */}
               {activeResume.experience && activeResume.experience.length > 0 && (
                 <div>
-                  <h4 className="text-sm font-bold text-gray-900 flex items-center gap-2 mb-2">
-                    <Briefcase className="w-4 h-4 text-emerald-600" />
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-2">
+                    <Briefcase className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
                     Work Experience & Internships
                   </h4>
                   <div className="space-y-2">
                     {activeResume.experience.map((exp, idx) => (
-                      <div key={idx} className="p-3 bg-gray-50 rounded-lg border border-gray-200 text-xs">
-                        <p className="font-semibold text-gray-800">{exp.title || exp.role || 'Experience'}</p>
-                        <p className="text-gray-500">{exp.company || ''} {exp.duration ? `• ${exp.duration}` : ''}</p>
-                        {exp.description && <p className="text-gray-600 mt-1">{exp.description}</p>}
+                      <div key={idx} className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700 text-xs">
+                        <p className="font-semibold text-gray-800 dark:text-gray-200">{exp.title || exp.role || 'Experience'}</p>
+                        <p className="text-gray-500 dark:text-gray-400">{exp.company || ''} {exp.duration ? `• ${exp.duration}` : ''}</p>
+                        {exp.description && <p className="text-gray-600 dark:text-gray-300 mt-1">{exp.description}</p>}
                       </div>
                     ))}
                   </div>
@@ -680,7 +681,7 @@ const ResumeAnalyzer = () => {
             </div>
 
             {/* Modal Footer */}
-            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-4 flex justify-between items-center">
+            <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 p-4 flex justify-between items-center">
               <button
                 onClick={() => handleExport(activeResume.id, 'json')}
                 className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 flex items-center gap-1.5"
@@ -690,7 +691,7 @@ const ResumeAnalyzer = () => {
               </button>
               <button
                 onClick={() => setActiveResume(null)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-xs font-semibold"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg text-xs font-semibold"
               >
                 Close
               </button>

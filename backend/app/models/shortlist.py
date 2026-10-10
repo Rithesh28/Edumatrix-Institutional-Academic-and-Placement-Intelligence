@@ -28,15 +28,40 @@ class Shortlist(Base):
     company = relationship("Company", back_populates="shortlists")
     job_posting = relationship("JobPosting", back_populates="shortlists")
     shortlister = relationship("User", foreign_keys=[shortlisted_by])
-    
+
+    @property
+    def student_name(self):
+        return self.student.name if self.student else None
+
+    @property
+    def student_email(self):
+        return self.student.email if self.student else None
+
+    @property
+    def company_name(self):
+        return self.company.name if self.company else None
+
+    @property
+    def job_title(self):
+        return self.job_posting.title if self.job_posting else None
+
+    @property
+    def shortlister_name(self):
+        return self.shortlister.name if self.shortlister else None
+
+    @property
+    def status(self):
+        return "shortlisted"
+
     def __repr__(self):
         return f"<Shortlist {self.student_id} -> {self.company_id}>"
-    
+
     def to_dict(self):
         return {
             "id": self.id,
             "student_id": self.student_id,
             "student_name": self.student.name if self.student else None,
+            "student_email": self.student.email if self.student else None,
             "company_id": self.company_id,
             "company_name": self.company.name if self.company else None,
             "job_posting_id": self.job_posting_id,

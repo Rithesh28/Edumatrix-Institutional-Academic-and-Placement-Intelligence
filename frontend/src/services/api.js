@@ -50,6 +50,8 @@ export const chatAPI = {
   getMessages: (userId) => api.get(`/chat/messages/${userId}`),
   sendMessage: (receiver_id, content) => api.post('/chat/send', { receiver_id, content }),
   getAllUsers: () => api.get('/chat/users'),
+  // AI Assistant — dedicated endpoint with full grounding metadata
+  chatAI: (content) => api.post('/chat/ai', { content }),
 }
 
 // ============================================

@@ -8,9 +8,9 @@ Defines request/response validation for placement operations:
 - Shortlists
 """
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 from enum import Enum
 
 
@@ -88,6 +88,7 @@ class JobPostingBase(BaseModel):
     title: str = Field(..., max_length=255, description="Job title")
     description: Optional[str] = Field(None, description="Job description")
     required_skills: List[str] = Field(default=[], description="Required skills")
+    preferred_skills: List[str] = Field(default=[], description="Preferred skills")
     experience_level: Optional[str] = Field(None, max_length=50, description="Experience level required")
     cgpa_criteria: Optional[float] = Field(None, ge=0, le=10, description="Minimum CGPA requirement")
     branch_eligibility: List[str] = Field(default=[], description="Eligible branches")
@@ -95,7 +96,7 @@ class JobPostingBase(BaseModel):
     salary_range: Optional[str] = Field(None, max_length=100, description="Salary range")
     application_deadline: Optional[datetime] = Field(None, description="Application deadline")
     drive_date: Optional[datetime] = Field(None, description="Placement drive date")
-    status: JobStatus = Field(JobStatus.OPEN, description="Job status")
+    status: JobStatus = Field(JobStatus.DRAFT, description="Job status")
 
 
 class JobPostingCreate(JobPostingBase):
@@ -109,6 +110,7 @@ class JobPostingUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
     required_skills: Optional[List[str]] = None
+    preferred_skills: Optional[List[str]] = None
     experience_level: Optional[str] = Field(None, max_length=50)
     cgpa_criteria: Optional[float] = Field(None, ge=0, le=10)
     branch_eligibility: Optional[List[str]] = None
@@ -147,9 +149,14 @@ class ApplicationBase(BaseModel):
     notes: Optional[str] = Field(None, description="Additional notes")
 
 
-class ApplicationCreate(ApplicationBase):
+class ApplicationCreate(BaseModel):
     """Schema for creating an application."""
-    pass
+    student_id: Optional[int] = Field(None, description="Student user ID (server derives from authenticated user)")
+    job_posting_id: int = Field(..., description="Job posting ID")
+    status: Optional[ApplicationStatus] = Field(ApplicationStatus.APPLIED, description="Application status")
+    eligibility_score: Optional[float] = Field(None, ge=0, le=100, description="Untrusted client preview score - ignored by server")
+    match_percentage: Optional[float] = Field(None, ge=0, le=100, description="Untrusted client preview score - ignored by server")
+    notes: Optional[str] = Field(None, description="Additional notes")
 
 
 class ApplicationUpdate(BaseModel):
@@ -172,6 +179,32 @@ class ApplicationResponse(ApplicationBase):
     job_title: Optional[str] = None
     company_name: Optional[str] = None
     
+    # Authoritative Snapshot & Warning
+    match_snapshot: Optional[Dict[str, Any]] = Field(None, description="Immutable application-time snapshot")
+    has_low_match_warning: Optional[bool] = Field(None, description="Whether required skill match is below 50%")
+    low_match_warning: Optional[str] = Field(None, description="Low skill match warning message")
+
+    @field_validator("match_snapshot", mode="before")
+    @classmethod
+    def validate_match_snapshot(cls, v):
+        if v is not None and not isinstance(v, dict):
+            return None
+        return v
+
+    @field_validator("low_match_warning", mode="before")
+    @classmethod
+    def validate_low_match_warning(cls, v):
+        if v is not None and not isinstance(v, str):
+            return None
+        return v
+
+    @field_validator("has_low_match_warning", mode="before")
+    @classmethod
+    def validate_has_low_match_warning(cls, v):
+        if v is not None and not isinstance(v, bool):
+            return None
+        return v
+    
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -182,7 +215,7 @@ class ApplicationResponse(ApplicationBase):
 class ShortlistBase(BaseModel):
     """Base shortlist schema."""
     student_id: int = Field(..., description="Student user ID")
-    company_id: int = Field(..., description="Company ID")
+    company_id: Optional[int] = Field(None, description="Company ID (auto-resolved from job posting relationship if omitted)")
     job_posting_id: int = Field(..., description="Job posting ID")
     reason: Optional[str] = Field(None, description="Reason for shortlisting")
     shortlisted_by: Optional[int] = Field(None, description="User ID who shortlisted")
@@ -201,6 +234,7 @@ class ShortlistUpdate(BaseModel):
 class ShortlistResponse(ShortlistBase):
     """Schema for shortlist response."""
     id: int
+    company_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -274,14 +308,41 @@ class StudentEligibility(BaseModel):
     
     is_eligible: bool
     eligibility_reasons: List[str] = Field(default=[], description="Reasons for eligibility/ineligibility")
-    match_score: float = Field(..., ge=0, le=100, description="Overall match score")
+    match_score: Optional[float] = Field(None, ge=0, le=100, description="Overall match score (None if no skill requirements)")
     
-    skill_match: float = Field(..., ge=0, le=100, description="Skill match percentage")
+    skill_match: Optional[float] = Field(None, ge=0, le=100, description="Skill match percentage (None if no skill requirements)")
     cgpa_match: bool = Field(..., description="Whether CGPA criteria is met")
     branch_match: bool = Field(..., description="Whether branch criteria is met")
     
     missing_skills: List[str] = Field(default=[], description="Skills the student is missing")
     matched_skills: List[str] = Field(default=[], description="Skills the student has")
+    
+    # Detailed Breakdown for Phase 3.2 Matching Foundation
+    required_total: int = Field(default=0, description="Total required skills count")
+    required_matched: int = Field(default=0, description="Matched required skills count")
+    required_missing: int = Field(default=0, description="Missing required skills count")
+    preferred_total: int = Field(default=0, description="Total preferred skills count")
+    preferred_matched: int = Field(default=0, description="Matched preferred skills count")
+    preferred_missing: int = Field(default=0, description="Missing preferred skills count")
+    
+    required_score: Optional[float] = Field(default=None, ge=0, le=100, description="Required skills score percentage")
+    preferred_score: Optional[float] = Field(default=None, ge=0, le=100, description="Preferred skills score percentage")
+    overall_skill_match: Optional[float] = Field(default=None, ge=0, le=100, description="80% required + 20% preferred skill match score")
+    
+    matched_required_skills: List[str] = Field(default=[], description="Matched required skills")
+    matched_preferred_skills: List[str] = Field(default=[], description="Matched preferred skills")
+    missing_required_skills: List[str] = Field(default=[], description="Missing required skills")
+    missing_preferred_skills: List[str] = Field(default=[], description="Missing preferred skills")
+    semantic_matches: List[Dict[str, Any]] = Field(default=[], description="Details of semantic skill matches")
+    
+    # Low Match Warning (<50% required skill match)
+    has_low_match_warning: bool = Field(default=False, description="Whether required skill match is below 50%")
+    low_match_warning: Optional[str] = Field(default=None, description="Warning message for low skill match")
+    
+    # Traceability for Phase 3.2 Audit
+    resume_id: Optional[int] = Field(default=None, description="Resume ID used for matching")
+    resume_filename: Optional[str] = Field(default=None, description="Filename of resume used")
+    skill_sources: Dict[str, List[str]] = Field(default={}, description="Sources of student skills (profile_skills, resume_skills)")
 
 
 class JobMatchRequest(BaseModel):
@@ -300,3 +361,69 @@ class JobMatchResponse(BaseModel):
     eligible_students: List[StudentEligibility]
     
     top_candidates: List[StudentEligibility] = Field(default=[], description="Top 10 candidates")
+    all_candidates: List[StudentEligibility] = Field(default=[], description="All evaluated candidates including ineligible")
+
+
+# ============================================
+# JD PARSER SCHEMAS
+# ============================================
+
+class JdParseRequest(BaseModel):
+    """Schema for JD text parsing request."""
+    text: Optional[str] = Field(None, description="Raw job description text")
+
+
+class JdParseResponse(BaseModel):
+    """Schema for parsed JD extraction result."""
+    # Core job requirements (100% backward compatible)
+    title: Optional[str] = Field(None, description="Extracted job title")
+    description: Optional[str] = Field(None, description="Extracted job summary or description")
+    required_skills: List[str] = Field(default=[], description="Extracted required skills")
+    preferred_skills: List[str] = Field(default=[], description="Extracted preferred skills")
+    experience_level: Optional[str] = Field(None, description="Extracted experience level (e.g. fresher, 1-3 years)")
+    cgpa_criteria: Optional[float] = Field(None, description="Extracted minimum CGPA criteria (0-10 scale)")
+    branch_eligibility: List[str] = Field(default=[], description="Extracted eligible branches")
+    location: Optional[str] = Field(None, description="Extracted job location")
+    salary_range: Optional[str] = Field(None, description="Extracted salary or CTC range")
+    raw_text_length: int = Field(default=0, description="Length of processed JD text")
+
+    # General-purpose extended fields (Phase 3.2 Step C Improvement)
+    company_name: Optional[str] = Field(None, description="Extracted company or organization name")
+    job_type: Optional[str] = Field(None, description="Job / employment type (e.g. Full-Time, Internship, Internship + Full-Time)")
+    degree_eligibility: List[str] = Field(default=[], description="Eligible degrees (e.g. B.E, B.Tech, M.Tech, MCA)")
+    graduation_years: List[Union[int, str]] = Field(default=[], description="Eligible passing out / batch years (e.g. ['2025', '2026'])")
+    
+    # Academic percentage criteria across tiers
+    academic_percentages: Optional[Dict[str, Optional[float]]] = Field(
+        default=None,
+        description="Minimum percentage requirements across academic tiers: tenth, twelfth, diploma, degree, postgraduate"
+    )
+    backlog_criteria: Optional[str] = Field(None, description="Extracted backlog / arrear criteria")
+    certifications: List[str] = Field(default=[], description="Preferred or required professional certifications")
+    
+    # Compensation and Staged Package Breakdown
+    compensation_details: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Structured compensation details including currency, stipend, CTC, and staged progression"
+    )
+    
+    # Dates and Deadlines
+    application_deadline: Optional[str] = Field(None, description="Extracted registration / application deadline")
+    drive_date: Optional[str] = Field(None, description="Extracted placement drive date")
+    joining_date: Optional[str] = Field(None, description="Extracted joining or commencement date")
+    
+    # Workplace & Agreements
+    work_mode: Optional[str] = Field(None, description="Work mode (On-site, Hybrid, Remote)")
+    bond_details: Optional[str] = Field(None, description="Service agreement or bond duration/terms")
+    selection_rounds: List[str] = Field(default=[], description="Selection / interview rounds")
+    application_instructions: Optional[str] = Field(None, description="Instructions or portal link for applying")
+    
+    # Verification, Auditability & Quality Assurance
+    review_flags: List[str] = Field(
+        default=[],
+        description="Actionable review warnings and ambiguity flags for Placement Officer confirmation"
+    )
+    field_evidence: Dict[str, Any] = Field(
+        default={},
+        description="Source text snippets justifying each extracted field for full auditability"
+    )

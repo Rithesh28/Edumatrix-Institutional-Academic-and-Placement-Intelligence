@@ -59,12 +59,28 @@ const formatFileSize = (bytes) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-const FileCard = ({ file, onDelete, onDownload, onEdit }) => {
+const FileCard = ({ file, onDelete, onDownload, onEdit, isSelected, onToggleSelect }) => {
   const { id, filename, title, file_type, file_size, mime_type, created_at, department } = file;
 
   return (
-    <div className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-md transition-shadow p-4">
-      <div className="flex items-start space-x-4">
+    <div className={`bg-white dark:bg-gray-900 rounded-lg shadow-sm border transition-all p-4 ${
+      isSelected 
+        ? 'border-indigo-500 ring-2 ring-indigo-500/30 bg-indigo-50/10 dark:bg-indigo-950/20' 
+        : 'border-gray-200 dark:border-gray-800 hover:shadow-md'
+    }`}>
+      <div className="flex items-start space-x-3">
+        {/* Selection Checkbox */}
+        <div className="pt-1 flex-shrink-0">
+          <input
+            type="checkbox"
+            checked={!!isSelected}
+            onChange={() => onToggleSelect?.(id)}
+            onClick={(e) => e.stopPropagation()}
+            className="w-4 h-4 text-indigo-600 border-gray-300 dark:border-gray-700 rounded focus:ring-indigo-500 cursor-pointer bg-white dark:bg-gray-800"
+            aria-label={`Select ${title || filename}`}
+          />
+        </div>
+
         {/* Icon */}
         <div className="flex-shrink-0">
           {getFileIcon(mime_type, filename)}
@@ -73,15 +89,15 @@ const FileCard = ({ file, onDelete, onDownload, onEdit }) => {
         {/* Content */}
         <div className="flex-1 min-w-0">
           <Link to={`/files/${id}`} className="block hover:underline">
-            <h3 className="text-sm font-medium text-gray-900 truncate">
+            <h3 className="text-sm font-medium text-gray-900 dark:text-white truncate">
               {title || filename}
             </h3>
           </Link>
           
           <div className="flex items-center space-x-2 mt-1">
-            <span className="text-xs text-gray-500 truncate">{filename}</span>
-            <span className="text-xs text-gray-400">•</span>
-            <span className="text-xs text-gray-500">{formatFileSize(file_size)}</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400 truncate">{filename}</span>
+            <span className="text-xs text-gray-400 dark:text-gray-500">•</span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">{formatFileSize(file_size)}</span>
           </div>
 
           <div className="flex items-center space-x-2 mt-2">
@@ -89,10 +105,10 @@ const FileCard = ({ file, onDelete, onDownload, onEdit }) => {
               {file_type.replace('_', ' ')}
             </span>
             {department && (
-              <span className="text-xs text-gray-500">{department}</span>
+              <span className="text-xs text-gray-500 dark:text-gray-400">{department}</span>
             )}
             {created_at && (
-              <span className="text-xs text-gray-400">
+              <span className="text-xs text-gray-400 dark:text-gray-500">
                 {formatDistanceToNow(new Date(created_at), { addSuffix: true })}
               </span>
             )}
@@ -103,21 +119,21 @@ const FileCard = ({ file, onDelete, onDownload, onEdit }) => {
         <div className="flex items-center space-x-1">
           <button
             onClick={() => onDownload?.(id, filename)}
-            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+            className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
             title="Download"
           >
             <Download className="w-4 h-4" />
           </button>
           <button
             onClick={() => onEdit?.(id)}
-            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100"
+            className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800"
             title="Edit"
           >
             <Edit2 className="w-4 h-4" />
           </button>
           <button
             onClick={() => onDelete?.(id)}
-            className="p-1.5 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50"
+            className="p-1.5 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-50 dark:hover:bg-red-950/30"
             title="Delete"
           >
             <Trash2 className="w-4 h-4" />

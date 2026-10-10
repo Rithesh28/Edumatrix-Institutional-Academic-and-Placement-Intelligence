@@ -14,6 +14,7 @@ from .company import Company
 from .job_posting import JobPosting, JobStatus
 from .application import Application, ApplicationStatus
 from .shortlist import Shortlist
+from .audit_log import AuditLog
 
 __all__ = [
     "User",
@@ -51,5 +52,6 @@ __all__ = [
     'JobStatus',
     'Application',
     'ApplicationStatus',
-    'Shortlist'
+    'Shortlist',
+    'AuditLog'
 ]

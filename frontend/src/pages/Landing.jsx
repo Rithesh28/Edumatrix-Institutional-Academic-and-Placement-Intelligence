@@ -1,10 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { useThemeStore } from '../store/themeStore';
+import ThemeToggle from '../components/ThemeToggle';
 
 const Landing = () => {
   const navigate = useNavigate();
   const { token, user } = useAuthStore();
+  const { isDark, toggleTheme } = useThemeStore();
   const hasRedirected = useRef(false);
 
   // Redirect if already logged in - ONLY ONCE
@@ -44,14 +47,6 @@ const Landing = () => {
     return () => observer.disconnect();
   }, []);
 
-  const toggleTheme = () => {
-    const current = document.documentElement.getAttribute('data-theme');
-    document.documentElement.setAttribute(
-      'data-theme',
-      current === 'dark' ? 'light' : 'dark'
-    );
-  };
-
   useEffect(() => {
     const container = document.getElementById('particles');
     if (!container) return;
@@ -86,7 +81,17 @@ const Landing = () => {
         <span className="tag">Chats</span>
         <span className="tag">Documents</span>
         <span className="tag">Profile</span>
-        <div className="theme-toggle" id="themeToggle" role="button" onClick={toggleTheme}></div>
+        <div 
+          className="theme-toggle" 
+          id="themeToggle" 
+          role="button" 
+          aria-label={`Toggle theme, currently ${isDark ? 'Dark' : 'Light'} mode`}
+          title={`Switch to ${isDark ? 'Light' : 'Dark'} mode`}
+          onClick={toggleTheme}
+          style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        >
+          {isDark ? '🌙' : '☀️'}
+        </div>
       </div>
 
       {/* Hero Section */}

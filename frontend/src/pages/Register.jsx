@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
+import ThemeToggle from '../components/ThemeToggle'
 import toast from 'react-hot-toast'
 
 function Register() {
@@ -69,16 +70,21 @@ function Register() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 py-12 px-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
+    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-950 dark:via-gray-900 dark:to-indigo-950 py-12 px-4 relative transition-colors duration-200">
+      {/* Top Header Theme Toggle */}
+      <div className="absolute top-4 right-4 sm:top-6 sm:right-6 z-20">
+        <ThemeToggle id="register-theme-toggle" />
+      </div>
+
+      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-800 w-full max-w-md p-8 relative transition-colors duration-200">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-blue-600">EduMatrix</h1>
-          <p className="text-gray-600 mt-2">Create your account</p>
+          <h1 className="text-3xl font-bold text-blue-600 dark:text-blue-400">EduMatrix</h1>
+          <p className="text-gray-600 dark:text-gray-400 mt-2">Create your account</p>
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-5">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
               Full Name
             </label>
             <input

@@ -132,34 +132,34 @@ const LecturerExamDuties = () => {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">My Exam Duties</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">My Exam Duties</h1>
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-sm text-gray-500">Total</p>
-          <p className="text-2xl font-bold text-blue-600">{stats.total}</p>
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Total</p>
+          <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{stats.total}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-sm text-gray-500">Pending</p>
-          <p className="text-2xl font-bold text-yellow-600">{stats.pending}</p>
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Pending</p>
+          <p className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{stats.pending}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-sm text-gray-500">Confirmed</p>
-          <p className="text-2xl font-bold text-green-600">{stats.confirmed}</p>
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Confirmed</p>
+          <p className="text-2xl font-bold text-green-600 dark:text-green-400">{stats.confirmed}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-sm border border-gray-200">
-          <p className="text-sm text-gray-500">Completed</p>
-          <p className="text-2xl font-bold text-purple-600">{stats.completed}</p>
+        <div className="bg-white dark:bg-gray-900 p-4 rounded-lg shadow-sm border border-gray-200 dark:border-gray-800">
+          <p className="text-sm text-gray-500 dark:text-gray-400">Completed</p>
+          <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">{stats.completed}</p>
         </div>
       </div>
 
       {/* Conflicts Warning */}
       {conflicts.length > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-4 flex items-center justify-between">
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4 flex items-center justify-between">
           <div>
-            <span className="text-red-700 font-medium">⚠️ {conflicts.length} conflict{conflicts.length > 1 ? 's' : ''} detected</span>
-            <span className="text-red-600 text-sm ml-2">You have overlapping duties</span>
+            <span className="text-red-700 dark:text-red-300 font-medium">⚠️ {conflicts.length} conflict{conflicts.length > 1 ? 's' : ''} detected</span>
+            <span className="text-red-600 dark:text-red-400 text-sm ml-2">You have overlapping duties</span>
           </div>
           <button
             onClick={() => setShowConflicts(!showConflicts)}
@@ -193,7 +193,7 @@ const LecturerExamDuties = () => {
             className={`px-3 py-1 text-sm rounded-lg transition-colors ${
               filter === status
                 ? 'bg-blue-600 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
             }`}
           >
             {status.charAt(0).toUpperCase() + status.slice(1)}

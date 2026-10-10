@@ -62,6 +62,29 @@ export const deleteJobPosting = async (id) => {
   return response.data;
 };
 
+export const publishJobPosting = async (id, confirmNoSkills = false) => {
+  const response = await api.post(`/placement/jobs/${id}/publish`, null, {
+    params: { confirm_no_skills: confirmNoSkills }
+  });
+  return response.data;
+};
+
+export const parseJdText = async (text) => {
+  const response = await api.post('/placement/jobs/parse-jd', { text });
+  return response.data;
+};
+
+export const uploadJdFile = async (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await api.post('/placement/jobs/upload-jd', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return response.data;
+};
+
 // ============================================
 // APPLICATION ENDPOINTS
 // ============================================

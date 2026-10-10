@@ -22,15 +22,17 @@ from ..models.job_posting import JobPosting, JobStatus
 from ..models.application import Application, ApplicationStatus
 from ..models.shortlist import Shortlist
 from ..models.user import User, UserRole
-from ..models.profile import StudentProfile
+from ..models.profile import StudentProfile, Skill
+from ..models.resume import Resume
 from ..schemas.placement import (
     CompanyCreate, CompanyUpdate,
     JobPostingCreate, JobPostingUpdate,
-    ApplicationCreate, ApplicationUpdate,
+    ApplicationCreate, ApplicationUpdate, ApplicationResponse,
     ShortlistCreate, ShortlistUpdate,
     StudentEligibility, JobMatchRequest, JobMatchResponse,
     PlacementStatistics, CompanyStatistics, StudentPlacementStatus
 )
+from .job_matching_service import job_matching_service
 
 logger = logging.getLogger(__name__)
 
@@ -105,12 +107,13 @@ class PlacementService:
     # ============================================
     
     def create_job_posting(self, db: Session, job_data: JobPostingCreate, created_by: int) -> JobPosting:
-        """Create a new job posting."""
+        """Create a new job posting (defaults to DRAFT status)."""
         job = JobPosting(
             company_id=job_data.company_id,
             title=job_data.title,
             description=job_data.description,
             required_skills=job_data.required_skills,
+            preferred_skills=getattr(job_data, 'preferred_skills', []),
             experience_level=job_data.experience_level,
             cgpa_criteria=job_data.cgpa_criteria,
             branch_eligibility=job_data.branch_eligibility,
@@ -118,13 +121,34 @@ class PlacementService:
             salary_range=job_data.salary_range,
             application_deadline=job_data.application_deadline,
             drive_date=job_data.drive_date,
-            status=job_data.status,
+            status=job_data.status if job_data.status else JobStatus.DRAFT,
             created_by=created_by
         )
         db.add(job)
         db.commit()
         db.refresh(job)
         logger.info(f"✅ Job posting created: {job.title} (ID: {job.id})")
+        return job
+
+    def publish_job_posting(self, db: Session, job_id: int, confirm_no_skills: bool = False) -> Optional[JobPosting]:
+        """Publish a draft job posting (status -> OPEN). Validates that skills exist unless confirmed."""
+        job = self.get_job_posting(db, job_id)
+        if not job:
+            return None
+
+        # Validate that job has meaningful skill requirements unless confirmed
+        has_required = bool(job.required_skills and len(job.required_skills) > 0)
+        has_preferred = bool(job.preferred_skills and len(job.preferred_skills) > 0)
+        if not has_required and not has_preferred and not confirm_no_skills:
+            raise ValueError(
+                "Job cannot be published without skill requirements unless explicitly confirmed with confirm_no_skills=True"
+            )
+
+        job.status = JobStatus.OPEN
+        job.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(job)
+        logger.info(f"📢 Job posting published: {job.title} (ID: {job.id})")
         return job
     
     def get_job_posting(self, db: Session, job_id: int) -> Optional[JobPosting]:
@@ -178,20 +202,129 @@ class PlacementService:
     # APPLICATION MANAGEMENT
     # ============================================
     
-    def create_application(self, db: Session, app_data: ApplicationCreate) -> Application:
-        """Create a new application."""
+    def create_application(
+        self,
+        db: Session,
+        app_data: ApplicationCreate,
+        current_user: Optional[User] = None
+    ) -> Application:
+        """
+        Create a new application with server-authoritative scoring, eligibility validation,
+        and immutable snapshot persistence.
+        """
+        from sqlalchemy.exc import IntegrityError
+        from datetime import timezone
+
+        # 1. Determine and authenticate student identity
+        if current_user:
+            if current_user.role == UserRole.STUDENT:
+                student_id = current_user.id
+            elif current_user.role in [UserRole.ADMIN, UserRole.PLACEMENT_OFFICER]:
+                student_id = app_data.student_id if app_data.student_id else current_user.id
+            else:
+                student_id = current_user.id
+        else:
+            if not app_data.student_id:
+                raise ValueError("Student ID is required")
+            student_id = app_data.student_id
+
+        student = db.query(User).filter(User.id == student_id).first()
+        if not student:
+            raise ValueError(f"Student with ID {student_id} not found")
+
+        # 2. Fetch and validate job posting
+        job = self.get_job_posting(db, app_data.job_posting_id)
+        if not job:
+            raise ValueError(f"Job posting with ID {app_data.job_posting_id} not found")
+
+        if job.status != JobStatus.OPEN:
+            raise ValueError("Job posting is not open for applications")
+
+        # Check deadline if configured
+        if job.application_deadline:
+            now_utc = datetime.now(timezone.utc)
+            deadline = job.application_deadline
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            if now_utc > deadline:
+                raise ValueError("Application deadline has passed")
+
+        # 3. Prevent duplicate applications (application-level check)
+        existing = db.query(Application).filter(
+            Application.student_id == student_id,
+            Application.job_posting_id == job.id
+        ).first()
+        if existing:
+            raise ValueError("You have already applied for this job")
+
+        # 4. Server-Authoritative Matching and Eligibility
+        eligibility = job_matching_service.match_student_to_job(db, student, job)
+
+        # Reject submission when an explicit eligibility requirement fails
+        if not eligibility.is_eligible:
+            reasons_str = "; ".join(eligibility.eligibility_reasons) if eligibility.eligibility_reasons else "Candidate does not meet explicit eligibility criteria"
+            raise ValueError(f"Application rejected: {reasons_str}")
+
+        # 5. Build immutable application-time snapshot
+        skill_res = job_matching_service.get_student_skills(db, student_id)
+        candidate_skills = skill_res[0] if skill_res else []
+
+        match_snapshot = {
+            "snapshot_version": "1.0",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "student_id": student.id,
+            "student_name": student.name,
+            "branch": eligibility.branch,
+            "cgpa": eligibility.cgpa,
+            "resume_id": eligibility.resume_id,
+            "resume_filename": eligibility.resume_filename,
+            "skill_sources": eligibility.skill_sources,
+            "candidate_skills": candidate_skills,
+            "job_required_skills": job.required_skills or [],
+            "job_preferred_skills": job.preferred_skills or [],
+            "matched_required_skills": eligibility.matched_required_skills,
+            "missing_required_skills": eligibility.missing_required_skills,
+            "matched_preferred_skills": eligibility.matched_preferred_skills,
+            "missing_preferred_skills": eligibility.missing_preferred_skills,
+            "semantic_matches": eligibility.semantic_matches,
+            "required_score": eligibility.required_score,
+            "preferred_score": eligibility.preferred_score,
+            "match_percentage": eligibility.match_score,
+            "is_eligible": eligibility.is_eligible,
+            "eligibility_reasons": eligibility.eligibility_reasons,
+            "has_low_match_warning": eligibility.has_low_match_warning,
+            "low_match_warning": eligibility.low_match_warning,
+            "cgpa_match": eligibility.cgpa_match,
+            "branch_match": eligibility.branch_match,
+            "job_criteria": {
+                "cgpa_criteria": job.cgpa_criteria,
+                "branch_eligibility": job.branch_eligibility or [],
+                "experience_level": job.experience_level,
+            }
+        }
+
+        # 6. Persist application with server-authoritative scores
+        authoritative_match_score = eligibility.match_score
+        authoritative_eligibility_score = eligibility.match_score if eligibility.match_score is not None else 100.0
+
         application = Application(
-            student_id=app_data.student_id,
-            job_posting_id=app_data.job_posting_id,
-            status=app_data.status,
-            eligibility_score=app_data.eligibility_score,
-            match_percentage=app_data.match_percentage,
-            notes=app_data.notes
+            student_id=student_id,
+            job_posting_id=job.id,
+            status=app_data.status or ApplicationStatus.APPLIED,
+            eligibility_score=authoritative_eligibility_score,
+            match_percentage=authoritative_match_score,
+            notes=app_data.notes,
+            match_snapshot=match_snapshot
         )
         db.add(application)
-        db.commit()
-        db.refresh(application)
-        logger.info(f"✅ Application created: Student {app_data.student_id} -> Job {app_data.job_posting_id}")
+        try:
+            db.commit()
+            db.refresh(application)
+        except IntegrityError:
+            db.rollback()
+            raise ValueError("You have already applied for this job")
+
+        logger.info(f"✅ Authoritative Application created: Student {student_id} -> Job {job.id} (Score: {authoritative_match_score}%)")
         return application
     
     def get_application(self, db: Session, app_id: int) -> Optional[Application]:
@@ -240,20 +373,51 @@ class PlacementService:
     # SHORTLIST MANAGEMENT
     # ============================================
     
-    def create_shortlist(self, db: Session, shortlist_data: ShortlistCreate) -> Shortlist:
-        """Create a new shortlist entry."""
+    def create_shortlist(
+        self,
+        db: Session,
+        shortlist_data: ShortlistCreate,
+        current_user_id: Optional[int] = None
+    ) -> Shortlist:
+        """Create a new shortlist entry with authoritative validation."""
+        # 1. Fetch and validate job posting
+        job = db.query(JobPosting).filter(JobPosting.id == shortlist_data.job_posting_id).first()
+        if not job:
+            raise ValueError(f"Job posting with ID {shortlist_data.job_posting_id} not found")
+
+        # 2. Authoritative Company Relationship: Verify or auto-resolve from JobPosting
+        if shortlist_data.company_id and shortlist_data.company_id != job.company_id:
+            raise ValueError(
+                f"Company ID {shortlist_data.company_id} does not match job posting's company ({job.company_id})"
+            )
+        resolved_company_id = job.company_id
+
+        # 3. Fetch and validate student
+        student = db.query(User).filter(User.id == shortlist_data.student_id, User.role == UserRole.STUDENT).first()
+        if not student:
+            raise ValueError(f"Student with ID {shortlist_data.student_id} not found")
+
+        # 4. Check for duplicate shortlisting
+        existing = db.query(Shortlist).filter(
+            Shortlist.student_id == shortlist_data.student_id,
+            Shortlist.job_posting_id == shortlist_data.job_posting_id
+        ).first()
+        if existing:
+            raise ValueError(f"Student {student.name or shortlist_data.student_id} is already shortlisted for this job")
+
+        # 5. Create shortlist entry
         shortlist = Shortlist(
             student_id=shortlist_data.student_id,
-            company_id=shortlist_data.company_id,
-            job_posting_id=shortlist_data.job_posting_id,
+            company_id=resolved_company_id,
+            job_posting_id=job.id,
             reason=shortlist_data.reason,
-            shortlisted_by=shortlist_data.shortlisted_by
+            shortlisted_by=shortlist_data.shortlisted_by or current_user_id
         )
         db.add(shortlist)
         db.commit()
         db.refresh(shortlist)
-        
-        # Update application status to SHORTLISTED
+
+        # 6. Update application status to SHORTLISTED if an application exists
         application = db.query(Application).filter(
             Application.student_id == shortlist_data.student_id,
             Application.job_posting_id == shortlist_data.job_posting_id
@@ -262,8 +426,8 @@ class PlacementService:
             application.status = ApplicationStatus.SHORTLISTED
             application.updated_at = datetime.utcnow()
             db.commit()
-        
-        logger.info(f"✅ Student {shortlist_data.student_id} shortlisted for job {shortlist_data.job_posting_id}")
+
+        logger.info(f"✅ Student {shortlist_data.student_id} shortlisted for job {job.id} at company {resolved_company_id}")
         return shortlist
     
     def get_shortlists(self, db: Session, student_id: Optional[int] = None,
@@ -308,75 +472,18 @@ class PlacementService:
         return True
     
     # ============================================
-    # ELIGIBILITY & MATCHING (Simplified - No Skill Model)
+    # ELIGIBILITY & MATCHING
     # ============================================
     
     def check_student_eligibility(self, db: Session, student_id: int, job_posting_id: int) -> StudentEligibility:
-        """Check if a student is eligible for a job posting."""
+        """Check if a student is eligible for a job posting with normalized and semantic skill matching."""
         student = db.query(User).filter(User.id == student_id).first()
         job = self.get_job_posting(db, job_posting_id)
         
         if not student or not job:
             raise ValueError("Student or job not found")
         
-        # Get student profile
-        profile = db.query(StudentProfile).filter(StudentProfile.user_id == student_id).first()
-        
-        # Get student skills from profile (if available)
-        student_skills = []
-        if profile and hasattr(profile, 'skills') and profile.skills:
-            student_skills = profile.skills if isinstance(profile.skills, list) else []
-        
-        # Get skills from job posting
-        required_skills = job.required_skills or []
-        
-        # Calculate scores
-        is_eligible = True
-        eligibility_reasons = []
-        
-        # Check CGPA
-        cgpa_match = True
-        if job.cgpa_criteria and profile and hasattr(profile, 'cgpa'):
-            cgpa_match = profile.cgpa >= job.cgpa_criteria
-            if not cgpa_match:
-                is_eligible = False
-                eligibility_reasons.append(f"CGPA {profile.cgpa} < {job.cgpa_criteria}")
-        
-        # Check branch
-        branch_match = True
-        if job.branch_eligibility and profile and hasattr(profile, 'branch'):
-            branch_match = profile.branch in job.branch_eligibility
-            if not branch_match:
-                is_eligible = False
-                eligibility_reasons.append(f"Branch {profile.branch} not eligible")
-        
-        # Check skills
-        matched_skills = [s for s in required_skills if s in student_skills]
-        missing_skills = [s for s in required_skills if s not in student_skills]
-        
-        skill_match = (len(matched_skills) / len(required_skills) * 100) if required_skills else 100
-        if skill_match < 50 and required_skills:
-            is_eligible = False
-            eligibility_reasons.append(f"Skill match {skill_match:.1f}% < 50%")
-        
-        # Calculate overall match score
-        match_score = (skill_match * 0.5) + (100 if cgpa_match else 0) * 0.25 + (100 if branch_match else 0) * 0.25
-        
-        return StudentEligibility(
-            student_id=student.id,
-            student_name=student.name,
-            email=student.email,
-            branch=profile.branch if profile and hasattr(profile, 'branch') else "N/A",
-            cgpa=profile.cgpa if profile and hasattr(profile, 'cgpa') else 0,
-            is_eligible=is_eligible,
-            eligibility_reasons=eligibility_reasons,
-            match_score=min(match_score, 100),
-            skill_match=skill_match,
-            cgpa_match=cgpa_match,
-            branch_match=branch_match,
-            missing_skills=missing_skills,
-            matched_skills=matched_skills
-        )
+        return job_matching_service.match_student_to_job(db, student, job)
     
     def match_students_for_job(self, db: Session, request: JobMatchRequest) -> JobMatchResponse:
         """Match students for a job posting."""
@@ -392,16 +499,19 @@ class PlacementService:
         
         # Evaluate each student
         eligible_students = []
+        all_candidates = []
         for student in students:
             try:
                 eligibility = self.check_student_eligibility(db, student.id, request.job_posting_id)
+                all_candidates.append(eligibility)
                 if eligibility.is_eligible:
                     eligible_students.append(eligibility)
             except Exception as e:
                 logger.error(f"Error checking eligibility for student {student.id}: {str(e)}")
         
-        # Sort by match score (highest first)
-        eligible_students.sort(key=lambda x: x.match_score, reverse=True)
+        # Sort by match score (highest first, None scores at end)
+        eligible_students.sort(key=lambda x: (x.match_score if x.match_score is not None else -1.0), reverse=True)
+        all_candidates.sort(key=lambda x: (x.match_score if x.match_score is not None else -1.0), reverse=True)
         
         return JobMatchResponse(
             job_posting_id=job.id,
@@ -409,7 +519,8 @@ class PlacementService:
             company_name=job.company.name if job.company else "Unknown",
             total_eligible=len(eligible_students),
             eligible_students=eligible_students,
-            top_candidates=eligible_students[:10]
+            top_candidates=eligible_students[:10],
+            all_candidates=all_candidates
         )
     
     # ============================================

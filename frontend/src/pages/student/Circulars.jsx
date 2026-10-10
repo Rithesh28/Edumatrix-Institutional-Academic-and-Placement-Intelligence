@@ -114,13 +114,13 @@ const StudentCirculars = () => {
     const isPreviewable = true // Allow preview for all files
 
     return (
-      <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
+      <div className="mt-3 p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-800/50">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2">
-            <span className="text-sm font-medium text-gray-700">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
               📎 {fileDetails.filename || 'Attachment'}
             </span>
-            <span className="text-xs text-gray-500">
+            <span className="text-xs text-gray-500 dark:text-gray-400">
               ({fileDetails.file_size ? Math.round(fileDetails.file_size / 1024) : 0} KB)
             </span>
           </div>
@@ -132,14 +132,14 @@ const StudentCirculars = () => {
                 fileDetails.mime_type
               )}
               disabled={previewing}
-              className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200 disabled:opacity-50"
+              className="px-3 py-1 text-xs bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 rounded hover:bg-blue-200 dark:hover:bg-blue-800 disabled:opacity-50 cursor-pointer"
             >
               {previewing ? '⏳ Loading...' : '👁️ Preview'}
             </button>
             <button
               onClick={() => handleDownload(circ.file_id, fileDetails.filename)}
               disabled={downloading}
-              className="px-3 py-1 text-xs bg-green-100 text-green-700 rounded hover:bg-green-200 disabled:opacity-50"
+              className="px-3 py-1 text-xs bg-green-100 dark:bg-green-900/60 text-green-700 dark:text-green-300 rounded hover:bg-green-200 dark:hover:bg-green-800 disabled:opacity-50 cursor-pointer"
             >
               {downloading ? '⏳ Downloading...' : '⬇️ Download'}
             </button>
@@ -150,40 +150,40 @@ const StudentCirculars = () => {
   }
 
   if (loading) {
-    return <div className="text-center py-10">Loading circulars...</div>
+    return <div className="text-center py-10 text-gray-500 dark:text-gray-400">Loading circulars...</div>
   }
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">📢 Circulars</h1>
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">📢 Circulars</h1>
 
       <div className="space-y-4">
         {circulars.length === 0 ? (
-          <p className="text-gray-500 text-center py-10">No circulars yet</p>
+          <p className="text-gray-500 dark:text-gray-400 text-center py-10">No circulars yet</p>
         ) : (
           circulars.map((circ) => (
-            <div key={circ.id} className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div key={circ.id} className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-4">
               <div className="flex items-start space-x-2">
                 <span className={`text-xs px-2 py-1 rounded-full ${
-                  circ.type === 'exam' ? 'bg-red-100 text-red-700' :
-                  circ.type === 'assignment' ? 'bg-yellow-100 text-yellow-700' :
-                  'bg-blue-100 text-blue-700'
+                  circ.type === 'exam' ? 'bg-red-100 dark:bg-red-950/60 text-red-700 dark:text-red-300' :
+                  circ.type === 'assignment' ? 'bg-yellow-100 dark:bg-yellow-950/60 text-yellow-700 dark:text-yellow-300' :
+                  'bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300'
                 }`}>
                   {circ.type.toUpperCase()}
                 </span>
                 <div className="flex-1">
-                  <h3 className="text-lg font-semibold text-gray-900">{circ.title}</h3>
-                  <p className="text-gray-600 mt-1 whitespace-pre-wrap">{circ.content}</p>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{circ.title}</h3>
+                  <p className="text-gray-600 dark:text-gray-300 mt-1 whitespace-pre-wrap">{circ.content}</p>
                   
                   {/* File Attachment */}
                   {renderFileAttachment(circ)}
                   
                   {circ.due_date && (
-                    <p className="text-sm text-red-600 mt-2">
+                    <p className="text-sm text-red-600 dark:text-red-400 mt-2">
                       📅 Due: {new Date(circ.due_date).toLocaleDateString()}
                     </p>
                   )}
-                  <p className="text-xs text-gray-400 mt-2">
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
                     Posted: {new Date(circ.created_at).toLocaleString()}
                     {circ.lecturer_name && ` by ${circ.lecturer_name}`}
                   </p>

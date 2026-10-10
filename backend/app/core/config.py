@@ -25,6 +25,13 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     HUGGINGFACE_API_KEY: str = os.getenv("HUGGINGFACE_API_KEY", "")
+
+    # AI Chat Assistant Configuration
+    AI_MODEL_NAME: str = os.getenv("AI_MODEL_NAME", "Qwen/Qwen2.5-0.5B-Instruct")
+    AI_MODEL_PATH: str = os.getenv("AI_MODEL_PATH", "")
+    AI_MAX_NEW_TOKENS: int = int(os.getenv("AI_MAX_NEW_TOKENS", "256"))
+    AI_TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.2"))
+    AI_ASSISTANT_NAME: str = os.getenv("AI_ASSISTANT_NAME", "EduMatrix AI Assistant")
     
     # Firebase
     FIREBASE_CREDENTIALS: str = os.getenv("FIREBASE_CREDENTIALS", "")

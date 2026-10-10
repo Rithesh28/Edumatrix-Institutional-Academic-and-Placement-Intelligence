@@ -27,6 +27,7 @@ class JobPosting(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     required_skills = Column(JSONB, nullable=True, default=[])  # List of skills
+    preferred_skills = Column(JSONB, nullable=True, default=[])  # List of preferred skills
     experience_level = Column(String(50), nullable=True)
     cgpa_criteria = Column(Float, nullable=True)  # Minimum CGPA requirement
     branch_eligibility = Column(JSONB, nullable=True, default=[])  # List of eligible branches
@@ -34,7 +35,7 @@ class JobPosting(Base):
     salary_range = Column(String(100), nullable=True)
     application_deadline = Column(DateTime(timezone=True), nullable=True)
     drive_date = Column(DateTime(timezone=True), nullable=True)
-    status = Column(Enum(JobStatus), default=JobStatus.OPEN)
+    status = Column(Enum(JobStatus), default=JobStatus.DRAFT)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -55,6 +56,7 @@ class JobPosting(Base):
             "title": self.title,
             "description": self.description,
             "required_skills": self.required_skills or [],
+            "preferred_skills": self.preferred_skills or [],
             "experience_level": self.experience_level,
             "cgpa_criteria": self.cgpa_criteria,
             "branch_eligibility": self.branch_eligibility or [],

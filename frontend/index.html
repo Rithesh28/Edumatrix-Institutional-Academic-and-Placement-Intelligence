@@ -1,10 +1,31 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>EduMatrix - AI Powered College Communication & Career Platform</title>
+
+    <!-- Theme Initialization Script (Prevents White Flash) -->
+    <script>
+      (function() {
+        try {
+          var saved = localStorage.getItem('edumatrix_theme');
+          var theme = (saved === 'light') ? 'light' : 'dark';
+          if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.documentElement.style.colorScheme = 'dark';
+          } else {
+            document.documentElement.classList.remove('dark');
+            document.documentElement.setAttribute('data-theme', 'light');
+            document.documentElement.style.colorScheme = 'light';
+          }
+        } catch (e) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
     
     <!-- Google Fonts for Landing Page -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />

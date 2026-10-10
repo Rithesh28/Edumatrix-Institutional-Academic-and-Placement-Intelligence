@@ -12,7 +12,8 @@ from .api import (
     resume_analyzer_router,
     exam_duties_router,
     files_router,
-    placement_router
+    placement_router,
+    admin_router
 )
 from contextlib import asynccontextmanager
 import logging
@@ -31,12 +32,21 @@ async def lifespan(app: FastAPI):
             # Ensure venue column exists in exam_duties table for existing PostgreSQL volumes
             conn.execute(text("ALTER TABLE exam_duties ADD COLUMN IF NOT EXISTS venue VARCHAR;"))
             
-            # Ensure resume_status enum has all values
-            for val in ['pending', 'processing', 'completed', 'failed', 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED']:
-                try:
-                    conn.execute(text(f"ALTER TYPE resume_status ADD VALUE IF NOT EXISTS '{val}';"))
-                except Exception:
-                    pass
+            # Ensure chat_messages has AI support columns and nullable sender/receiver
+            try:
+                conn.execute(text("ALTER TABLE chat_messages ALTER COLUMN sender_id DROP NOT NULL;"))
+                conn.execute(text("ALTER TABLE chat_messages ALTER COLUMN receiver_id DROP NOT NULL;"))
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_ai BOOLEAN DEFAULT FALSE;"))
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS ai_participant VARCHAR(50);"))
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS intent VARCHAR(50);"))
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS intent_confidence FLOAT;"))
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sentiment VARCHAR(50);"))
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS sentiment_confidence FLOAT;"))
+                conn.execute(text("ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS ai_metadata JSON;"))
+                conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chat_messages_is_ai ON chat_messages (is_ai);"))
+            except Exception as chat_mig_err:
+                logger.warning(f"⚠️ chat_messages AI column check: {chat_mig_err}")
+                
             conn.commit()
         logger.info("✅ Database tables created/verified successfully with all schema migrations")
     except Exception as e:
@@ -95,6 +105,7 @@ app.include_router(resume_analyzer_router)
 app.include_router(exam_duties_router)
 app.include_router(files_router)
 app.include_router(placement_router)
+app.include_router(admin_router)
 
 # Root endpoint
 @app.get("/")

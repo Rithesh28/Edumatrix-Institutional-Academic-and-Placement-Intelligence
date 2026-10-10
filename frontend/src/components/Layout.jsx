@@ -1,12 +1,20 @@
 import React from 'react'
-import { Outlet, useNavigate } from 'react-router-dom'
+import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import UnifiedBell from './UnifiedBell'
+import ThemeToggle from './ThemeToggle'
 import toast from 'react-hot-toast'
 
 function Layout() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, logout } = useAuthStore()
+
+  const isItemActive = (itemPath) => {
+    if (location.pathname === itemPath) return true
+    if (itemPath !== '/' && location.pathname.startsWith(itemPath + '/')) return true
+    return false
+  }
 
   const handleLogout = () => {
     logout()
@@ -29,6 +37,8 @@ function Layout() {
     if (role === 'student') {
       return [
         { name: 'Dashboard', path: '/student/dashboard', icon: '📊' },
+        { name: 'Campus Jobs', path: '/student/jobs', icon: '💼' },
+        { name: 'My Applications', path: '/student/applications', icon: '📋' },
         { name: 'Chat', path: '/student/chat', icon: '💬' },
         { name: 'Circulars', path: '/student/circulars', icon: '📢' },
         { name: 'Resume Analyzer', path: '/placement/resume-analyzer', icon: '📄' },
@@ -47,6 +57,7 @@ function Layout() {
     if (role === 'hod') {
       return [
         { name: 'Dashboard', path: '/hod/dashboard', icon: '📊' },
+        { name: 'Chat', path: '/hod/chat', icon: '💬' },
         { name: 'Exam Duties', path: '/hod/exam-duties', icon: '📅' },
         { name: 'Circulars', path: '/hod/circulars', icon: '📢' },
       ]
@@ -54,6 +65,7 @@ function Layout() {
     if (role === 'placement_officer' || role === 'placement') {
       return [
         { name: 'Dashboard', path: '/placement/dashboard', icon: '📊' },
+        { name: 'Chat', path: '/placement/chat', icon: '💬' },
         { name: 'Resume Analyzer', path: '/placement/resume-analyzer', icon: '📄' },
         { name: 'Companies', path: '/placement/companies', icon: '🏢' },
         { name: 'Jobs', path: '/placement/jobs', icon: '💼' },
@@ -66,10 +78,10 @@ function Layout() {
     if (role === 'admin') {
       return [
         { name: 'Dashboard', path: '/admin/dashboard', icon: '📊' },
+        { name: 'Users', path: '/admin/users', icon: '👥' },
+        { name: 'Audit Logs', path: '/admin/logs', icon: '📋' },
         { name: 'Resume Analyzer', path: '/placement/resume-analyzer', icon: '📄' },
         { name: 'Placement', path: '/placement/dashboard', icon: '💼' },
-        { name: 'Users', path: '/admin/users', icon: '👥' },
-        { name: 'Logs', path: '/admin/logs', icon: '📋' },
         { name: 'Files', path: '/files', icon: '📁' },
       ]
     }
@@ -79,28 +91,29 @@ function Layout() {
   const navItems = getNavItems()
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 transition-colors duration-200">
       {/* Navbar */}
-      <nav className="bg-white shadow-sm border-b border-gray-200 sticky top-0 z-50">
+      <nav className="bg-white dark:bg-gray-900 shadow-sm border-b border-gray-200 dark:border-gray-800 sticky top-0 z-50 transition-colors">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center">
               <h1 
-                className="text-xl font-bold text-blue-600 cursor-pointer" 
+                className="text-xl font-bold text-blue-600 dark:text-blue-400 cursor-pointer" 
                 onClick={() => navigate(getDashboardLink())}
               >
                 EduMatrix
               </h1>
-              <span className="ml-2 text-sm text-gray-500 capitalize bg-gray-100 px-2 py-1 rounded">
+              <span className="ml-2 text-sm text-gray-500 dark:text-gray-400 capitalize bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded border border-transparent dark:border-gray-700">
                 {user?.role}
               </span>
             </div>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-2 sm:space-x-4">
               <UnifiedBell />
-              <span className="text-gray-700 hidden sm:block">Welcome, {user?.name}</span>
+              <ThemeToggle id="navbar-theme-toggle" />
+              <span className="text-gray-700 dark:text-gray-300 hidden md:block text-sm font-medium">Welcome, {user?.name}</span>
               <button
                 onClick={handleLogout}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors"
+                className="px-3.5 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors flex-shrink-0"
               >
                 Logout
               </button>
@@ -113,25 +126,32 @@ function Layout() {
       <div className="flex">
         {/* Sidebar */}
         <aside 
-          className="w-64 bg-white shadow-sm min-h-screen border-r border-gray-200 fixed lg:relative z-40 transform -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-in-out" 
+          className="w-64 bg-white dark:bg-gray-900 shadow-sm min-h-screen border-r border-gray-200 dark:border-gray-800 fixed lg:relative z-40 transform -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-in-out" 
           id="sidebar"
         >
           <nav className="mt-6 px-4 space-y-1">
-            {navItems.map((item) => (
-              <button
-                key={item.path}
-                onClick={() => {
-                  navigate(item.path)
-                  if (window.innerWidth < 1024) {
-                    document.getElementById('sidebar').classList.add('-translate-x-full')
-                  }
-                }}
-                className="w-full text-left px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors flex items-center space-x-3"
-              >
-                <span className="text-xl">{item.icon}</span>
-                <span>{item.name}</span>
-              </button>
-            ))}
+            {navItems.map((item) => {
+              const active = isItemActive(item.path);
+              return (
+                <button
+                  key={item.path}
+                  onClick={() => {
+                    navigate(item.path);
+                    if (window.innerWidth < 1024) {
+                      document.getElementById('sidebar').classList.add('-translate-x-full');
+                    }
+                  }}
+                  className={`w-full text-left px-4 py-2 rounded-lg transition-colors flex items-center space-x-3 cursor-pointer ${
+                    active
+                      ? 'bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-semibold shadow-sm'
+                      : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 font-medium'
+                  }`}
+                >
+                  <span className="text-xl">{item.icon}</span>
+                  <span>{item.name}</span>
+                </button>
+              );
+            })}
           </nav>
         </aside>
 

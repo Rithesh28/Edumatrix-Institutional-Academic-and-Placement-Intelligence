@@ -135,13 +135,13 @@ const ResumeUpload = () => {
       {/* Resume List */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h3 className="text-base font-bold text-gray-900 flex items-center gap-2">
-            <FileText className="w-5 h-5 text-indigo-600" />
+          <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+            <FileText className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
             Uploaded Resumes ({resumes.length})
           </h3>
           <button
             onClick={fetchResumes}
-            className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg text-xs flex items-center gap-1"
+            className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-xs flex items-center gap-1 cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
@@ -149,41 +149,41 @@ const ResumeUpload = () => {
         </div>
 
         {loading ? (
-          <div className="text-center py-8 text-gray-500 text-sm">
-            <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-600" />
+          <div className="text-center py-8 text-gray-500 dark:text-gray-400 text-sm">
+            <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-indigo-600 dark:text-indigo-400" />
             Loading resumes...
           </div>
         ) : resumes.length === 0 ? (
-          <div className="text-center py-8 bg-gray-50 rounded-xl border border-gray-200">
-            <p className="text-gray-500 text-sm font-medium">No resumes uploaded yet.</p>
-            <p className="text-xs text-gray-400 mt-1">Upload your resume to get instant ATS scores and placement visibility!</p>
+          <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-200 dark:border-gray-800">
+            <p className="text-gray-500 dark:text-gray-400 text-sm font-medium">No resumes uploaded yet.</p>
+            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Upload your resume to get instant ATS scores and placement visibility!</p>
           </div>
         ) : (
           <div className="space-y-3">
             {resumes.map((resume) => (
               <div
                 key={resume.id}
-                className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white border border-gray-200 rounded-xl hover:border-indigo-300 transition-all gap-3 shadow-sm"
+                className="flex flex-col sm:flex-row sm:items-center justify-between p-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl hover:border-indigo-300 dark:hover:border-indigo-700 transition-all gap-3 shadow-sm"
               >
                 <div className="flex items-start gap-3 flex-1 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-100 text-indigo-600 flex items-center justify-center flex-shrink-0">
+                  <div className="w-10 h-10 rounded-lg bg-indigo-100 dark:bg-indigo-950/60 text-indigo-600 dark:text-indigo-400 flex items-center justify-center flex-shrink-0">
                     <FileText className="w-5 h-5" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-gray-900 truncate">
+                      <p className="font-semibold text-gray-900 dark:text-white truncate">
                         {resume.name || 'Student Resume'}
                       </p>
                       {getScoreBadge(resume.ats_score)}
                     </div>
-                    <p className="text-xs text-gray-500 mt-0.5">
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                       {resume.created_at ? new Date(resume.created_at).toLocaleDateString() : 'Recent'} • {resume.status || 'completed'}
                     </p>
                     {/* Skills pills */}
                     {Array.isArray(resume.skills) && resume.skills.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {resume.skills.slice(0, 4).map((s, idx) => (
-                          <span key={idx} className="px-2 py-0.5 bg-gray-100 text-gray-700 text-[11px] rounded-md">
+                          <span key={idx} className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-[11px] rounded-md">
                             {typeof s === 'string' ? s : s.name || ''}
                           </span>
                         ))}
@@ -198,21 +198,21 @@ const ResumeUpload = () => {
                 <div className="flex items-center gap-2 self-end sm:self-center">
                   <button
                     onClick={() => setActiveResume(resume)}
-                    className="px-3 py-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg flex items-center gap-1"
+                    className="px-3 py-1.5 text-xs font-medium text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg flex items-center gap-1 cursor-pointer"
                   >
                     <Eye className="w-3.5 h-3.5" />
                     <span>View Analysis</span>
                   </button>
                   <button
                     onClick={() => handleExport(resume.id, 'json')}
-                    className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg"
+                    className="p-1.5 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 rounded-lg cursor-pointer"
                     title="Export JSON"
                   >
                     <Download className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => handleDelete(resume.id)}
-                    className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-lg"
+                    className="p-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 rounded-lg cursor-pointer"
                     title="Delete Resume"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -226,16 +226,16 @@ const ResumeUpload = () => {
 
       {/* Analysis Details Modal */}
       {activeResume && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto shadow-2xl border border-gray-200">
-            <div className="sticky top-0 bg-white border-b border-gray-200 p-5 flex items-center justify-between z-10">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-2xl w-full max-h-[85vh] overflow-y-auto shadow-2xl border border-gray-200 dark:border-gray-800">
+            <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 p-5 flex items-center justify-between z-10">
               <div className="flex items-center gap-2">
-                <h3 className="text-lg font-bold text-gray-900">📄 Resume Analysis</h3>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">📄 Resume Analysis</h3>
                 {getScoreBadge(activeResume.ats_score)}
               </div>
               <button
                 onClick={() => setActiveResume(null)}
-                className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full"
+                className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -243,43 +243,43 @@ const ResumeUpload = () => {
 
             <div className="p-5 space-y-4">
               {/* ATS Score Box */}
-              <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex items-center justify-between">
+              <div className="bg-indigo-50 dark:bg-indigo-950/40 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800/50 flex items-center justify-between">
                 <div>
-                  <p className="text-xs font-semibold text-indigo-900 uppercase">Overall ATS Compatibility</p>
-                  <p className="text-xs text-indigo-700 mt-0.5">Scored based on keyword coverage and structure.</p>
+                  <p className="text-xs font-semibold text-indigo-900 dark:text-indigo-200 uppercase">Overall ATS Compatibility</p>
+                  <p className="text-xs text-indigo-700 dark:text-indigo-400 mt-0.5">Scored based on keyword coverage and structure.</p>
                 </div>
-                <div className="text-2xl font-black text-indigo-600 bg-white px-4 py-2 rounded-xl shadow-sm border border-indigo-200">
+                <div className="text-2xl font-black text-indigo-600 dark:text-indigo-400 bg-white dark:bg-gray-800 px-4 py-2 rounded-xl shadow-sm border border-indigo-200 dark:border-indigo-700">
                   {Math.round(activeResume.ats_score || 0)}%
                 </div>
               </div>
 
               {/* Skills */}
               <div>
-                <h4 className="text-xs font-bold text-gray-700 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                  <Award className="w-4 h-4 text-purple-600" />
+                <h4 className="text-xs font-bold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <Award className="w-4 h-4 text-purple-600 dark:text-purple-400" />
                   Extracted Skills
                 </h4>
                 <div className="flex flex-wrap gap-1.5">
                   {Array.isArray(activeResume.skills) && activeResume.skills.length > 0 ? (
                     activeResume.skills.map((s, idx) => (
-                      <span key={idx} className="px-2.5 py-1 bg-purple-50 border border-purple-200 text-purple-700 text-xs rounded-lg font-medium">
+                      <span key={idx} className="px-2.5 py-1 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-xs rounded-lg font-medium">
                         {typeof s === 'string' ? s : s.name || ''}
                       </span>
                     ))
                   ) : (
-                    <p className="text-xs text-gray-400">No skills detected</p>
+                    <p className="text-xs text-gray-400 dark:text-gray-500">No skills detected</p>
                   )}
                 </div>
               </div>
 
               {/* Suggestions */}
               {Array.isArray(activeResume.suggestions) && activeResume.suggestions.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                  <h4 className="text-xs font-bold text-amber-900 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-amber-600" />
+                <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/50 rounded-xl p-4">
+                  <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                    <Sparkles className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                     Improvement Tips
                   </h4>
-                  <ul className="space-y-1 text-xs text-amber-900">
+                  <ul className="space-y-1 text-xs text-amber-900 dark:text-amber-300">
                     {activeResume.suggestions.map((sug, i) => (
                       <li key={i} className="flex items-start gap-1.5">
                         <span className="text-amber-500 font-bold">•</span>
@@ -291,10 +291,10 @@ const ResumeUpload = () => {
               )}
             </div>
 
-            <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-4 flex justify-end">
+            <div className="sticky bottom-0 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4 flex justify-end">
               <button
                 onClick={() => setActiveResume(null)}
-                className="px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg text-xs font-semibold"
+                className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 rounded-lg text-xs font-semibold cursor-pointer"
               >
                 Close
               </button>

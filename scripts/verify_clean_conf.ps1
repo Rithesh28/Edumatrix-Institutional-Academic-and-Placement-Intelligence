@@ -1,0 +1,21 @@
+$word = New-Object -ComObject Word.Application
+$word.Visible = $false
+try {
+    $docxPath = "d:\Edumatrix-Institutional-Academic-and-Placement-Intelligence\EDUMATRIX_Clean_Structured_Abstract.docx"
+    $pdfPath = "d:\Edumatrix-Institutional-Academic-and-Placement-Intelligence\EDUMATRIX_Clean_Structured_Abstract.pdf"
+    $doc = $word.Documents.Open($docxPath)
+    $pages = $doc.ComputeStatistics(2)
+    $lines = $doc.ComputeStatistics(1)
+    $words = $doc.ComputeStatistics(0)
+    Write-Host "PAGES: $pages"
+    Write-Host "LINES: $lines"
+    Write-Host "WORDS: $words"
+    $wdFormatPDF = 17
+    $doc.SaveAs([ref]$pdfPath, [ref]$wdFormatPDF)
+    Write-Host "PDF created successfully at $pdfPath"
+    $doc.Close([ref]$false)
+} catch {
+    Write-Host "ERR: $($_.Exception.Message)"
+} finally {
+    $word.Quit()
+}

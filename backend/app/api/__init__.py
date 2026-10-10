@@ -10,6 +10,7 @@ from .resume_analyzer import router as resume_analyzer_router
 from .exam_duties import router as exam_duties_router
 from .files import router as files_router
 from .placement import router as placement_router
+from .admin import router as admin_router
 
 
 __all__ = [
@@ -24,6 +25,6 @@ __all__ = [
     'resume_analyzer_router',
     "exam_duties_router",
     "files_router",
-    'placement_router'
-
+    'placement_router',
+    "admin_router"
 ]

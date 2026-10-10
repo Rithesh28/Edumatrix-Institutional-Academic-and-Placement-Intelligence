@@ -6,7 +6,7 @@ import FileDetail from './FileDetail';
 
 const FileManager = () => {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 transition-colors">
       <Routes>
         <Route index element={<FileBrowser />} />
         <Route path="upload" element={<FileUpload />} />
