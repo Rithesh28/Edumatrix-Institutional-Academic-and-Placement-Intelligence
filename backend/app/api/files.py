@@ -250,6 +250,15 @@ def check_file_permission(db: Session, file: File, current_user: User) -> bool:
             return True
 
     if current_user.role == UserRole.STUDENT:
+        # Check if file is student's verified placement offer letter
+        from ..models.recruitment_round import PlacementOffer
+        offer = db.query(PlacementOffer).filter(
+            PlacementOffer.offer_letter_file_id == file.id,
+            PlacementOffer.student_id == current_user.id
+        ).first()
+        if offer:
+            return True
+
         from ..models.recruitment_circular import RecruitmentCircular, RecruitmentCircularAttachment, RecruitmentCircularStatus
         published_rcs = db.query(RecruitmentCircular).join(
             RecruitmentCircularAttachment,
@@ -273,6 +282,7 @@ def check_file_permission(db: Session, file: File, current_user: User) -> bool:
                     return True
 
     return False
+
 
 
 @router.get("/{file_id}", response_model=FileDetailResponse)

@@ -49,17 +49,21 @@ class RecruitmentResultService:
     def map_result_status_to_round_outcome(
         status: RecruitmentResultItemStatus,
         is_final_round: bool = False,
+        legacy_offered: bool = False,
     ) -> RoundOutcome:
         """
         Maps tabular RecruitmentResultItemStatus to authoritative RoundOutcome.
         
-        Mapping rules:
+        Mapping rules (Phase 3.3.4 verified event semantics):
         - REJECTED -> RoundOutcome.REJECTED
         - ABSENT -> RoundOutcome.ABSENT
         - ON_HOLD -> RoundOutcome.ON_HOLD
         - SHORTLISTED -> RoundOutcome.CLEARED (passed/shortlisted for next stage)
         - SELECTED in intermediate round -> RoundOutcome.CLEARED (cleared intermediate stage)
-        - SELECTED in final round -> RoundOutcome.OFFERED (verified selection/offer in final stage)
+        - SELECTED in final round -> RoundOutcome.CLEARED (cleared final recruitment round).
+          Ordinary final-round clearance does not assume an employer-issued offer has been verified.
+          If legacy_offered=True is explicitly passed, returns RoundOutcome.OFFERED for backwards
+          compatibility with historical test expectations.
         """
         if status == RecruitmentResultItemStatus.REJECTED:
             return RoundOutcome.REJECTED
@@ -70,11 +74,12 @@ class RecruitmentResultService:
         elif status == RecruitmentResultItemStatus.SHORTLISTED:
             return RoundOutcome.CLEARED
         elif status == RecruitmentResultItemStatus.SELECTED:
-            if is_final_round:
+            if is_final_round and legacy_offered:
                 return RoundOutcome.OFFERED
             return RoundOutcome.CLEARED
         else:
             raise ValueError(f"Unknown or unsupported candidate status '{status}'. Cannot map to RoundOutcome.")
+
 
     # =========================================================================
     # BATCH CREATION & EXTRACTION (UPLOAD STEP)
@@ -598,15 +603,22 @@ class RecruitmentResultService:
                 confirmed_count += 1
 
                 # 6. Status Semantics (Application status only, NEVER profile placement status!)
+                is_final_stage = bool(rec_round.is_final) or bool(batch.is_final_round)
                 if outcome == RoundOutcome.CLEARED:
-                    application.status = ApplicationStatus.SHORTLISTED
-                    if not application.notes or application.notes.startswith("Auto-registered"):
-                        application.notes = f"Progressed: Round {rec_round.round_number} ({rec_round.name}) at {batch.company.name}"
+                    if is_final_stage:
+                        application.status = ApplicationStatus.SELECTED
+                        if not application.notes or application.notes.startswith("Auto-registered"):
+                            application.notes = f"Final selection confirmed: Round {rec_round.round_number} ({rec_round.name}) at {batch.company.name}"
+                    else:
+                        application.status = ApplicationStatus.SHORTLISTED
+                        if not application.notes or application.notes.startswith("Auto-registered"):
+                            application.notes = f"Progressed: Round {rec_round.round_number} ({rec_round.name}) at {batch.company.name}"
                 elif outcome == RoundOutcome.REJECTED:
                     application.status = ApplicationStatus.REJECTED
                     if not application.notes or application.notes.startswith("Auto-registered"):
                         application.notes = f"Round result: Round {rec_round.round_number} ({rec_round.name}) - Not Selected"
                 elif outcome == RoundOutcome.OFFERED:
+                    # Backward compatibility for legacy/historical records
                     application.status = ApplicationStatus.SELECTED
                     if not application.notes or application.notes.startswith("Auto-registered"):
                         application.notes = f"Final selection confirmed: Round {rec_round.round_number} ({rec_round.name}) at {batch.company.name}"
@@ -629,7 +641,7 @@ class RecruitmentResultService:
                         )
                         round_label = f"Round {rec_round.round_number} ({rec_round.name})"
 
-                        if outcome == RoundOutcome.OFFERED:
+                        if outcome == RoundOutcome.OFFERED or (outcome == RoundOutcome.CLEARED and is_final_stage):
                             title = f"🎉 Final Selection: {round_label} at {company_name}"
                             message = (
                                 f"Congratulations! You have been selected in {round_label} "
@@ -641,6 +653,7 @@ class RecruitmentResultService:
                                 f"You have cleared {round_label} "
                                 f"for {job_title} at {company_name}. Check Campus Jobs for updates."
                             )
+
                         elif outcome == RoundOutcome.REJECTED:
                             title = f"Update: {round_label} at {company_name}"
                             message = f"Results for {round_label} for {job_title} at {company_name} have been published."

@@ -807,6 +807,10 @@ class PlacementService:
 
         placement_rate = (total_placed / total_students * 100.0) if total_students > 0 else 0.0
 
+        # Verified Accounting Metrics (Phase 3.3.4)
+        from .placement_offer_service import placement_offer_service
+        verified_metrics = placement_offer_service.get_placement_accounting_metrics(db)
+
         return PlacementStatistics(
             total_companies=total_companies,
             active_companies=active_companies,
@@ -815,11 +819,26 @@ class PlacementService:
             total_applications=total_applications,
             total_shortlists=total_shortlists,
             total_students=total_students,
+            # Legacy metrics
             total_placed=total_placed,
             placement_rate=round(placement_rate, 2),
+            legacy_placed_count=total_placed,
+            legacy_placement_rate=round(placement_rate, 2),
+            # Verified Accounting metrics
+            total_verified_offers=verified_metrics["total_verified_offers"],
+            verified_offers_count=verified_metrics["total_verified_offers"],
+            accepted_offers_count=verified_metrics["accepted_offers_count"],
+            declined_offers_count=verified_metrics["declined_offers_count"],
+            rescinded_offers_count=verified_metrics["rescinded_offers_count"],
+            pending_offers_count=verified_metrics["pending_offers_count"],
+            verified_placed_students_count=verified_metrics["verified_placed_students_count"],
+            students_with_multiple_offers_count=verified_metrics["students_with_multiple_offers_count"],
+            verified_placement_rate=verified_metrics["verified_placement_rate"],
+            # Breakdowns
             applications_by_status=apps_by_status,
             jobs_by_status=jobs_by_status
         )
+
     
     def get_company_statistics(self, db: Session, company_id: int) -> Optional[CompanyStatistics]:
         """Get statistics for a specific company."""

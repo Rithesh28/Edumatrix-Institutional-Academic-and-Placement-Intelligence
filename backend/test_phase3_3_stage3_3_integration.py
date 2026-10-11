@@ -546,13 +546,20 @@ class TestRecruitmentResultsProgressionIntegration(unittest.TestCase):
             RoundOutcome.ON_HOLD,
         )
 
-        # Final round
+        # Final round (Phase 3.3.4 corrected review mapping)
         self.assertEqual(
             recruitment_result_service.map_result_status_to_round_outcome(
                 RecruitmentResultItemStatus.SELECTED, is_final_round=True
             ),
+            RoundOutcome.CLEARED,
+        )
+        self.assertEqual(
+            recruitment_result_service.map_result_status_to_round_outcome(
+                RecruitmentResultItemStatus.SELECTED, is_final_round=True, legacy_offered=True
+            ),
             RoundOutcome.OFFERED,
         )
+
         self.assertEqual(
             recruitment_result_service.map_result_status_to_round_outcome(
                 RecruitmentResultItemStatus.SHORTLISTED, is_final_round=True
@@ -678,12 +685,13 @@ class TestRecruitmentResultsProgressionIntegration(unittest.TestCase):
             current_user=self.officer,
         )
 
-        # 1. Progression outcome is OFFERED
+        # 1. Progression outcome is CLEARED (cleared final recruitment round)
         outcome = self.db.query(StudentRoundOutcome).filter(
             StudentRoundOutcome.student_id == student.id,
             StudentRoundOutcome.round_id == self.round_a_final.id,
         ).first()
-        self.assertEqual(outcome.outcome, RoundOutcome.OFFERED)
+        self.assertEqual(outcome.outcome, RoundOutcome.CLEARED)
+
 
         # 2. No automatic PlacementOffer record is created
         app = self.db.query(Application).filter(

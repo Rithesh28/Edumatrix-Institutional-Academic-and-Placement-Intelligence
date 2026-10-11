@@ -641,14 +641,10 @@ class RecruitmentProgressionService:
             existing_offer.verified_by = actor.id
             existing_offer.updated_at = now
 
-            try:
-                db.commit()
-                db.refresh(existing_offer)
-            except Exception:
-                db.rollback()
-                raise
+            db.flush()
 
-            audit_service.log_action(
+            # Atomic audit log write in same transaction
+            audit_entry = audit_service.log_action(
                 db=db,
                 action="PLACEMENT_OFFER_UPDATED",
                 actor=actor,
@@ -666,7 +662,19 @@ class RecruitmentProgressionService:
                     "new_designation": existing_offer.designation,
                     "update_reason": reason.strip() if reason else "Offer terms revised by Placement Officer",
                 },
+                auto_commit=False,
             )
+            if audit_entry is None:
+                db.rollback()
+                raise RuntimeError("Audit logging failed during placement offer update; transaction aborted.")
+
+            try:
+                db.commit()
+                db.refresh(existing_offer)
+            except Exception:
+                db.rollback()
+                raise
+
             return existing_offer
 
         else:
@@ -683,6 +691,29 @@ class RecruitmentProgressionService:
                 verified_by=actor.id,
             )
             db.add(new_offer)
+            db.flush()
+
+            # Atomic audit log write in same transaction
+            audit_entry = audit_service.log_action(
+                db=db,
+                action="PLACEMENT_OFFER_CREATED",
+                actor=actor,
+                target_type="placement_offer",
+                target_id=str(new_offer.id),
+                details={
+                    "application_id": application_id,
+                    "student_id": app.student_id,
+                    "job_posting_id": app.job_posting_id,
+                    "ctc_lpa": ctc_lpa,
+                    "designation": new_offer.designation,
+                    "acceptance_status": norm_status.value,
+                },
+                auto_commit=False,
+            )
+            if audit_entry is None:
+                db.rollback()
+                raise RuntimeError("Audit logging failed during placement offer creation; transaction aborted.")
+
             try:
                 db.commit()
                 db.refresh(new_offer)
@@ -699,23 +730,51 @@ class RecruitmentProgressionService:
                         "Re-fetch the existing offer to update terms."
                     ) from exc
                 raise
+            except Exception:
+                db.rollback()
+                raise
 
-            audit_service.log_action(
-                db=db,
-                action="PLACEMENT_OFFER_CREATED",
-                actor=actor,
-                target_type="placement_offer",
-                target_id=str(new_offer.id),
-                details={
-                    "application_id": application_id,
-                    "student_id": app.student_id,
-                    "job_posting_id": app.job_posting_id,
-                    "ctc_lpa": ctc_lpa,
-                    "designation": new_offer.designation,
-                    "acceptance_status": norm_status.value,
-                },
-            )
             return new_offer
+
+    def create_placement_offer(self, *args, **kwargs) -> PlacementOffer:
+        """Create verified placement offer via PlacementOfferService."""
+        from .placement_offer_service import placement_offer_service
+        return placement_offer_service.create_placement_offer(*args, **kwargs)
+
+    def update_placement_offer(self, *args, **kwargs) -> PlacementOffer:
+        """Update verified placement offer terms via PlacementOfferService."""
+        from .placement_offer_service import placement_offer_service
+        return placement_offer_service.update_placement_offer(*args, **kwargs)
+
+    def respond_to_placement_offer(self, *args, **kwargs) -> PlacementOffer:
+        """Record student offer response via PlacementOfferService."""
+        from .placement_offer_service import placement_offer_service
+        return placement_offer_service.respond_to_placement_offer(*args, **kwargs)
+
+    def rescind_placement_offer(self, *args, **kwargs) -> PlacementOffer:
+        """Rescind placement offer with audit reason via PlacementOfferService."""
+        from .placement_offer_service import placement_offer_service
+        return placement_offer_service.rescind_placement_offer(*args, **kwargs)
+
+    def get_placement_offer_by_id(self, *args, **kwargs) -> PlacementOffer:
+        """Fetch offer by ID via PlacementOfferService."""
+        from .placement_offer_service import placement_offer_service
+        return placement_offer_service.get_placement_offer_by_id(*args, **kwargs)
+
+    def get_student_offers(self, *args, **kwargs) -> List[PlacementOffer]:
+        """Fetch all offers for student via PlacementOfferService."""
+        from .placement_offer_service import placement_offer_service
+        return placement_offer_service.get_student_offers(*args, **kwargs)
+
+    def list_placement_offers(self, *args, **kwargs) -> List[PlacementOffer]:
+        """List offers with filtering via PlacementOfferService."""
+        from .placement_offer_service import placement_offer_service
+        return placement_offer_service.list_placement_offers(*args, **kwargs)
+
+    def get_placement_accounting_metrics(self, *args, **kwargs) -> Dict[str, Any]:
+        """Fetch verified placement accounting metrics via PlacementOfferService."""
+        from .placement_offer_service import placement_offer_service
+        return placement_offer_service.get_placement_accounting_metrics(*args, **kwargs)
 
     def get_placement_offer_by_application(
         self,
@@ -724,6 +783,7 @@ class RecruitmentProgressionService:
     ) -> Optional[PlacementOffer]:
         """Fetch placement offer for an application if one exists."""
         return db.query(PlacementOffer).filter(PlacementOffer.application_id == application_id).first()
+
 
     # -------------------------------------------------------------------------
     # 7. INTEGRITY & HEALTH VALIDATION

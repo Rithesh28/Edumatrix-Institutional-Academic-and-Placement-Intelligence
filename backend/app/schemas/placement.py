@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator, model_valida
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 from enum import Enum
+from uuid import UUID
+
 
 
 # ============================================
@@ -293,7 +295,7 @@ class ShortlistResponse(ShortlistBase):
 # ============================================
 
 class PlacementStatistics(BaseModel):
-    """Schema for placement statistics."""
+    """Schema for placement statistics, including both legacy and verified accounting metrics."""
     total_companies: int
     active_companies: int
     total_jobs: int
@@ -301,12 +303,26 @@ class PlacementStatistics(BaseModel):
     total_applications: int
     total_shortlists: int
     total_students: int
-    total_placed: int = Field(0, description="Unique students placed/selected")
-    placement_rate: Optional[float] = Field(None, description="Placement rate percentage")
+    total_placed: int = Field(0, description="Unique students placed/selected (legacy)")
+    placement_rate: Optional[float] = Field(None, description="Placement rate percentage (legacy)")
     
     # Breakdowns
     applications_by_status: Dict[str, int] = Field(default={})
     jobs_by_status: Dict[str, int] = Field(default={})
+
+    # Verified Placement Accounting Metrics (Phase 3.3.4)
+    legacy_placed_count: int = Field(0, description="Legacy placed student count")
+    legacy_placement_rate: Optional[float] = Field(None, description="Legacy placement rate percentage")
+    total_verified_offers: int = Field(0, description="Total verified offers created")
+    verified_offers_count: int = Field(0, description="Total verified offers created (alias)")
+    accepted_offers_count: int = Field(0, description="Total offers accepted by students")
+    declined_offers_count: int = Field(0, description="Total offers declined by students")
+    rescinded_offers_count: int = Field(0, description="Total offers rescinded")
+    pending_offers_count: int = Field(0, description="Total offers awaiting student response")
+    verified_placed_students_count: int = Field(0, description="Unique students with >= 1 verified accepted offer")
+    students_with_multiple_offers_count: int = Field(0, description="Unique students with multiple active verified offers")
+    verified_placement_rate: Optional[float] = Field(None, description="Verified placement rate percentage")
+
 
 
 class CompanyStatistics(BaseModel):
@@ -467,4 +483,64 @@ class JdParseResponse(BaseModel):
     field_evidence: Dict[str, Any] = Field(
         default={},
         description="Source text snippets justifying each extracted field for full auditability"
-    )
+    )
+
+
+# ============================================
+# PLACEMENT OFFER SCHEMAS (Phase 3.3.4)
+# ============================================
+
+class PlacementOfferCreate(BaseModel):
+    """Schema for creating / verifying a placement offer by Placement Officer."""
+    application_id: int = Field(..., description="Target Application ID")
+    student_id: Optional[int] = Field(None, description="Optional student ID for cross-validation")
+    job_posting_id: Optional[int] = Field(None, description="Optional job posting ID for cross-validation")
+    ctc_lpa: Optional[float] = Field(None, gt=0, description="Annual Cost to Company in LPA (must be > 0)")
+    designation: Optional[str] = Field(None, max_length=255, description="Offered role designation")
+    offer_letter_file_id: Optional[UUID] = Field(None, description="Supporting offer letter document UUID")
+    offer_date: Optional[datetime] = Field(None, description="Offer issuance date")
+
+
+class PlacementOfferUpdate(BaseModel):
+    """Schema for updating offer terms by Placement Officer."""
+    ctc_lpa: Optional[float] = Field(None, gt=0, description="Revised CTC in LPA (must be > 0)")
+    designation: Optional[str] = Field(None, max_length=255, description="Revised designation")
+    offer_letter_file_id: Optional[UUID] = Field(None, description="Revised offer letter document UUID")
+    offer_date: Optional[datetime] = Field(None, description="Revised offer date")
+    reason: Optional[str] = Field(None, description="Mandatory audit rationale for modifying terms")
+
+
+class PlacementOfferResponseRequest(BaseModel):
+    """Schema for student responding to their own placement offer."""
+    decision: str = Field(..., description="Student response decision: ACCEPTED or DECLINED")
+    remarks: Optional[str] = Field(None, description="Optional student comments or remarks")
+
+
+class PlacementOfferRescindRequest(BaseModel):
+    """Schema for authorized officer rescinding an offer."""
+    reason: str = Field(..., min_length=3, description="Mandatory administrative reason for rescission")
+
+
+class PlacementOfferResponse(BaseModel):
+    """Schema for detailed placement offer response."""
+    id: int
+    application_id: int
+    student_id: int
+    job_posting_id: int
+    job_title: Optional[str] = None
+    company_name: Optional[str] = None
+    student_name: Optional[str] = None
+    student_email: Optional[str] = None
+    ctc_lpa: Optional[float] = None
+    designation: Optional[str] = None
+    acceptance_status: str
+    offer_letter_file_id: Optional[UUID] = None
+    offer_date: Optional[datetime] = None
+    response_date: Optional[datetime] = None
+    verified_by: Optional[int] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+

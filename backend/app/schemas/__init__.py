@@ -114,7 +114,13 @@ from .placement import (
     StudentEligibility,
     JobMatchRequest,
     JobMatchResponse,
+    PlacementOfferCreate,
+    PlacementOfferUpdate,
+    PlacementOfferResponseRequest,
+    PlacementOfferRescindRequest,
+    PlacementOfferResponse,
 )
+
 
 
 __all__ = [
@@ -227,4 +233,9 @@ __all__ = [
     'StudentEligibility',
     'JobMatchRequest',
     'JobMatchResponse',
+    'PlacementOfferCreate',
+    'PlacementOfferUpdate',
+    'PlacementOfferResponseRequest',
+    'PlacementOfferRescindRequest',
+    'PlacementOfferResponse',
 ]

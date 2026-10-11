@@ -28,6 +28,7 @@ from ..models.shortlist import Shortlist
 from ..models.profile import StudentProfileExtended, Skill, Project
 from ..models.certification import Certification
 from ..models.resume import Resume
+from ..models.recruitment_round import PlacementOffer, OfferAcceptanceStatus
 from ..schemas.placement import (
     CompanyCreate, CompanyUpdate, CompanyResponse,
     JobPostingCreate, JobPostingUpdate, JobPostingResponse,
@@ -35,12 +36,17 @@ from ..schemas.placement import (
     ShortlistCreate, ShortlistUpdate, ShortlistResponse,
     PlacementStatistics, CompanyStatistics, StudentPlacementStatus,
     StudentEligibility, JobMatchRequest, JobMatchResponse,
-    JdParseRequest, JdParseResponse
+    JdParseRequest, JdParseResponse,
+    PlacementOfferCreate, PlacementOfferUpdate,
+    PlacementOfferResponseRequest, PlacementOfferRescindRequest,
+    PlacementOfferResponse,
 )
 from ..services.placement_service import placement_service
 from ..services.jd_parser_service import jd_parser_service
+from ..services.placement_offer_service import placement_offer_service
 
 logger = logging.getLogger(__name__)
+
 
 router = APIRouter(prefix="/placement", tags=["Placement"])
 
@@ -588,7 +594,10 @@ async def export_placement_report(
         "Total Applications",
         "Total Shortlists",
         "Applied Job Titles",
-        "Skills"
+        "Skills",
+        "Verified Offers Count",
+        "Accepted Offer CTC (LPA)",
+        "Offer Acceptance Status",
     ])
     
     for u in users:
@@ -617,8 +626,22 @@ async def export_placement_report(
             job = db.query(JobPosting).filter(JobPosting.id == a.job_posting_id).first()
             if job and job.title:
                 applied_jobs.append(job.title)
-        jobs_str = "; ".join(applied_jobs)
-        
+            jobs_str = "; ".join(applied_jobs)
+
+        # Verified Offer Details
+        offers = db.query(PlacementOffer).filter(
+            PlacementOffer.student_id == u.id,
+            PlacementOffer.acceptance_status != OfferAcceptanceStatus.RESCINDED
+        ).all()
+        accepted_offer = next((o for o in offers if o.acceptance_status == OfferAcceptanceStatus.ACCEPTED), None)
+        accepted_ctc_str = f"{accepted_offer.ctc_lpa:.2f}" if (accepted_offer and accepted_offer.ctc_lpa is not None) else ""
+        if accepted_offer:
+            offer_status_str = "ACCEPTED"
+        elif len(offers) > 0:
+            offer_status_str = offers[0].acceptance_status.value.upper()
+        else:
+            offer_status_str = "NONE"
+
         writer.writerow([
             u.id,
             profile.full_name if (profile and profile.full_name) else u.name,
@@ -633,8 +656,12 @@ async def export_placement_report(
             len(apps),
             len(shortlists),
             jobs_str,
-            skills_str
+            skills_str,
+            len(offers),
+            accepted_ctc_str,
+            offer_status_str,
         ])
+
     
     csv_content = output.getvalue()
     filename = f"placement_report_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
@@ -880,3 +907,216 @@ async def get_student_details_for_placement(
         "total_applications": len(apps),
         "total_shortlists": len(shortlists)
     }
+
+
+# ============================================
+# VERIFIED PLACEMENT OFFER ENDPOINTS (Phase 3.3.4)
+# ============================================
+
+def _serialize_placement_offer(offer: PlacementOffer) -> PlacementOfferResponse:
+    job = offer.job_posting
+    company = job.company if job else None
+    student = offer.student
+    return PlacementOfferResponse(
+        id=offer.id,
+        application_id=offer.application_id,
+        student_id=offer.student_id,
+        job_posting_id=offer.job_posting_id,
+        job_title=job.title if job else None,
+        company_name=company.name if company else None,
+        student_name=student.name if student else None,
+        student_email=student.email if student else None,
+        ctc_lpa=offer.ctc_lpa,
+        designation=offer.designation,
+        acceptance_status=offer.acceptance_status.value if hasattr(offer.acceptance_status, "value") else str(offer.acceptance_status),
+        offer_letter_file_id=offer.offer_letter_file_id,
+        offer_date=offer.offer_date,
+        response_date=offer.response_date,
+        verified_by=offer.verified_by,
+        created_at=offer.created_at,
+        updated_at=offer.updated_at,
+    )
+
+
+@router.post("/offers", response_model=PlacementOfferResponse, status_code=status.HTTP_201_CREATED)
+async def create_verified_offer(
+    payload: PlacementOfferCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Create a formal placement offer after Placement Officer verification.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        offer = placement_offer_service.create_placement_offer(
+            db=db,
+            application_id=payload.application_id,
+            ctc_lpa=payload.ctc_lpa,
+            designation=payload.designation,
+            offer_letter_file_id=payload.offer_letter_file_id,
+            offer_date=payload.offer_date,
+            student_id=payload.student_id,
+            job_posting_id=payload.job_posting_id,
+            current_user=current_user,
+        )
+        return _serialize_placement_offer(offer)
+    except ValueError as e:
+        if "already exists" in str(e).lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.put("/offers/{offer_id}", response_model=PlacementOfferResponse)
+async def update_offer_terms(
+    offer_id: int,
+    payload: PlacementOfferUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update terms of an existing verified placement offer.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        offer = placement_offer_service.update_placement_offer(
+            db=db,
+            offer_id=offer_id,
+            ctc_lpa=payload.ctc_lpa,
+            designation=payload.designation,
+            offer_letter_file_id=payload.offer_letter_file_id,
+            offer_date=payload.offer_date,
+            reason=payload.reason,
+            current_user=current_user,
+        )
+        return _serialize_placement_offer(offer)
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post("/offers/{offer_id}/respond", response_model=PlacementOfferResponse)
+async def respond_to_offer(
+    offer_id: int,
+    payload: PlacementOfferResponseRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Student response (accept or decline) to their own verified placement offer.
+    Student identity is taken strictly from authenticated server-side user.
+    """
+    try:
+        offer = placement_offer_service.respond_to_placement_offer(
+            db=db,
+            offer_id=offer_id,
+            decision=payload.decision,
+            remarks=payload.remarks,
+            current_user=current_user,
+        )
+        return _serialize_placement_offer(offer)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        err_msg = str(e)
+        if "not found" in err_msg.lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=err_msg)
+        if "conflicting" in err_msg.lower() or "cannot change" in err_msg.lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err_msg)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err_msg)
+
+
+@router.post("/offers/{offer_id}/rescind", response_model=PlacementOfferResponse)
+async def rescind_offer(
+    offer_id: int,
+    payload: PlacementOfferRescindRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Rescind a placement offer with a mandatory audit reason.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        offer = placement_offer_service.rescind_placement_offer(
+            db=db,
+            offer_id=offer_id,
+            reason=payload.reason,
+            current_user=current_user,
+        )
+        return _serialize_placement_offer(offer)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get("/offers/my-offers", response_model=List[PlacementOfferResponse])
+async def get_my_placement_offers(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve all placement offers extended to the authenticated student."""
+    if current_user.role != UserRole.STUDENT and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only students can view their offers")
+    offers = placement_offer_service.get_student_offers(db=db, student_id=current_user.id, current_user=current_user)
+    return [_serialize_placement_offer(o) for o in offers]
+
+
+@router.get("/offers/{offer_id}", response_model=PlacementOfferResponse)
+async def get_placement_offer_details(
+    offer_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get placement offer details. Accessible by Placement Officers, Admins, or offer recipient."""
+    try:
+        offer = placement_offer_service.get_placement_offer_by_id(db=db, offer_id=offer_id, current_user=current_user)
+        return _serialize_placement_offer(offer)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/offers", response_model=List[PlacementOfferResponse])
+async def list_placement_offers(
+    job_posting_id: Optional[int] = Query(None),
+    student_id: Optional[int] = Query(None),
+    acceptance_status: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """List all placement offers with optional filtering. Accessible by Placement Officers and Admins."""
+    check_placement_officer_or_admin(current_user)
+    offers = placement_offer_service.list_placement_offers(
+        db=db,
+        job_posting_id=job_posting_id,
+        student_id=student_id,
+        acceptance_status=acceptance_status,
+        skip=skip,
+        limit=limit,
+        current_user=current_user,
+    )
+    return [_serialize_placement_offer(o) for o in offers]
+
+
+@router.get("/accounting")
+async def get_placement_accounting(
+    current_user: User = Depends(get_current_placement_officer),
+    db: Session = Depends(get_db),
+):
+    """Retrieve detailed placement accounting metrics."""
+    return placement_offer_service.get_placement_accounting_metrics(db)
