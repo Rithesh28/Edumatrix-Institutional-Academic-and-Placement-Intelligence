@@ -47,11 +47,13 @@ from ..schemas.placement import (
     PlacementOfferResponse,
     RecruitmentRoundCreate, RecruitmentRoundResponse,
     StudentRoundOutcomeCorrectionRequest, StudentProgressionItem,
+    CleanupPreviewResponse, CleanupExecuteRequest, CleanupExecuteResponse,
 )
 from ..services.placement_service import placement_service
 from ..services.jd_parser_service import jd_parser_service
 from ..services.placement_offer_service import placement_offer_service
 from ..services.recruitment_progression_service import recruitment_progression_service
+from ..services.placement_cleanup_service import placement_cleanup_service
 
 logger = logging.getLogger(__name__)
 
@@ -1247,8 +1249,9 @@ async def get_student_recruitment_progression(
     Retrieve chronological recruitment progression history across rounds for a student.
     Accessible by Placement Officers, Admins, or the student themselves.
     """
-    if current_user.role == UserRole.STUDENT and current_user.id != student_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access another student's progression.")
+    if current_user.role not in [UserRole.ADMIN, UserRole.PLACEMENT_OFFICER]:
+        if current_user.role != UserRole.STUDENT or current_user.id != student_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access another student's progression.")
     
     try:
         progression = recruitment_progression_service.get_student_progression(
@@ -1294,4 +1297,74 @@ async def correct_round_outcome(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+# =============================================================================
+# SAFE TEST-DATA CLEANUP ENDPOINTS (Phase 3.4.1)
+# =============================================================================
+
+@router.get("/cleanup/preview", response_model=CleanupPreviewResponse)
+async def preview_recruitment_cleanup(
+    company_ids: Optional[List[int]] = Query(None),
+    pattern: Optional[str] = Query(None),
+    include_all_candidates: bool = Query(True),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Preview candidates for safe recruitment test-data cleanup.
+    Evaluates dependent record counts, safety classifications, and protection reasons.
+    Preview operations are strictly read-only and never mutate records or delete storage files.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        preview_data = placement_cleanup_service.generate_cleanup_preview(
+            db=db,
+            company_ids=company_ids,
+            pattern=pattern,
+            include_all_candidates=include_all_candidates,
+        )
+        return CleanupPreviewResponse(**preview_data)
+    except Exception as e:
+        logger.error(f"Error generating cleanup preview: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate cleanup preview: {str(e)}"
+        )
+
+
+@router.post("/cleanup/execute", response_model=CleanupExecuteResponse)
+async def execute_recruitment_cleanup(
+    payload: CleanupExecuteRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Execute explicit recruitment test-data cleanup ('archive' or 'purge').
+    Requires explicit company selection and strict safety re-validation at execution time.
+    'purge' mode requires confirmation_phrase='CONFIRM_PURGE_TEST_DATA'.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        result = placement_cleanup_service.execute_cleanup(
+            db=db,
+            company_ids=payload.company_ids,
+            mode=payload.mode,
+            confirmation_phrase=payload.confirmation_phrase,
+            current_user=current_user,
+        )
+        return CleanupExecuteResponse(**result)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error executing cleanup: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cleanup execution failed: {str(e)}"
+        )
+
 

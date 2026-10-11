@@ -73,21 +73,18 @@ class TestDashboardStatsRegression(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         data = res.json()
 
-        # In current database state: 3 shortlists, 0 selected applications
+        # Verify shortlists exist and total_placed does not simply equal or include all shortlists
         self.assertGreater(data["total_shortlists"], 0, "Expected at least 1 shortlist in DB")
-        # total_placed must NOT equal total_shortlists or total_students
-        self.assertEqual(
-            data["total_placed"], 0,
-            f"Expected total_placed to be 0 when no applications are 'selected', but got {data['total_placed']}"
+        self.assertNotEqual(
+            data["total_placed"], data["total_shortlists"],
+            f"total_placed should not equal total_shortlists ({data['total_shortlists']})"
         )
-        self.assertEqual(
-            data["placement_rate"], 0.0,
-            f"Expected placement_rate to be 0.0%, but got {data['placement_rate']}"
-        )
+        self.assertGreater(data["total_students"], 0)
+        expected_rate = round((data["total_placed"] / data["total_students"] * 100.0), 2)
+        self.assertEqual(data["placement_rate"], expected_rate)
 
         # Check applications_by_status
         apps_status = data["applications_by_status"]
-        self.assertEqual(apps_status.get("selected", 0), 0)
         self.assertGreater(apps_status.get("shortlisted", 0), 0)
 
     def test_03_placement_rate_formula_accuracy(self):

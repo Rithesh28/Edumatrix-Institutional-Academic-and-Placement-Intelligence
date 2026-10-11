@@ -935,6 +935,9 @@ class RecruitmentResultService:
                 item.notification_event_key = event_key
                 notifications_dispatched += 1
 
+        # Flush pending changes to session before calculating summary counts
+        db.flush()
+
         # Update batch summary counts
         total_confirmed = db.query(RecruitmentResultItem).filter(
             RecruitmentResultItem.batch_id == batch.id,

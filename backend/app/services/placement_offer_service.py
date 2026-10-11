@@ -607,7 +607,7 @@ class PlacementOfferService:
 
         if current_user:
             role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-            if role_val.lower() == "student" and offer.student_id != current_user.id:
+            if role_val.lower() not in ["placement_officer", "admin"] and offer.student_id != current_user.id:
                 raise PermissionError("Access denied: You can only view your own placement offers.")
 
         return offer
@@ -621,7 +621,7 @@ class PlacementOfferService:
         """Fetch all placement offers for a specific student."""
         if current_user:
             role_val = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
-            if role_val.lower() == "student" and student_id != current_user.id:
+            if role_val.lower() not in ["placement_officer", "admin"] and student_id != current_user.id:
                 raise PermissionError("Access denied: You can only view your own placement offers.")
 
         return db.query(PlacementOffer).filter(

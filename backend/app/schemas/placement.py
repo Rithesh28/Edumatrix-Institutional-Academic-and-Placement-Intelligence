@@ -603,4 +603,19 @@ class StudentProgressionItem(BaseModel):
     offer_status: Optional[str] = None
     offer_ctc_lpa: Optional[float] = None
 
+
+# ============================================
+# SAFE PLACEMENT TEST-DATA CLEANUP SCHEMAS (Phase 3.4.1)
+# ============================================
+
+from .placement_cleanup import (
+    CleanupDependentCounts,
+    CompanyCleanupCandidate,
+    CleanupPreviewSummary,
+    CleanupPreviewResponse,
+    CleanupExecuteRequest,
+    CleanupExecuteResponse,
+)
+
+
 
