@@ -28,6 +28,14 @@ from ..models.job_posting import JobPosting, JobStatus
 from ..models.file import File
 from ..models.user import User, UserRole
 from ..models.notification import Notification
+from ..models.application import Application, ApplicationStatus
+from ..models.recruitment_round import (
+    RecruitmentRound,
+    StudentRoundOutcome,
+    RoundOutcome,
+    PlacementOffer,
+    OfferAcceptanceStatus,
+)
 from ..schemas.recruitment_circular import (
     RecruitmentCircularCreate,
     RecruitmentCircularUpdate,
@@ -658,6 +666,164 @@ class RecruitmentCircularService:
         db.refresh(circular)
         logger.info(f"Archived recruitment circular {circular_id}")
         return self._enrich_circular_response(circular)
+
+    def get_drive_report(self, db: Session, circular_id: int, current_user: User) -> Dict[str, Any]:
+        """
+        Generate authoritative drive placement report scoped to the circular and its linked jobs.
+        Distinguishes:
+        - Unique applicants
+        - Applications per role and status
+        - Student-reported external confirmations
+        - Confirmed progression outcomes by round and role
+        - Verified offers by status (offered, accepted, declined, rescinded)
+        - Unique students with active accepted verified offers (placement accounting standard)
+        """
+        circular = self.get_circular_raw(db, circular_id)
+        if not circular:
+            raise ValueError(f"Recruitment circular with ID {circular_id} not found.")
+
+        # Linked roles
+        linked_jobs = (
+            db.query(JobPosting)
+            .join(RecruitmentCircularJob, RecruitmentCircularJob.job_posting_id == JobPosting.id)
+            .filter(RecruitmentCircularJob.circular_id == circular_id)
+            .all()
+        )
+        linked_job_ids = [j.id for j in linked_jobs]
+        job_title_map = {j.id: j.title for j in linked_jobs}
+
+        applications = []
+        if linked_job_ids:
+            applications = (
+                db.query(Application)
+                .options(
+                    joinedload(Application.student).joinedload(User.student_profile),
+                    joinedload(Application.job_posting),
+                )
+                .filter(Application.job_posting_id.in_(linked_job_ids))
+                .all()
+            )
+
+        unique_applicants = set(a.student_id for a in applications)
+        unique_applicants_count = len(unique_applicants)
+        total_applications_count = len(applications)
+        external_confirmations_count = sum(1 for a in applications if a.external_applied_at is not None)
+
+        # Applications by status
+        app_status_counts = {"applied": 0, "shortlisted": 0, "selected": 0, "rejected": 0}
+        for a in applications:
+            s_val = a.status.value if hasattr(a.status, "value") else str(a.status)
+            app_status_counts[s_val] = app_status_counts.get(s_val, 0) + 1
+
+        # Applications by role
+        applications_by_role = []
+        for job in linked_jobs:
+            job_apps = [a for a in applications if a.job_posting_id == job.id]
+            role_status_counts = {"applied": 0, "shortlisted": 0, "selected": 0, "rejected": 0}
+            for a in job_apps:
+                s_val = a.status.value if hasattr(a.status, "value") else str(a.status)
+                role_status_counts[s_val] = role_status_counts.get(s_val, 0) + 1
+            applications_by_role.append({
+                "job_posting_id": job.id,
+                "job_title": job.title,
+                "total_applications": len(job_apps),
+                "applications_by_status": role_status_counts,
+                "external_confirmed_count": sum(1 for a in job_apps if a.external_applied_at is not None),
+            })
+
+        # Branch breakdown of unique students
+        student_branch_map = {}
+        for a in applications:
+            if a.student_id not in student_branch_map:
+                branch = "Unknown"
+                if a.student:
+                    if hasattr(a.student, "student_profile") and a.student.student_profile and a.student.student_profile.branch:
+                        branch = a.student.student_profile.branch
+                    elif a.student.department:
+                        branch = a.student.department
+                student_branch_map[a.student_id] = branch
+
+        branch_breakdown = {}
+        for b in student_branch_map.values():
+            branch_breakdown[b] = branch_breakdown.get(b, 0) + 1
+
+        # Rounds summary
+        rounds_summary = []
+        if linked_job_ids:
+            rounds = (
+                db.query(RecruitmentRound)
+                .filter(RecruitmentRound.job_posting_id.in_(linked_job_ids))
+                .order_by(RecruitmentRound.job_posting_id, RecruitmentRound.round_number)
+                .all()
+            )
+            for r in rounds:
+                outcomes = (
+                    db.query(StudentRoundOutcome)
+                    .filter(StudentRoundOutcome.round_id == r.id)
+                    .all()
+                )
+                cleared_count = sum(1 for o in outcomes if o.outcome == RoundOutcome.CLEARED)
+                rejected_count = sum(1 for o in outcomes if o.outcome == RoundOutcome.REJECTED)
+                absent_count = sum(1 for o in outcomes if o.outcome == RoundOutcome.ABSENT)
+                on_hold_count = sum(1 for o in outcomes if o.outcome == RoundOutcome.ON_HOLD)
+                rounds_summary.append({
+                    "round_id": r.id,
+                    "round_number": r.round_number,
+                    "round_name": r.round_name,
+                    "round_type": r.round_type.value if hasattr(r.round_type, "value") else str(r.round_type),
+                    "job_posting_id": r.job_posting_id,
+                    "job_title": job_title_map.get(r.job_posting_id, "Unknown Role"),
+                    "cleared_count": cleared_count,
+                    "rejected_count": rejected_count,
+                    "absent_count": absent_count,
+                    "on_hold_count": on_hold_count,
+                    "total_outcomes": len(outcomes),
+                })
+
+        # Verified Offers summary
+        offers = []
+        if linked_job_ids:
+            offers = (
+                db.query(PlacementOffer)
+                .filter(PlacementOffer.job_posting_id.in_(linked_job_ids))
+                .all()
+            )
+
+        offered_count = sum(1 for o in offers if o.acceptance_status == OfferAcceptanceStatus.OFFERED)
+        accepted_count = sum(1 for o in offers if o.acceptance_status == OfferAcceptanceStatus.ACCEPTED)
+        declined_count = sum(1 for o in offers if o.acceptance_status == OfferAcceptanceStatus.DECLINED)
+        rescinded_count = sum(1 for o in offers if o.acceptance_status == OfferAcceptanceStatus.RESCINDED)
+        unique_students_with_offers = len(set(o.student_id for o in offers))
+        unique_students_placed = len(set(o.student_id for o in offers if o.acceptance_status == OfferAcceptanceStatus.ACCEPTED))
+
+        offers_summary = {
+            "total_offers": len(offers),
+            "offered_count": offered_count,
+            "accepted_count": accepted_count,
+            "declined_count": declined_count,
+            "rescinded_count": rescinded_count,
+            "unique_students_with_offers": unique_students_with_offers,
+            "unique_students_placed": unique_students_placed,
+        }
+
+        return {
+            "circular_id": circular.id,
+            "circular_title": circular.title,
+            "company_id": circular.company_id,
+            "company_name": circular.company.name if circular.company else "Unknown Company",
+            "linked_roles_count": len(linked_jobs),
+            "unique_applicants_count": unique_applicants_count,
+            "total_applications_count": total_applications_count,
+            "external_confirmations_count": external_confirmations_count,
+            "verified_placed_students_count": unique_students_placed,
+            "total_verified_offers_count": len(offers),
+            "applications_by_status": app_status_counts,
+            "applications_by_role": applications_by_role,
+            "branch_breakdown": branch_breakdown,
+            "rounds_summary": rounds_summary,
+            "offers_summary": offers_summary,
+            "generated_at": datetime.utcnow(),
+        }
 
 
 recruitment_circular_service = RecruitmentCircularService()

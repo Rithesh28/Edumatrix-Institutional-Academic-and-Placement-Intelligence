@@ -175,6 +175,7 @@ async def link_batch_to_round(
 async def list_result_batches(
     company_id: Optional[int] = Query(None),
     job_posting_id: Optional[int] = Query(None),
+    circular_id: Optional[int] = Query(None, description="Filter batches by recruitment circular ID"),
     status: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -186,6 +187,7 @@ async def list_result_batches(
         db=db,
         company_id=company_id,
         job_posting_id=job_posting_id,
+        circular_id=circular_id,
         status=status,
         skip=skip,
         limit=limit,

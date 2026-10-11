@@ -208,6 +208,8 @@ class ApplicationResponse(ApplicationBase):
     # Additional fields from relationships
     student_name: Optional[str] = None
     student_email: Optional[str] = None
+    student_branch: Optional[str] = None
+    student_cgpa: Optional[float] = None
     job_title: Optional[str] = None
     company_name: Optional[str] = None
     

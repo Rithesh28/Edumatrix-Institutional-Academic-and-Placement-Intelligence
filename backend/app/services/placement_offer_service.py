@@ -632,6 +632,7 @@ class PlacementOfferService:
         self,
         db: Session,
         job_posting_id: Optional[int] = None,
+        circular_id: Optional[int] = None,
         student_id: Optional[int] = None,
         acceptance_status: Optional[str] = None,
         skip: int = 0,
@@ -645,6 +646,12 @@ class PlacementOfferService:
 
         if job_posting_id is not None:
             query = query.filter(PlacementOffer.job_posting_id == job_posting_id)
+        if circular_id is not None:
+            from ..models.recruitment_circular import RecruitmentCircularJob
+            query = query.join(
+                RecruitmentCircularJob,
+                RecruitmentCircularJob.job_posting_id == PlacementOffer.job_posting_id
+            ).filter(RecruitmentCircularJob.circular_id == circular_id)
         if student_id is not None:
             query = query.filter(PlacementOffer.student_id == student_id)
         if acceptance_status is not None:

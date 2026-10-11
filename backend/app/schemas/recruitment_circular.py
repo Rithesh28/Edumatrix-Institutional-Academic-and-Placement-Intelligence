@@ -145,3 +145,70 @@ class RecruitmentCircularPublishResponse(BaseModel):
     circular: RecruitmentCircularResponse
     published_jobs_count: int
     message: str
+
+
+# ============================================
+# DRIVE REPORT SCHEMAS (STAGE 3.4.3)
+# ============================================
+
+class RoleApplicationSummary(BaseModel):
+    """Application breakdown per linked job role."""
+    job_posting_id: int
+    job_title: str
+    total_applications: int
+    applications_by_status: Dict[str, int]
+    external_confirmed_count: int
+
+
+class RoundOutcomeSummary(BaseModel):
+    """Recruitment round outcome summary per round and role."""
+    round_id: int
+    round_number: int
+    round_name: str
+    round_type: str
+    job_posting_id: int
+    job_title: str
+    cleared_count: int
+    rejected_count: int
+    absent_count: int
+    on_hold_count: int
+    total_outcomes: int
+
+
+class DriveOffersSummary(BaseModel):
+    """Drive-level verified offer metrics."""
+    total_offers: int
+    offered_count: int
+    accepted_count: int
+    declined_count: int
+    rescinded_count: int
+    unique_students_with_offers: int
+    unique_students_placed: int  # >= 1 ACCEPTED offer per institutional accounting
+
+
+class DriveReportResponse(BaseModel):
+    """Full drive placement report response."""
+    circular_id: int
+    circular_title: str
+    company_id: int
+    company_name: str
+    linked_roles_count: int
+
+    # Executive counts
+    unique_applicants_count: int
+    total_applications_count: int
+    external_confirmations_count: int
+
+    # Placed accounting (institutional standard: strictly active accepted offers)
+    verified_placed_students_count: int
+    total_verified_offers_count: int
+
+    # Categorical breakdowns
+    applications_by_status: Dict[str, int]
+    applications_by_role: List[RoleApplicationSummary]
+    branch_breakdown: Dict[str, int]
+    rounds_summary: List[RoundOutcomeSummary]
+    offers_summary: DriveOffersSummary
+
+    generated_at: datetime
+

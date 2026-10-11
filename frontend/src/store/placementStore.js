@@ -54,6 +54,7 @@ import {
   getPlacementAccounting,
   getMyOffers,
   respondToOffer,
+  getCircularDriveReport,
 } from '../services/placementService';
 import { useAuthStore } from './authStore';
 
@@ -86,6 +87,9 @@ const usePlacementStore = create((set, get) => ({
   selectedCircular: null,
   isCircularsLoading: false,
   circularsError: null,
+  driveReport: null,
+  isDriveReportLoading: false,
+  driveReportError: null,
 
   // Recruitment Results State (Stage 3.2)
   resultBatches: [],
@@ -807,6 +811,19 @@ const usePlacementStore = create((set, get) => ({
     }
   },
 
+  fetchCircularDriveReport: async (circularId) => {
+    set({ isDriveReportLoading: true, driveReportError: null });
+    try {
+      const driveReport = await getCircularDriveReport(circularId);
+      set({ driveReport, isDriveReportLoading: false });
+      return driveReport;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isDriveReportLoading: false, driveReportError: errorMsg });
+      throw error;
+    }
+  },
+
   // ============================================
   // MATCHING ACTIONS
   // ============================================
@@ -1120,6 +1137,9 @@ const usePlacementStore = create((set, get) => ({
     selectedCircular: null,
     isCircularsLoading: false,
     circularsError: null,
+    driveReport: null,
+    isDriveReportLoading: false,
+    driveReportError: null,
     jobEligibility: null,
     eligibilityJobId: null,
     isEligibilityLoading: false,

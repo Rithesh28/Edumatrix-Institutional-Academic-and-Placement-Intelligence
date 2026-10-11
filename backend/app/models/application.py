@@ -67,14 +67,47 @@ class Application(Base):
             return self.match_snapshot.get("low_match_warning")
         return None
 
+    @property
+    def student_name(self):
+        return self.student.name if self.student else None
+
+    @property
+    def student_email(self):
+        return self.student.email if self.student else None
+
+    @property
+    def student_branch(self):
+        if self.student:
+            if hasattr(self.student, "student_profile") and self.student.student_profile and self.student.student_profile.branch:
+                return self.student.student_profile.branch
+            return self.student.department
+        return None
+
+    @property
+    def student_cgpa(self):
+        if self.student and hasattr(self.student, "student_profile") and self.student.student_profile:
+            return self.student.student_profile.cgpa
+        return None
+
+    @property
+    def job_title(self):
+        return self.job_posting.title if self.job_posting else None
+
+    @property
+    def company_name(self):
+        return self.job_posting.company.name if self.job_posting and self.job_posting.company else None
+
     def to_dict(self):
         return {
             "id": self.id,
             "student_id": self.student_id,
-            "student_name": self.student.name if self.student else None,
+            "student_name": self.student_name,
+            "student_email": self.student_email,
+            "student_branch": self.student_branch,
+            "student_cgpa": self.student_cgpa,
             "job_posting_id": self.job_posting_id,
-            "job_title": self.job_posting.title if self.job_posting else None,
-            "company_name": self.job_posting.company.name if self.job_posting and self.job_posting.company else None,
+            "job_title": self.job_title,
+            "company_name": self.company_name,
             "status": self.status.value if self.status else None,
             "eligibility_score": self.eligibility_score,
             "match_percentage": self.match_percentage,

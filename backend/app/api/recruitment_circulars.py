@@ -22,6 +22,7 @@ from ..schemas.recruitment_circular import (
     RecruitmentCircularPublishResponse,
     CircularAttachmentCreate,
     CircularJobLinkRequest,
+    DriveReportResponse,
 )
 from ..services.recruitment_circular_service import recruitment_circular_service
 
@@ -264,3 +265,29 @@ async def unlink_job(
     except Exception as e:
         logger.error(f"Error unlinking job {job_posting_id} from circular {circular_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to unlink job.")
+
+
+# ============================================
+# DRIVE PLACEMENT REPORT (STAGE 3.4.3)
+# ============================================
+
+@router.get("/{circular_id}/report", response_model=DriveReportResponse)
+async def get_drive_report(
+    circular_id: int,
+    current_user: User = Depends(require_placement_officer_or_admin),
+    db: Session = Depends(get_db),
+):
+    """
+    Get authoritative drive placement report.
+    Scoped to the selected circular and all its linked job roles.
+    Enforces Placement Officer and Admin authorization.
+    """
+    try:
+        report = recruitment_circular_service.get_drive_report(db, circular_id, current_user)
+        return report
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error generating drive report for circular {circular_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to generate drive report.")
+

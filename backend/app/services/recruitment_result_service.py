@@ -278,6 +278,7 @@ class RecruitmentResultService:
         db: Session,
         company_id: Optional[int] = None,
         job_posting_id: Optional[int] = None,
+        circular_id: Optional[int] = None,
         status: Optional[str] = None,
         skip: int = 0,
         limit: int = 50,
@@ -294,6 +295,25 @@ class RecruitmentResultService:
 
         if company_id:
             query = query.filter(RecruitmentResultBatch.company_id == company_id)
+        if circular_id:
+            from ..models.recruitment_circular import RecruitmentCircularJob
+            from sqlalchemy import or_, and_
+            linked_job_ids = [
+                r[0] for r in db.query(RecruitmentCircularJob.job_posting_id)
+                .filter(RecruitmentCircularJob.circular_id == circular_id).all()
+            ]
+            if linked_job_ids:
+                query = query.filter(
+                    or_(
+                        RecruitmentResultBatch.circular_id == circular_id,
+                        and_(
+                            RecruitmentResultBatch.circular_id.is_(None),
+                            RecruitmentResultBatch.job_posting_id.in_(linked_job_ids),
+                        )
+                    )
+                )
+            else:
+                query = query.filter(RecruitmentResultBatch.circular_id == circular_id)
         if job_posting_id:
             query = query.filter(RecruitmentResultBatch.job_posting_id == job_posting_id)
         if status:

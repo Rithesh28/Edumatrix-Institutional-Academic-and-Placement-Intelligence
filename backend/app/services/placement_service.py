@@ -435,18 +435,25 @@ class PlacementService:
     
     def get_applications(self, db: Session, student_id: Optional[int] = None,
                          job_posting_id: Optional[int] = None,
+                         circular_id: Optional[int] = None,
                          status: Optional[ApplicationStatus] = None,
                          skip: int = 0, limit: int = 100) -> List[Application]:
         """Get applications with filters."""
         query = db.query(Application).options(
-            joinedload(Application.student),
-            joinedload(Application.job_posting)
+            joinedload(Application.student).joinedload(User.student_profile),
+            joinedload(Application.job_posting).joinedload(JobPosting.company)
         )
         
         if student_id:
             query = query.filter(Application.student_id == student_id)
         if job_posting_id:
             query = query.filter(Application.job_posting_id == job_posting_id)
+        if circular_id:
+            from ..models.recruitment_circular import RecruitmentCircularJob
+            query = query.join(
+                RecruitmentCircularJob,
+                RecruitmentCircularJob.job_posting_id == Application.job_posting_id
+            ).filter(RecruitmentCircularJob.circular_id == circular_id)
         if status:
             query = query.filter(Application.status == status)
         

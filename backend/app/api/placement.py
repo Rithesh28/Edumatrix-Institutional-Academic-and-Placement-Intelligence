@@ -352,6 +352,7 @@ async def create_application(
 async def get_applications(
     student_id: Optional[int] = Query(None, description="Filter by student ID"),
     job_posting_id: Optional[int] = Query(None, description="Filter by job posting ID"),
+    circular_id: Optional[int] = Query(None, description="Filter by recruitment circular ID"),
     status: Optional[str] = Query(None, description="Filter by status"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
@@ -363,7 +364,10 @@ async def get_applications(
     if current_user.role == UserRole.STUDENT:
         student_id = current_user.id
     
-    applications = placement_service.get_applications(db, student_id, job_posting_id, status, skip, limit)
+    applications = placement_service.get_applications(
+        db, student_id=student_id, job_posting_id=job_posting_id,
+        circular_id=circular_id, status=status, skip=skip, limit=limit
+    )
     results = []
     for a in applications:
         resp = ApplicationResponse.model_validate(a)
@@ -1102,6 +1106,7 @@ async def get_placement_offer_details(
 @router.get("/offers", response_model=List[PlacementOfferResponse])
 async def list_placement_offers(
     job_posting_id: Optional[int] = Query(None),
+    circular_id: Optional[int] = Query(None, description="Filter offers by recruitment circular ID"),
     student_id: Optional[int] = Query(None),
     acceptance_status: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
@@ -1114,6 +1119,7 @@ async def list_placement_offers(
     offers = placement_offer_service.list_placement_offers(
         db=db,
         job_posting_id=job_posting_id,
+        circular_id=circular_id,
         student_id=student_id,
         acceptance_status=acceptance_status,
         skip=skip,

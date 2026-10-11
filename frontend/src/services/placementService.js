@@ -357,4 +357,11 @@ export const respondToOffer = async (offerId, data) => {
   const response = await api.post(`/placement/offers/${offerId}/respond`, data);
   return response.data;
 };
+
+// Drive Placement Report (Stage 3.4.3)
+export const getCircularDriveReport = async (circularId) => {
+  const response = await api.get(`/placement/circulars/${circularId}/report`);
+  return response.data;
+};
+
 
