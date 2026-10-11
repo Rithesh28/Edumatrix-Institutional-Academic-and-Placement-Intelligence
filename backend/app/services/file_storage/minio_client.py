@@ -89,6 +89,7 @@ class MinIOClient:
             object_key: The key of the uploaded object
         """
         try:
+            self._create_bucket_if_not_exists(bucket)
             file_size = len(file_data)
             file_stream = BytesIO(file_data)
             

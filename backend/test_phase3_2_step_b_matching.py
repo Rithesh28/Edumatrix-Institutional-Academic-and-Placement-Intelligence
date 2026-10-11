@@ -685,6 +685,7 @@ class TestPhase32StepBMatchingFoundation(unittest.TestCase):
             mock_draft_job.branch_eligibility = ["CSE"]
             mock_draft_job.location = "Remote"
             mock_draft_job.salary_range = "6 LPA"
+            mock_draft_job.application_url = None
             mock_draft_job.application_deadline = None
             mock_draft_job.drive_date = None
             mock_draft_job.created_by = 401

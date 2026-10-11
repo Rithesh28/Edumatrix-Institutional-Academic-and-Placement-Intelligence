@@ -181,6 +181,17 @@ function StudentJobs() {
     setSortBy('newest');
   };
 
+  const filteredCirculars = useMemo(() => {
+    return (circulars || []).filter((circ) => {
+      return (
+        !searchTerm ||
+        circ.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        circ.company_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        circ.summary?.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    });
+  }, [circulars, searchTerm]);
+
   // Helper for deadline calculation
   const getDeadlineMeta = (deadlineStr) => {
     if (!deadlineStr) return null;
@@ -279,19 +290,190 @@ function StudentJobs() {
         <div className="flex items-center gap-2">
           <button
             onClick={loadData}
-            disabled={isLoading || isRefreshing}
+            disabled={isLoading || isRefreshing || isCircularsLoading}
             className="px-3 py-2 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            title="Refresh job listings"
+            title="Refresh listings"
           >
-            <RefreshCw className={`w-4 h-4 ${isLoading || isRefreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${isLoading || isRefreshing || isCircularsLoading ? 'animate-spin' : ''}`} />
             <span>Refresh</span>
           </button>
         </div>
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+      {/* Tab Switcher */}
+      <div className="flex items-center gap-2 border-b border-gray-200 dark:border-gray-800 pb-2">
+        <button
+          onClick={() => setSearchParams({ tab: 'jobs' })}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+            activeTab === 'jobs'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+          }`}
+        >
+          <Briefcase className="w-4 h-4" />
+          <span>Campus Jobs ({jobs.length})</span>
+        </button>
+
+        <button
+          onClick={() => setSearchParams({ tab: 'circulars' })}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+            activeTab === 'circulars'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+          }`}
+        >
+          <Megaphone className="w-4 h-4" />
+          <span>Recruitment Circulars ({circulars.length})</span>
+        </button>
+      </div>
+
+      {activeTab === 'circulars' ? (
+        /* Recruitment Circulars View */
+        <div className="space-y-6">
+          {/* Circulars Search */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search circulars by company name, title, or summary..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full pl-9 pr-4 py-2.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm dark:text-white"
+            />
+          </div>
+
+          {isCircularsLoading && circulars.length === 0 ? (
+            <div className="p-12 text-center text-gray-500 dark:text-gray-400">
+              <div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-3" />
+              <p>Loading eligible recruitment circulars...</p>
+            </div>
+          ) : circularsError ? (
+            <div className="p-6 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-xl text-center text-red-700 dark:text-red-300">
+              <p>{circularsError}</p>
+            </div>
+          ) : filteredCirculars.length === 0 ? (
+            <div className="p-12 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 text-center">
+              <Megaphone className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                No recruitment circulars found
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {searchTerm
+                  ? 'No circulars match your search query.'
+                  : 'There are currently no active recruitment drive circulars for your department.'}
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredCirculars.map((circ) => {
+                const isPassed =
+                  circ.application_deadline && new Date(circ.application_deadline) < new Date();
+                return (
+                  <div
+                    key={circ.id}
+                    className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:border-blue-300 dark:hover:border-blue-700 transition-all flex flex-col justify-between space-y-4"
+                  >
+                    <div className="space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider flex items-center gap-1">
+                            <Building2 className="w-3.5 h-3.5" />
+                            {circ.company_name}
+                          </span>
+                          <h3
+                            onClick={() => navigate(`/student/jobs/circulars/${circ.id}`)}
+                            className="text-base font-bold text-gray-900 dark:text-white mt-0.5 hover:text-blue-600 dark:hover:text-blue-400 cursor-pointer"
+                          >
+                            {circ.title}
+                          </h3>
+                        </div>
+
+                        {circ.published_at && (
+                          <span className="text-[10px] text-gray-400 font-medium whitespace-nowrap">
+                            {new Date(circ.published_at).toLocaleDateString()}
+                          </span>
+                        )}
+                      </div>
+
+                      {circ.summary && (
+                        <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+                          {circ.summary}
+                        </p>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2 text-xs text-gray-500 dark:text-gray-400 pt-1">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                          <span>
+                            Drive: {circ.drive_date ? new Date(circ.drive_date).toLocaleDateString() : 'TBD'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <Clock
+                            className={`w-3.5 h-3.5 ${
+                              isPassed ? 'text-red-500' : 'text-gray-400'
+                            }`}
+                          />
+                          <span className={isPassed ? 'text-red-600 dark:text-red-400 font-semibold' : ''}>
+                            {isPassed
+                              ? 'Deadline Passed'
+                              : circ.application_deadline
+                              ? `Deadline: ${new Date(circ.application_deadline).toLocaleDateString()}`
+                              : 'Open'}
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <Briefcase className="w-3.5 h-3.5 text-gray-400" />
+                          <span>{circ.linked_jobs_count || circ.linked_jobs?.length || 0} Roles</span>
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <Paperclip className="w-3.5 h-3.5 text-gray-400" />
+                          <span>{circ.attachments_count || circ.attachments?.length || 0} Attachments</span>
+                        </div>
+                      </div>
+
+                      {circ.branch_eligibility && circ.branch_eligibility.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-1">
+                          {circ.branch_eligibility.slice(0, 3).map((branch, idx) => (
+                            <span
+                              key={idx}
+                              className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded text-[10px]"
+                            >
+                              {branch}
+                            </span>
+                          ))}
+                          {circ.branch_eligibility.length > 3 && (
+                            <span className="text-[10px] text-gray-400 self-center">
+                              +{circ.branch_eligibility.length - 3} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-3 border-t border-gray-100 dark:border-gray-800">
+                      <button
+                        onClick={() => navigate(`/student/jobs/circulars/${circ.id}`)}
+                        className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <span>View Drive Details & Roles</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Metrics Row */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
               Active Drives
@@ -743,6 +925,8 @@ function StudentJobs() {
             );
           })}
         </div>
+      )}
+        </>
       )}
     </div>
   );

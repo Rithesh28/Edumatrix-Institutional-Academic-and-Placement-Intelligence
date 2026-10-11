@@ -155,7 +155,7 @@ const CircularForm = () => {
       if (isEditMode) {
         // In edit mode, link immediately via API
         const updated = await addCircularAttachment(id, {
-          file_id: uploadedFileObj.id,
+          file_id: uploadedFileObj.file_id || uploadedFileObj.id,
           attachment_type: uploadType,
           display_order: Number(uploadOrder),
         });
@@ -165,8 +165,8 @@ const CircularForm = () => {
         // In create mode, track for creation
         const newAtt = {
           id: `temp-${Date.now()}`,
-          file_id: uploadedFileObj.id,
-          filename: uploadedFileObj.original_filename || uploadFile.name,
+          file_id: uploadedFileObj.file_id || uploadedFileObj.id,
+          filename: uploadedFileObj.filename || uploadedFileObj.original_filename || uploadFile.name,
           attachment_type: uploadType,
           display_order: Number(uploadOrder),
           file_size: uploadFile.size,

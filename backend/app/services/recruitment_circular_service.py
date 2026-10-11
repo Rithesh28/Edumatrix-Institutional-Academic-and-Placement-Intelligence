@@ -60,7 +60,7 @@ class RecruitmentCircularService:
                 "attachment_type": att.attachment_type,
                 "display_order": att.display_order,
                 "created_at": att.created_at,
-                "filename": file_meta.original_filename if file_meta else None,
+                "filename": file_meta.filename if file_meta else None,
                 "file_size": file_meta.file_size if file_meta else None,
                 "mime_type": file_meta.mime_type if file_meta else None,
                 "download_url": f"/files/{att.file_id}/download",

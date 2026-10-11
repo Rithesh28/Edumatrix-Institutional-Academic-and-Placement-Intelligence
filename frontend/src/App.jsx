@@ -46,6 +46,10 @@ import Students from './pages/placement/Students'
 import PlacementStudentProfile from './pages/placement/StudentProfile'
 import Shortlist from './pages/placement/Shortlist'
 import Reports from './pages/placement/Reports'
+import Circulars from './pages/placement/Circulars'
+import CircularForm from './pages/placement/CircularForm'
+import CircularDetails from './pages/placement/CircularDetails'
+import StudentRecruitmentCircularDetails from './pages/student/RecruitmentCircularDetails'
 
 // Resume Analyzer Import
 import ResumeAnalyzer from './pages/placement/ResumeAnalyzer'
@@ -98,6 +102,7 @@ function App() {
             <Route element={<ProtectedRoute allowedRoles={['student', 'admin']} />}>
               <Route path="/student/dashboard" element={<StudentDashboard />} />
               <Route path="/student/jobs" element={<StudentJobs />} />
+              <Route path="/student/jobs/circulars/:id" element={<StudentRecruitmentCircularDetails />} />
               <Route path="/student/jobs/:id" element={<StudentJobDetails />} />
               <Route path="/student/applications" element={<StudentApplications />} />
               <Route path="/student/circulars" element={<StudentCirculars />} />
@@ -160,6 +165,10 @@ function App() {
               <Route path="/placement/jobs/post" element={<JobForm />} />
               <Route path="/placement/jobs/:id" element={<JobDetails />} />
               <Route path="/placement/jobs/:id/edit" element={<JobForm />} />
+              <Route path="/placement/circulars" element={<Circulars />} />
+              <Route path="/placement/circulars/new" element={<CircularForm />} />
+              <Route path="/placement/circulars/:id" element={<CircularDetails />} />
+              <Route path="/placement/circulars/:id/edit" element={<CircularForm />} />
               <Route path="/placement/students" element={<Students />} />
               <Route path="/placement/students/:id" element={<PlacementStudentProfile />} />
               <Route path="/placement/shortlist" element={<Shortlist />} />

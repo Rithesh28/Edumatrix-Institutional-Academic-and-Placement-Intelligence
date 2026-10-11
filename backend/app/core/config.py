@@ -86,7 +86,7 @@ class Settings:
     MAX_FILE_SIZE: int = int(os.getenv("MAX_FILE_SIZE", "52428800"))  # 50MB default
     ALLOWED_EXTENSIONS: List[str] = os.getenv(
         "ALLOWED_EXTENSIONS",
-        ".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.jpg,.jpeg,.png,.txt"
+        ".pdf,.docx,.doc,.pptx,.ppt,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.txt"
     ).split(",")
     ALLOWED_MIME_TYPES: List[str] = [
         "application/pdf",
@@ -94,6 +94,7 @@ class Settings:
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/csv",
         "image/jpeg",
         "image/png",
         "text/plain"

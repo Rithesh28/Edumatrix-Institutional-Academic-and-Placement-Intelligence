@@ -21,6 +21,13 @@ from .recruitment_circular import (
     RecruitmentCircularJob,
     AttachmentType,
 )
+from .recruitment_result import (
+    RecruitmentResultBatch,
+    RecruitmentResultBatchStatus,
+    RecruitmentResultItem,
+    RecruitmentResultItemStatus,
+    RecruitmentResultReviewState,
+)
 from .audit_log import AuditLog
 
 __all__ = [
@@ -65,5 +72,10 @@ __all__ = [
     'RecruitmentCircularAttachment',
     'RecruitmentCircularJob',
     'AttachmentType',
+    'RecruitmentResultBatch',
+    'RecruitmentResultBatchStatus',
+    'RecruitmentResultItem',
+    'RecruitmentResultItemStatus',
+    'RecruitmentResultReviewState',
     'AuditLog'
 ]
