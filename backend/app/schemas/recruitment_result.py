@@ -46,6 +46,7 @@ class RecruitmentResultBatchCreate(BaseModel):
     company_id: int
     job_posting_id: Optional[int] = None
     circular_id: Optional[int] = None
+    round_id: Optional[int] = None
     round_name: str
     round_type: Optional[str] = "assessment"
     is_final_round: Optional[bool] = False
@@ -61,6 +62,8 @@ class RecruitmentResultBatchResponse(BaseModel):
     circular_title: Optional[str] = None
     file_id: UUID
     filename: Optional[str] = None
+    round_id: Optional[int] = None
+    round_number: Optional[int] = None
     round_name: str
     round_type: str
     is_final_round: bool
@@ -95,6 +98,8 @@ class RecruitmentResultConfirmResponse(BaseModel):
     is_final_round: bool
     batch_status: str
     message: str
+    round_id: Optional[int] = None
+    outcomes_recorded: int = 0
 
 
 class StudentSearchItem(BaseModel):

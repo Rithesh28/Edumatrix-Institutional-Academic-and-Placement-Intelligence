@@ -50,10 +50,12 @@ class AuditService:
         outcome: str = "SUCCESS",
         details: Optional[Dict[str, Any]] = None,
         ip_address: Optional[str] = None,
+        auto_commit: bool = True,
     ) -> Optional[AuditLog]:
         """
         Record a security or administrative action in the audit log.
         Safe against logging failures so business logic is not interrupted.
+        Supports outer transactions when auto_commit=False.
         """
         try:
             actor_id = actor.id if actor else None
@@ -75,16 +77,20 @@ class AuditService:
             )
 
             db.add(log_entry)
-            db.commit()
-            db.refresh(log_entry)
+            if auto_commit:
+                db.commit()
+                db.refresh(log_entry)
+            else:
+                db.flush()
             logger.info(f"📝 [AUDIT] {action.upper()} by {actor_email} on {target_type}:{target_id} -> {outcome.upper()}")
             return log_entry
         except Exception as e:
             logger.error(f"❌ Failed to record audit log: {str(e)}")
-            try:
-                db.rollback()
-            except Exception:
-                pass
+            if auto_commit:
+                try:
+                    db.rollback()
+                except Exception:
+                    pass
             return None
 
     @staticmethod

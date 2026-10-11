@@ -28,6 +28,7 @@ from ..schemas.recruitment_result import (
     StudentSearchItem,
 )
 from ..services.recruitment_result_service import recruitment_result_service
+from ..services.recruitment_progression_service import recruitment_progression_service
 from ..services.file_storage.file_service import file_service
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,7 @@ async def upload_and_process_result_file(
     is_final_round: bool = Form(False),
     job_posting_id: Optional[int] = Form(None),
     circular_id: Optional[int] = Form(None),
+    round_id: Optional[int] = Form(None),
     current_user: User = Depends(get_current_placement_officer),
     db: Session = Depends(get_db),
 ):
@@ -102,6 +104,7 @@ async def upload_and_process_result_file(
             is_final_round=is_final_round,
             job_posting_id=job_posting_id,
             circular_id=circular_id,
+            round_id=round_id,
             current_user=current_user,
         )
         return recruitment_result_service.get_batch_by_id(db, batch.id, include_items=True)
@@ -121,6 +124,7 @@ async def process_existing_file(
     is_final_round: bool = Query(False),
     job_posting_id: Optional[int] = Query(None),
     circular_id: Optional[int] = Query(None),
+    round_id: Optional[int] = Query(None),
     current_user: User = Depends(get_current_placement_officer),
     db: Session = Depends(get_db),
 ):
@@ -135,9 +139,30 @@ async def process_existing_file(
             is_final_round=is_final_round,
             job_posting_id=job_posting_id,
             circular_id=circular_id,
+            round_id=round_id,
             current_user=current_user,
         )
         return recruitment_result_service.get_batch_by_id(db, batch.id, include_items=True)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post("/batches/{batch_id}/link-round", response_model=RecruitmentResultBatchResponse)
+async def link_batch_to_round(
+    batch_id: int,
+    round_id: int = Query(...),
+    current_user: User = Depends(get_current_placement_officer),
+    db: Session = Depends(get_db),
+):
+    """Explicitly link a recruitment result batch to an authoritative RecruitmentRound."""
+    try:
+        recruitment_progression_service.link_batch_to_round(
+            db=db,
+            batch_id=batch_id,
+            round_id=round_id,
+            current_user=current_user,
+        )
+        return recruitment_result_service.get_batch_by_id(db, batch_id, include_items=True)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 

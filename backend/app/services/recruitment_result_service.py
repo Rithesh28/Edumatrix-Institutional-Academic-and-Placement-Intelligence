@@ -28,16 +28,53 @@ from ..models.recruitment_result import (
     RecruitmentResultItemStatus,
     RecruitmentResultReviewState,
 )
+from ..models.recruitment_round import (
+    RecruitmentRound,
+    StudentRoundOutcome,
+    RoundOutcome,
+)
 from ..services.file_storage.minio_client import minio_client
 from ..services.recruitment_result_extractor import recruitment_result_extractor
 from ..services.recruitment_result_matcher import recruitment_result_matcher
 from ..services.audit_service import audit_service
+from ..services.recruitment_progression_service import recruitment_progression_service
 
 logger = logging.getLogger(__name__)
 
 
 class RecruitmentResultService:
     """Service handling recruitment result workflows."""
+
+    @staticmethod
+    def map_result_status_to_round_outcome(
+        status: RecruitmentResultItemStatus,
+        is_final_round: bool = False,
+    ) -> RoundOutcome:
+        """
+        Maps tabular RecruitmentResultItemStatus to authoritative RoundOutcome.
+        
+        Mapping rules:
+        - REJECTED -> RoundOutcome.REJECTED
+        - ABSENT -> RoundOutcome.ABSENT
+        - ON_HOLD -> RoundOutcome.ON_HOLD
+        - SHORTLISTED -> RoundOutcome.CLEARED (passed/shortlisted for next stage)
+        - SELECTED in intermediate round -> RoundOutcome.CLEARED (cleared intermediate stage)
+        - SELECTED in final round -> RoundOutcome.OFFERED (verified selection/offer in final stage)
+        """
+        if status == RecruitmentResultItemStatus.REJECTED:
+            return RoundOutcome.REJECTED
+        elif status == RecruitmentResultItemStatus.ABSENT:
+            return RoundOutcome.ABSENT
+        elif status == RecruitmentResultItemStatus.ON_HOLD:
+            return RoundOutcome.ON_HOLD
+        elif status == RecruitmentResultItemStatus.SHORTLISTED:
+            return RoundOutcome.CLEARED
+        elif status == RecruitmentResultItemStatus.SELECTED:
+            if is_final_round:
+                return RoundOutcome.OFFERED
+            return RoundOutcome.CLEARED
+        else:
+            raise ValueError(f"Unknown or unsupported candidate status '{status}'. Cannot map to RoundOutcome.")
 
     # =========================================================================
     # BATCH CREATION & EXTRACTION (UPLOAD STEP)
@@ -52,11 +89,12 @@ class RecruitmentResultService:
         is_final_round: bool = False,
         job_posting_id: Optional[int] = None,
         circular_id: Optional[int] = None,
+        round_id: Optional[int] = None,
         current_user: Optional[User] = None,
     ) -> RecruitmentResultBatch:
         """
         Processes an uploaded result document:
-        1. Validates company, job, and circular consistency
+        1. Validates company, job, round, and circular consistency
         2. Downloads file from MinIO
         3. Extracts structured candidate rows via recruitment_result_extractor
         4. Matches each row conservatively against active students
@@ -67,7 +105,24 @@ class RecruitmentResultService:
         if not company:
             raise ValueError(f"Company ID {company_id} not found.")
 
-        # 2. Job consistency
+        # 2. Round consistency if specified
+        rec_round: Optional[RecruitmentRound] = None
+        if round_id:
+            rec_round = db.query(RecruitmentRound).filter(RecruitmentRound.id == round_id).first()
+            if not rec_round:
+                raise ValueError(f"Recruitment round #{round_id} not found.")
+            if job_posting_id and job_posting_id != rec_round.job_posting_id:
+                raise ValueError(
+                    f"Round #{round_id} belongs to Job #{rec_round.job_posting_id}, but batch specified Job #{job_posting_id}. Cross-job linking is prohibited."
+                )
+            if not job_posting_id:
+                job_posting_id = rec_round.job_posting_id
+            if rec_round.job_posting and rec_round.job_posting.company_id != company_id:
+                raise ValueError(
+                    f"Round #{round_id} company (#{rec_round.job_posting.company_id}) does not match batch company (#{company_id}). Cross-company linking is prohibited."
+                )
+
+        # 3. Job consistency
         job: Optional[JobPosting] = None
         if job_posting_id:
             job = db.query(JobPosting).filter(JobPosting.id == job_posting_id).first()
@@ -76,7 +131,7 @@ class RecruitmentResultService:
             if job.company_id != company_id:
                 raise ValueError(f"JobPosting ID {job_posting_id} belongs to a different company.")
 
-        # 3. Circular consistency
+        # 4. Circular consistency
         circular: Optional[RecruitmentCircular] = None
         if circular_id:
             circular = db.query(RecruitmentCircular).filter(RecruitmentCircular.id == circular_id).first()
@@ -85,7 +140,7 @@ class RecruitmentResultService:
             if circular.company_id != company_id:
                 raise ValueError(f"RecruitmentCircular ID {circular_id} belongs to a different company.")
 
-        # 4. Retrieve File metadata and download bytes
+        # 5. Retrieve File metadata and download bytes
         file_record = db.query(File).filter(File.id == file_id).first()
         if not file_record:
             raise ValueError(f"File ID {file_id} not found.")
@@ -96,7 +151,7 @@ class RecruitmentResultService:
             logger.error(f"Failed to retrieve file {file_id} from storage: {e}", exc_info=True)
             raise ValueError(f"Could not retrieve file content from storage: {str(e)}")
 
-        # 5. Extract structured candidate rows
+        # 6. Extract structured candidate rows
         extracted = recruitment_result_extractor.extract_candidates_from_bytes(
             file_bytes=file_bytes, filename=file_record.filename
         )
@@ -112,15 +167,16 @@ class RecruitmentResultService:
         elif circular and circular.branch_eligibility and isinstance(circular.branch_eligibility, (list, tuple)):
             job_branches = [str(b) for b in circular.branch_eligibility if b]
 
-        # 6. Create Batch record
+        # 7. Create Batch record
         batch = RecruitmentResultBatch(
             company_id=company_id,
             job_posting_id=job_posting_id,
             circular_id=circular_id,
             file_id=file_id,
+            round_id=round_id,
             round_name=round_name.strip(),
             round_type=round_type.strip().lower(),
-            is_final_round=bool(is_final_round),
+            is_final_round=bool(rec_round.is_final) if rec_round else bool(is_final_round),
             status=RecruitmentResultBatchStatus.IN_REVIEW,
             total_rows=len(rows),
             matched_count=0,
@@ -227,6 +283,7 @@ class RecruitmentResultService:
             joinedload(RecruitmentResultBatch.job_posting),
             joinedload(RecruitmentResultBatch.circular),
             joinedload(RecruitmentResultBatch.file),
+            joinedload(RecruitmentResultBatch.round),
             joinedload(RecruitmentResultBatch.uploader),
         )
 
@@ -251,6 +308,7 @@ class RecruitmentResultService:
                 joinedload(RecruitmentResultBatch.job_posting),
                 joinedload(RecruitmentResultBatch.circular),
                 joinedload(RecruitmentResultBatch.file),
+                joinedload(RecruitmentResultBatch.round),
                 joinedload(RecruitmentResultBatch.uploader),
                 joinedload(RecruitmentResultBatch.items).joinedload(RecruitmentResultItem.matched_student).joinedload(User.student_profile),
             )
@@ -275,6 +333,8 @@ class RecruitmentResultService:
             "circular_title": batch.circular.title if batch.circular else None,
             "file_id": batch.file_id,
             "filename": batch.file.filename if batch.file else None,
+            "round_id": batch.round_id,
+            "round_number": batch.round.round_number if batch.round else None,
             "round_name": batch.round_name,
             "round_type": batch.round_type,
             "is_final_round": batch.is_final_round,
@@ -443,6 +503,226 @@ class RecruitmentResultService:
     # =========================================================================
     # TRANSACTIONAL CONFIRMATION & NOTIFICATIONS
     # =========================================================================
+    def _confirm_round_linked_batch(
+        self,
+        db: Session,
+        batch: RecruitmentResultBatch,
+        items_to_confirm: List[RecruitmentResultItem],
+        officer_id: Optional[int],
+        current_user: Optional[User],
+        now: datetime,
+    ) -> Dict[str, Any]:
+        """
+        Executes atomic confirmation for a batch explicitly linked to a RecruitmentRound.
+        Integrates with RecruitmentProgressionService ledger, enforces cross-job/company boundaries,
+        emits contextual round notifications, and leaves profile placement status untouched.
+        """
+        rec_round = db.query(RecruitmentRound).filter(RecruitmentRound.id == batch.round_id).first()
+        if not rec_round:
+            raise ValueError(f"Linked RecruitmentRound #{batch.round_id} not found.")
+
+        # Cross-job boundary verification
+        if batch.job_posting_id and rec_round.job_posting_id != batch.job_posting_id:
+            raise ValueError(
+                f"Batch #{batch.id} belongs to Job #{batch.job_posting_id}, but linked Round #{rec_round.id} "
+                f"belongs to Job #{rec_round.job_posting_id}. Cross-job confirmation is prohibited."
+            )
+
+        # Cross-company boundary verification
+        if rec_round.job_posting and batch.company_id != rec_round.job_posting.company_id:
+            raise ValueError(
+                f"Batch #{batch.id} company (#{batch.company_id}) does not match round company "
+                f"(#{rec_round.job_posting.company_id}). Cross-company confirmation is prohibited."
+            )
+
+        seen_students_in_batch = set()
+        confirmed_count = 0
+        notifications_dispatched = 0
+        outcomes_recorded = 0
+
+        try:
+            for item in items_to_confirm:
+                student_id = item.matched_student_id
+                norm_status = item.normalized_status
+
+                # 1. Validate student active status
+                student = db.query(User).filter(User.id == student_id).first()
+                if not student:
+                    raise ValueError(f"Student #{student_id} not found.")
+                if not student.is_active:
+                    raise ValueError(f"Student #{student_id} ({student.email}) is inactive.")
+
+                # 2. Find or create application for this job posting
+                target_job_id = batch.job_posting_id or rec_round.job_posting_id
+                application = (
+                    db.query(Application)
+                    .filter(
+                        Application.student_id == student_id,
+                        Application.job_posting_id == target_job_id,
+                    )
+                    .first()
+                )
+                if not application:
+                    application = Application(
+                        student_id=student_id,
+                        job_posting_id=target_job_id,
+                        status=ApplicationStatus.APPLIED,
+                        notes=f"Auto-registered via recruitment result batch {batch.id} ({rec_round.name})",
+                    )
+                    db.add(application)
+                    db.flush()
+
+                # 3. Map tabular status to authoritative RoundOutcome
+                is_final = bool(rec_round.is_final) or bool(batch.is_final_round)
+                outcome = self.map_result_status_to_round_outcome(norm_status, is_final_round=is_final)
+
+                # 4. Record progression outcome (atomic flush inside session)
+                recruitment_progression_service.record_student_round_outcome(
+                    db=db,
+                    application_id=application.id,
+                    round_id=rec_round.id,
+                    outcome=outcome,
+                    score=None,
+                    remarks=item.extracted_remarks,
+                    source_batch_id=batch.id,
+                    source_item_id=item.id,
+                    current_user=current_user,
+                    auto_commit=False,
+                )
+                outcomes_recorded += 1
+
+                # 5. Mark item as CONFIRMED
+                item.review_status = RecruitmentResultReviewState.CONFIRMED
+                item.confirmed_by = officer_id
+                item.confirmed_at = now
+                confirmed_count += 1
+
+                # 6. Status Semantics (Application status only, NEVER profile placement status!)
+                if outcome == RoundOutcome.CLEARED:
+                    application.status = ApplicationStatus.SHORTLISTED
+                    if not application.notes or application.notes.startswith("Auto-registered"):
+                        application.notes = f"Progressed: Round {rec_round.round_number} ({rec_round.name}) at {batch.company.name}"
+                elif outcome == RoundOutcome.REJECTED:
+                    application.status = ApplicationStatus.REJECTED
+                    if not application.notes or application.notes.startswith("Auto-registered"):
+                        application.notes = f"Round result: Round {rec_round.round_number} ({rec_round.name}) - Not Selected"
+                elif outcome == RoundOutcome.OFFERED:
+                    application.status = ApplicationStatus.SELECTED
+                    if not application.notes or application.notes.startswith("Auto-registered"):
+                        application.notes = f"Final selection confirmed: Round {rec_round.round_number} ({rec_round.name}) at {batch.company.name}"
+                elif outcome in [RoundOutcome.ABSENT, RoundOutcome.ON_HOLD]:
+                    if not application.notes or application.notes.startswith("Auto-registered"):
+                        application.notes = f"Round result: Round {rec_round.round_number} ({rec_round.name}) ({outcome.value})"
+
+                # 7. Deduplicated Notification Delivery
+                if student_id not in seen_students_in_batch:
+                    seen_students_in_batch.add(student_id)
+                    event_key = f"recruitment_round:{rec_round.id}:student:{student_id}:batch:{batch.id}"
+                    existing_notif = db.query(Notification).filter(Notification.event_key == event_key).first()
+
+                    if not existing_notif:
+                        company_name = batch.company.name if batch.company else "Campus Recruiter"
+                        job_title = (
+                            batch.job_posting.title
+                            if batch.job_posting
+                            else (rec_round.job_posting.title if rec_round.job_posting else "Campus Role")
+                        )
+                        round_label = f"Round {rec_round.round_number} ({rec_round.name})"
+
+                        if outcome == RoundOutcome.OFFERED:
+                            title = f"🎉 Final Selection: {round_label} at {company_name}"
+                            message = (
+                                f"Congratulations! You have been selected in {round_label} "
+                                f"for {job_title} at {company_name}."
+                            )
+                        elif outcome == RoundOutcome.CLEARED:
+                            title = f"⭐ Cleared: {round_label} at {company_name}"
+                            message = (
+                                f"You have cleared {round_label} "
+                                f"for {job_title} at {company_name}. Check Campus Jobs for updates."
+                            )
+                        elif outcome == RoundOutcome.REJECTED:
+                            title = f"Update: {round_label} at {company_name}"
+                            message = f"Results for {round_label} for {job_title} at {company_name} have been published."
+                        elif outcome == RoundOutcome.ON_HOLD:
+                            title = f"On Hold: {round_label} at {company_name}"
+                            message = f"Your result for {round_label} at {company_name} is currently on hold."
+                        else:
+                            title = f"Placement Result Update: {company_name}"
+                            message = (
+                                f"Your status for {round_label} at {company_name} is updated: {outcome.value}."
+                            )
+
+                        notif = Notification(
+                            user_id=student_id,
+                            type="placement_result",
+                            title=title,
+                            message=message,
+                            reference_id=target_job_id or batch.id,
+                            event_key=event_key,
+                            is_read=False,
+                        )
+                        db.add(notif)
+                        item.notification_sent = True
+                        item.notification_event_key = event_key
+                        notifications_dispatched += 1
+                    else:
+                        item.notification_sent = True
+                        item.notification_event_key = existing_notif.event_key
+                else:
+                    item.notification_sent = True
+
+            # Flush pending changes to session before calculating summary counts
+            db.flush()
+
+            # Update batch summary counts
+            total_confirmed = db.query(RecruitmentResultItem).filter(
+                RecruitmentResultItem.batch_id == batch.id,
+                RecruitmentResultItem.review_status == RecruitmentResultReviewState.CONFIRMED,
+            ).count()
+            batch.confirmed_count = total_confirmed
+            if total_confirmed >= batch.total_rows:
+                batch.status = RecruitmentResultBatchStatus.FULLY_CONFIRMED
+            else:
+                batch.status = RecruitmentResultBatchStatus.PARTIALLY_CONFIRMED
+            batch.updated_at = now
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+        # Audit log
+        audit_service.log_action(
+            db=db,
+            action="RECRUITMENT_RESULT_BATCH_CONFIRMED",
+            actor=current_user,
+            target_type="recruitment_result_batch",
+            target_id=str(batch.id),
+            details={
+                "confirmed_count": confirmed_count,
+                "notifications_dispatched": notifications_dispatched,
+                "outcomes_recorded": outcomes_recorded,
+                "is_final_round": is_final,
+                "round_id": rec_round.id,
+                "round_number": rec_round.round_number,
+                "round_name": rec_round.name,
+            },
+        )
+
+        return {
+            "batch_id": batch.id,
+            "confirmed_count": confirmed_count,
+            "notifications_dispatched": notifications_dispatched,
+            "skipped_count": len(items_to_confirm) - confirmed_count,
+            "is_final_round": is_final,
+            "batch_status": batch.status.value,
+            "round_id": rec_round.id,
+            "outcomes_recorded": outcomes_recorded,
+            "message": f"Successfully confirmed {confirmed_count} records into Round #{rec_round.round_number} ({rec_round.name}). Sent {notifications_dispatched} notifications.",
+        }
+
     def confirm_batch_results(
         self,
         db: Session,
@@ -465,6 +745,7 @@ class RecruitmentResultService:
             .options(
                 joinedload(RecruitmentResultBatch.company),
                 joinedload(RecruitmentResultBatch.job_posting),
+                joinedload(RecruitmentResultBatch.round),
             )
             .filter(RecruitmentResultBatch.id == batch_id)
             .first()
@@ -509,9 +790,35 @@ class RecruitmentResultService:
                     f"Row {item.row_index} is flagged as AMBIGUOUS. "
                     "Please review and verify the student match before confirmation."
                 )
+            if item.review_status in [
+                RecruitmentResultReviewState.UNRESOLVED,
+                RecruitmentResultReviewState.IGNORED,
+                RecruitmentResultReviewState.PENDING,
+            ]:
+                raise ValueError(
+                    f"Row {item.row_index} has review state '{item.review_status.value}' and cannot be confirmed. "
+                    "Only matched rows can be confirmed."
+                )
 
         now = datetime.utcnow()
         officer_id = current_user.id if current_user else None
+
+        # ---------------------------------------------------------------------
+        # ROUTE ROUND-LINKED BATCH TO PROGRESSION LEDGER SERVICE
+        # ---------------------------------------------------------------------
+        if batch.round_id is not None:
+            return self._confirm_round_linked_batch(
+                db=db,
+                batch=batch,
+                items_to_confirm=items_to_confirm,
+                officer_id=officer_id,
+                current_user=current_user,
+                now=now,
+            )
+
+        # ---------------------------------------------------------------------
+        # LEGACY CONFIRMATION WORKFLOW (FOR BATCHES WITH round_id = NULL)
+        # ---------------------------------------------------------------------
         confirmed_count = 0
         notifications_dispatched = 0
 

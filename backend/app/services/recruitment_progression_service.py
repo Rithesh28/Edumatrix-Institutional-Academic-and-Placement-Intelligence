@@ -256,11 +256,13 @@ class RecruitmentProgressionService:
         source_batch_id: Optional[int] = None,
         source_item_id: Optional[int] = None,
         current_user: Optional[User] = None,
+        auto_commit: bool = True,
     ) -> StudentRoundOutcome:
         """
         Record a confirmed student outcome for a recruitment round.
         Validates application, round, student, and source batch/item provenance.
         Guards against silent overwrites if an authoritative outcome already exists.
+        Supports atomic caller transactions via auto_commit=False.
         """
         actor = _check_authorized_actor(current_user)
         norm_outcome = _normalize_round_outcome(outcome)
@@ -350,25 +352,45 @@ class RecruitmentProgressionService:
             confirmed_at=now,
         )
         db.add(new_outcome)
-        try:
-            db.commit()
-            db.refresh(new_outcome)
-        except IntegrityError as exc:
-            db.rollback()
-            # Race condition: another concurrent transaction committed an outcome for this (application_id, round_id)
-            existing = db.query(StudentRoundOutcome).filter(
-                StudentRoundOutcome.application_id == application_id,
-                StudentRoundOutcome.round_id == round_id
-            ).first()
-            if existing:
-                if existing.outcome == norm_outcome and existing.score == score:
-                    return existing
-                raise ValueError(
-                    f"An authoritative outcome for Application #{application_id} in Round #{round_id} was already confirmed "
-                    f"concurrently ({existing.outcome.value}). To modify an existing outcome, use correct_student_round_outcome "
-                    "with an audited reason."
-                ) from exc
-            raise
+
+        if auto_commit:
+            try:
+                db.commit()
+                db.refresh(new_outcome)
+            except IntegrityError as exc:
+                db.rollback()
+                # Race condition: another concurrent transaction committed an outcome for this (application_id, round_id)
+                existing = db.query(StudentRoundOutcome).filter(
+                    StudentRoundOutcome.application_id == application_id,
+                    StudentRoundOutcome.round_id == round_id
+                ).first()
+                if existing:
+                    if existing.outcome == norm_outcome and existing.score == score:
+                        return existing
+                    raise ValueError(
+                        f"An authoritative outcome for Application #{application_id} in Round #{round_id} was already confirmed "
+                        f"concurrently ({existing.outcome.value}). To modify an existing outcome, use correct_student_round_outcome "
+                        "with an audited reason."
+                    ) from exc
+                raise
+        else:
+            try:
+                db.flush()
+            except IntegrityError as exc:
+                db.rollback()
+                existing = db.query(StudentRoundOutcome).filter(
+                    StudentRoundOutcome.application_id == application_id,
+                    StudentRoundOutcome.round_id == round_id
+                ).first()
+                if existing:
+                    if existing.outcome == norm_outcome and existing.score == score:
+                        return existing
+                    raise ValueError(
+                        f"An authoritative outcome for Application #{application_id} in Round #{round_id} was already confirmed "
+                        f"concurrently ({existing.outcome.value}). To modify an existing outcome, use correct_student_round_outcome "
+                        "with an audited reason."
+                    ) from exc
+                raise
 
         audit_service.log_action(
             db=db,
@@ -386,6 +408,7 @@ class RecruitmentProgressionService:
                 "source_batch_id": source_batch_id,
                 "source_item_id": source_item_id,
             },
+            auto_commit=auto_commit,
         )
 
         return new_outcome
