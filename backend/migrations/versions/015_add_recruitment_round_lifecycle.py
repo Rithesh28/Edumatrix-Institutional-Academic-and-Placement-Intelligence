@@ -32,13 +32,13 @@ def upgrade() -> None:
 
     # 1. Create Enums if not existing
     round_outcome_enum = sa.Enum(
-        'cleared', 'rejected', 'absent', 'on_hold', 'offered',
+        'CLEARED', 'REJECTED', 'ABSENT', 'ON_HOLD', 'OFFERED',
         name='round_outcome'
     )
     round_outcome_enum.create(conn, checkfirst=True)
 
     offer_acceptance_status_enum = sa.Enum(
-        'offered', 'accepted', 'declined', 'rescinded',
+        'OFFERED', 'ACCEPTED', 'DECLINED', 'RESCINDED',
         name='offer_acceptance_status'
     )
     offer_acceptance_status_enum.create(conn, checkfirst=True)
@@ -74,9 +74,9 @@ def upgrade() -> None:
             sa.Column('student_id', sa.Integer(), nullable=False),
             sa.Column(
                 'outcome',
-                sa.Enum('cleared', 'rejected', 'absent', 'on_hold', 'offered', name='round_outcome', create_type=False),
+                sa.Enum('CLEARED', 'REJECTED', 'ABSENT', 'ON_HOLD', 'OFFERED', name='round_outcome', create_type=False),
                 nullable=False,
-                server_default='cleared'
+                server_default='CLEARED'
             ),
             sa.Column('score', sa.Float(), nullable=True),
             sa.Column('remarks', sa.Text(), nullable=True),
@@ -115,9 +115,9 @@ def upgrade() -> None:
             sa.Column('designation', sa.String(length=255), nullable=True),
             sa.Column(
                 'acceptance_status',
-                sa.Enum('offered', 'accepted', 'declined', 'rescinded', name='offer_acceptance_status', create_type=False),
+                sa.Enum('OFFERED', 'ACCEPTED', 'DECLINED', 'RESCINDED', name='offer_acceptance_status', create_type=False),
                 nullable=False,
-                server_default='offered'
+                server_default='OFFERED'
             ),
             sa.Column('offer_letter_file_id', UUID(as_uuid=True), nullable=True),
             sa.Column('offer_date', sa.DateTime(timezone=True), nullable=True),
