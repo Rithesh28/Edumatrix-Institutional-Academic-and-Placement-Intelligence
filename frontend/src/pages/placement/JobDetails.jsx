@@ -32,6 +32,9 @@ import {
 import usePlacementStore from '../../store/placementStore';
 import toast from 'react-hot-toast';
 import BatchFileUpload from '../../components/placement/BatchFileUpload';
+import RecruitmentRoundsTab from '../../components/placement/RecruitmentRoundsTab';
+import VerifiedOffersTab from '../../components/placement/VerifiedOffersTab';
+import StudentProgressionModal from '../../components/placement/StudentProgressionModal';
 
 const JobDetails = () => {
   const { id } = useParams();
@@ -47,7 +50,15 @@ const JobDetails = () => {
     publishJobPosting,
     shortlists,
     fetchShortlists,
+    jobRounds,
+    fetchJobRounds,
+    verifiedOffers,
+    fetchVerifiedOffers,
   } = usePlacementStore();
+
+  // Active tab state
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'rounds' | 'offers' | 'applications'
+  const [progressionModalStudent, setProgressionModalStudent] = useState(null);
 
   // Match state
   const [matchData, setMatchData] = useState(null);
@@ -71,12 +82,21 @@ const JobDetails = () => {
       fetchJobPosting(id);
       fetchApplications({ job_posting_id: id });
       fetchShortlists({ job_posting_id: id });
+      fetchJobRounds(id);
+      fetchVerifiedOffers({ job_posting_id: id });
     }
   }, [id]);
 
-  // If query string has ?tab=matches or user came from "View Matches", trigger match
+  // Tab and matching query param sync
   useEffect(() => {
-    if (id && location.search.includes('tab=matches')) {
+    if (location.search.includes('tab=rounds')) {
+      setActiveTab('rounds');
+    } else if (location.search.includes('tab=offers')) {
+      setActiveTab('offers');
+    } else if (location.search.includes('tab=applications')) {
+      setActiveTab('applications');
+    } else if (id && location.search.includes('tab=matches')) {
+      setActiveTab('overview');
       handleMatchStudents();
     }
   }, [id, location.search]);
@@ -489,9 +509,87 @@ const JobDetails = () => {
         )}
       </div>
 
-      {/* Candidate Skill Matching Section */}
-      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6 mb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+      {/* Tab Navigation Bar */}
+      <div className="flex items-center space-x-2 border-b border-gray-200 dark:border-gray-800 mb-6 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeTab === 'overview'
+              ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 font-semibold'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+          }`}
+        >
+          <Sparkles className="w-4 h-4" />
+          <span>Skill Matching & Candidates</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('rounds')}
+          className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeTab === 'rounds'
+              ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 font-semibold'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>Recruitment Rounds</span>
+          {jobRounds && jobRounds.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
+              {jobRounds.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('offers')}
+          className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeTab === 'offers'
+              ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 font-semibold'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+          }`}
+        >
+          <Award className="w-4 h-4" />
+          <span>Verified Offers</span>
+          {verifiedOffers && verifiedOffers.length > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">
+              {verifiedOffers.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('applications')}
+          className={`flex items-center space-x-2 px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer whitespace-nowrap ${
+            activeTab === 'applications'
+              ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 font-semibold'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Applications ({applications.length})</span>
+        </button>
+      </div>
+
+      {/* Tab: Recruitment Rounds */}
+      {activeTab === 'rounds' && (
+        <div className="mb-6">
+          <RecruitmentRoundsTab jobPostingId={parseInt(id)} />
+        </div>
+      )}
+
+      {/* Tab: Verified Offers */}
+      {activeTab === 'offers' && (
+        <div className="mb-6">
+          <VerifiedOffersTab jobPostingId={parseInt(id)} />
+        </div>
+      )}
+
+      {/* Tab: Skill Matching & Overview */}
+      {activeTab === 'overview' && (
+        <>
+          {/* Candidate Skill Matching Section */}
+          <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6 mb-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center gap-2">
               <div className="p-2 bg-indigo-50 dark:bg-indigo-950/50 rounded-lg text-indigo-600 dark:text-indigo-400">
@@ -1055,103 +1153,124 @@ const JobDetails = () => {
       )}
 
       {/* Batch File Upload Section (Phase 1 preserved) */}
-      <div className="mt-6">
-        <BatchFileUpload
-          jobPostingId={id}
-          onUploadComplete={(result) => {
-            toast.success(`Processed ${result.processed || 0} files`);
-          }}
-        />
-      </div>
-
-      {/* Applications Section (Phase 1 preserved) */}
-      <div className="mt-6 bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2 mb-4">
-          <FileText className="w-5 h-5 text-gray-500" />
-          <span>Applications Submitted ({applications.length})</span>
-        </h3>
-
-        {applications.length === 0 ? (
-          <p className="text-gray-500 dark:text-gray-400 text-center py-6">No applications submitted yet</p>
-        ) : (
-          <div className="space-y-3">
-            {applications.map((app) => (
-              <div
-                key={app.id}
-                className="flex items-center justify-between p-3.5 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800"
-              >
-                <div>
-                  <p className="font-medium text-gray-900 dark:text-white text-sm">{app.student_name}</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{app.student_email}</p>
-                </div>
-                <div className="flex items-center space-x-3">
-                  <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${getAppStatusColor(app.status)}`}>
-                    {app.status?.toUpperCase()}
-                  </span>
-                  {app.external_applied_at ? (
-                    <span
-                      className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800"
-                      title={`Student confirmed external submission on ${new Date(app.external_applied_at).toLocaleString()}`}
-                    >
-                      ✓ External Confirmed ({new Date(app.external_applied_at).toLocaleDateString()})
-                    </span>
-                  ) : selectedJob?.application_url ? (
-                    <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
-                      External: Pending
-                    </span>
-                  ) : null}
-                  {(app.has_low_match_warning || app.match_snapshot?.has_low_match_warning) && (
-                    <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800" title={app.low_match_warning || app.match_snapshot?.low_match_warning || 'Required skill match < 50%'}>
-                      ⚠️ Low match (&lt;50%)
-                    </span>
-                  )}
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {app.match_percentage !== null && app.match_percentage !== undefined ? `${app.match_percentage.toFixed(1)}% match` : 'Score N/A'}
-                  </span>
-                  {app.match_snapshot && (
-                    <button
-                      onClick={() => setSelectedCandidate({
-                        student_name: app.student_name,
-                        email: app.student_email,
-                        branch: app.match_snapshot.branch,
-                        cgpa: app.match_snapshot.cgpa,
-                        is_eligible: app.match_snapshot.is_eligible,
-                        eligibility_reasons: app.match_snapshot.eligibility_reasons || [],
-                        match_score: app.match_snapshot.match_percentage,
-                        required_score: app.match_snapshot.required_score,
-                        preferred_score: app.match_snapshot.preferred_score,
-                        required_matched: app.match_snapshot.matched_required_skills?.length || 0,
-                        required_total: app.match_snapshot.job_required_skills?.length || 0,
-                        preferred_matched: app.match_snapshot.matched_preferred_skills?.length || 0,
-                        preferred_total: app.match_snapshot.job_preferred_skills?.length || 0,
-                        matched_skills: (app.match_snapshot.matched_required_skills || []).concat(app.match_snapshot.matched_preferred_skills || []),
-                        missing_skills: (app.match_snapshot.missing_required_skills || []).concat(app.match_snapshot.missing_preferred_skills || []),
-                        missing_required_skills: app.match_snapshot.missing_required_skills || [],
-                        missing_preferred_skills: app.match_snapshot.missing_preferred_skills || [],
-                        semantic_matches: app.match_snapshot.semantic_matches || [],
-                        has_low_match_warning: app.match_snapshot.has_low_match_warning,
-                        low_match_warning: app.match_snapshot.low_match_warning,
-                        resume_filename: app.match_snapshot.resume_filename,
-                        isSnapshot: true,
-                        snapshot_time: app.match_snapshot.created_at
-                      })}
-                      className="px-2.5 py-1 text-xs bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors border border-indigo-200 dark:border-indigo-800"
-                    >
-                      Snapshot
-                    </button>
-                  )}
-                  <button
-                    onClick={() => navigate(`/placement/students/${app.student_id}`)}
-                    className="px-3 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
-                  >
-                    View
-                  </button>
-                </div>
-              </div>
-            ))}
+          <div className="mt-6">
+            <BatchFileUpload
+              jobPostingId={id}
+              onUploadComplete={(result) => {
+                toast.success(`Processed ${result.processed || 0} files`);
+              }}
+            />
           </div>
-        )}
-      </div>
+        </>
+      )}
+
+      {/* Applications Section */}
+      {activeTab === 'applications' && (
+        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2 mb-4">
+            <FileText className="w-5 h-5 text-gray-500" />
+            <span>Applications Submitted ({applications.length})</span>
+          </h3>
+
+          {applications.length === 0 ? (
+            <p className="text-gray-500 dark:text-gray-400 text-center py-6">No applications submitted yet</p>
+          ) : (
+            <div className="space-y-3">
+              {applications.map((app) => (
+                <div
+                  key={app.id}
+                  className="flex items-center justify-between p-3.5 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800"
+                >
+                  <div>
+                    <p className="font-medium text-gray-900 dark:text-white text-sm">{app.student_name}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{app.student_email}</p>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${getAppStatusColor(app.status)}`}>
+                      {app.status?.toUpperCase()}
+                    </span>
+                    {app.external_applied_at ? (
+                      <span
+                        className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800"
+                        title={`Student confirmed external submission on ${new Date(app.external_applied_at).toLocaleString()}`}
+                      >
+                        ✓ External Confirmed ({new Date(app.external_applied_at).toLocaleDateString()})
+                      </span>
+                    ) : selectedJob?.application_url ? (
+                      <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                        External: Pending
+                      </span>
+                    ) : null}
+                    {(app.has_low_match_warning || app.match_snapshot?.has_low_match_warning) && (
+                      <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800" title={app.low_match_warning || app.match_snapshot?.low_match_warning || 'Required skill match < 50%'}>
+                        ⚠️ Low match (&lt;50%)
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {app.match_percentage !== null && app.match_percentage !== undefined ? `${app.match_percentage.toFixed(1)}% match` : 'Score N/A'}
+                    </span>
+                    {app.match_snapshot && (
+                      <button
+                        onClick={() => setSelectedCandidate({
+                          student_name: app.student_name,
+                          email: app.student_email,
+                          branch: app.match_snapshot.branch,
+                          cgpa: app.match_snapshot.cgpa,
+                          is_eligible: app.match_snapshot.is_eligible,
+                          eligibility_reasons: app.match_snapshot.eligibility_reasons || [],
+                          match_score: app.match_snapshot.match_percentage,
+                          required_score: app.match_snapshot.required_score,
+                          preferred_score: app.match_snapshot.preferred_score,
+                          required_matched: app.match_snapshot.matched_required_skills?.length || 0,
+                          required_total: app.match_snapshot.job_required_skills?.length || 0,
+                          preferred_matched: app.match_snapshot.matched_preferred_skills?.length || 0,
+                          preferred_total: app.match_snapshot.job_preferred_skills?.length || 0,
+                          matched_skills: (app.match_snapshot.matched_required_skills || []).concat(app.match_snapshot.matched_preferred_skills || []),
+                          missing_skills: (app.match_snapshot.missing_required_skills || []).concat(app.match_snapshot.missing_preferred_skills || []),
+                          missing_required_skills: app.match_snapshot.missing_required_skills || [],
+                          missing_preferred_skills: app.match_snapshot.missing_preferred_skills || [],
+                          semantic_matches: app.match_snapshot.semantic_matches || [],
+                          has_low_match_warning: app.match_snapshot.has_low_match_warning,
+                          low_match_warning: app.match_snapshot.low_match_warning,
+                          resume_filename: app.match_snapshot.resume_filename,
+                          isSnapshot: true,
+                          snapshot_time: app.match_snapshot.created_at
+                        })}
+                        className="px-2.5 py-1 text-xs bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors border border-indigo-200 dark:border-indigo-800"
+                      >
+                        Snapshot
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setProgressionModalStudent({ studentId: app.student_id, studentName: app.student_name })}
+                      className="px-2.5 py-1 text-xs bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer"
+                      title="View student round progression history"
+                    >
+                      <TrendingUp className="w-3.5 h-3.5" />
+                      <span>Progression</span>
+                    </button>
+                    <button
+                      onClick={() => navigate(`/placement/students/${app.student_id}`)}
+                      className="px-3 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                    >
+                      View
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Student Progression Modal */}
+      {progressionModalStudent && (
+        <StudentProgressionModal
+          studentId={progressionModalStudent.studentId}
+          studentName={progressionModalStudent.studentName}
+          onClose={() => setProgressionModalStudent(null)}
+        />
+      )}
 
       {/* Publish Modal in JobDetails */}
       {publishModal.isOpen && (

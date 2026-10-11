@@ -119,6 +119,10 @@ from .placement import (
     PlacementOfferResponseRequest,
     PlacementOfferRescindRequest,
     PlacementOfferResponse,
+    RecruitmentRoundCreate,
+    RecruitmentRoundResponse,
+    StudentRoundOutcomeCorrectionRequest,
+    StudentProgressionItem,
 )
 
 
@@ -238,4 +242,8 @@ __all__ = [
     'PlacementOfferResponseRequest',
     'PlacementOfferRescindRequest',
     'PlacementOfferResponse',
+    'RecruitmentRoundCreate',
+    'RecruitmentRoundResponse',
+    'StudentRoundOutcomeCorrectionRequest',
+    'StudentProgressionItem',
 ]

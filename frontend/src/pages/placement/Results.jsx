@@ -17,6 +17,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
+import { getJobRounds } from '../../services/placementService';
 import toast from 'react-hot-toast';
 
 const Results = () => {
@@ -39,6 +40,8 @@ const Results = () => {
   // Upload Form State
   const [selectedCompanyId, setSelectedCompanyId] = useState('');
   const [selectedJobId, setSelectedJobId] = useState('');
+  const [availableRounds, setAvailableRounds] = useState([]);
+  const [selectedRoundId, setSelectedRoundId] = useState('');
   const [roundName, setRoundName] = useState('');
   const [roundType, setRoundType] = useState('assessment');
   const [isFinalRound, setIsFinalRound] = useState(false);
@@ -50,6 +53,33 @@ const Results = () => {
     fetchCompanies();
     fetchJobPostings();
   }, []);
+
+  // Fetch available recruitment rounds when a job is selected
+  useEffect(() => {
+    if (selectedJobId) {
+      getJobRounds(selectedJobId)
+        .then((rounds) => {
+          setAvailableRounds(rounds || []);
+        })
+        .catch(() => {
+          setAvailableRounds([]);
+        });
+    } else {
+      setAvailableRounds([]);
+      setSelectedRoundId('');
+    }
+  }, [selectedJobId]);
+
+  const handleRoundSelect = (roundId) => {
+    setSelectedRoundId(roundId);
+    if (!roundId) return;
+    const r = availableRounds.find((round) => String(round.id) === String(roundId));
+    if (r) {
+      setRoundName(r.round_name);
+      setRoundType(r.round_type);
+      setIsFinalRound(Boolean(r.is_final));
+    }
+  };
 
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
@@ -77,6 +107,9 @@ const Results = () => {
       if (selectedJobId) {
         formData.append('job_posting_id', selectedJobId);
       }
+      if (selectedRoundId) {
+        formData.append('round_id', selectedRoundId);
+      }
 
       const createdBatch = await uploadResultDocument(formData);
       toast.success(`Result file processed: ${createdBatch.total_rows} candidates extracted.`);
@@ -84,6 +117,8 @@ const Results = () => {
       // Reset form
       setSelectedCompanyId('');
       setSelectedJobId('');
+      setSelectedRoundId('');
+      setAvailableRounds([]);
       setRoundName('');
       setRoundType('assessment');
       setIsFinalRound(false);
@@ -217,10 +252,15 @@ const Results = () => {
                   <h3 className="text-base font-bold text-gray-900 dark:text-white hover:text-indigo-600 transition-colors">
                     {batch.round_name}
                   </h3>
+                  {batch.round_id && (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                      Round #{batch.round_number || batch.round_id}
+                    </span>
+                  )}
                   {getStatusBadge(batch.status)}
                   {batch.is_final_round ? (
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/70 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                      <Award className="w-3 h-3 mr-1" /> Final Placement Offer Round
+                      <Award className="w-3 h-3 mr-1" /> Final Process Round
                     </span>
                   ) : (
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
@@ -306,6 +346,7 @@ const Results = () => {
                   onChange={(e) => {
                     setSelectedCompanyId(e.target.value);
                     setSelectedJobId('');
+                    setSelectedRoundId('');
                   }}
                   className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
@@ -324,7 +365,10 @@ const Results = () => {
                 </label>
                 <select
                   value={selectedJobId}
-                  onChange={(e) => setSelectedJobId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedJobId(e.target.value);
+                    setSelectedRoundId('');
+                  }}
                   className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 >
                   <option value="">Link to Specific Job Posting (Optional)</option>
@@ -337,6 +381,30 @@ const Results = () => {
                     ))}
                 </select>
               </div>
+
+              {/* Authoritative Round Selector when Job is selected */}
+              {selectedJobId && availableRounds.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Select Recruitment Round (Recommended)
+                  </label>
+                  <select
+                    value={selectedRoundId}
+                    onChange={(e) => handleRoundSelect(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-indigo-200 dark:border-indigo-800 rounded-lg bg-indigo-50/50 dark:bg-indigo-950/30 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  >
+                    <option value="">-- Create/specify round manually below --</option>
+                    {availableRounds.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        Round #{r.round_number}: {r.round_name} ({r.round_type}) {r.is_final ? '[FINAL ROUND]' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1">
+                    Selecting an existing round links candidate outcomes directly to this job's recruitment pipeline.
+                  </p>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -383,10 +451,10 @@ const Results = () => {
                   />
                   <div>
                     <span className="text-xs font-bold text-purple-900 dark:text-purple-200">
-                      Final Placement Offer Round
+                      Final Recruitment Selection Round
                     </span>
                     <p className="text-[11px] text-purple-700 dark:text-purple-300 mt-0.5">
-                      Check only if this sheet contains final hiring selections. Confirmed students will be marked as PLACED and will increment institutional placement statistics.
+                      Check if this round determines final process selections. Confirmed students will have their application status set to SELECTED. Note: Official verified offers with CTC and offer letter attachments are verified separately under Verified Offers.
                     </p>
                   </div>
                 </label>

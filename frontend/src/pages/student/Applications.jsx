@@ -23,9 +23,12 @@ import {
   Sparkles,
   ChevronRight,
   Info,
+  TrendingUp,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import { useAuthStore } from '../../store/authStore';
+import StudentVerifiedOfferCard from '../../components/placement/StudentVerifiedOfferCard';
+import StudentRecruitmentTimeline from '../../components/placement/StudentRecruitmentTimeline';
 
 function StudentApplications() {
   const navigate = useNavigate();
@@ -35,6 +38,9 @@ function StudentApplications() {
     isMyApplicationsLoading,
     myApplicationsError,
     fetchMyApplications,
+    myOffers,
+    isMyOffersLoading,
+    fetchMyOffers,
     jobs,
     fetchJobPostings,
   } = usePlacementStore();
@@ -48,18 +54,22 @@ function StudentApplications() {
   // Snapshot Inspection Modal State
   const [selectedSnapshotApp, setSelectedSnapshotApp] = useState(null);
 
-  // Fetch applications and job catalog for relationship cross-referencing
+  // Timeline Inspection Modal State (Stage 3.3.6)
+  const [selectedTimelineApp, setSelectedTimelineApp] = useState(null);
+
+  // Fetch applications, verified offers, and job catalog
   const loadData = useCallback(async () => {
     setIsRefreshing(true);
     try {
       await Promise.allSettled([
         fetchMyApplications(user?.id),
+        fetchMyOffers(),
         fetchJobPostings(),
       ]);
     } finally {
       setIsRefreshing(false);
     }
-  }, [fetchMyApplications, fetchJobPostings, user?.id]);
+  }, [fetchMyApplications, fetchMyOffers, fetchJobPostings, user?.id]);
 
   useEffect(() => {
     loadData();
@@ -218,6 +228,40 @@ function StudentApplications() {
           </button>
         </div>
       </div>
+
+      {/* Verified Placement Offers Section (Stage 3.3.6) */}
+      {Array.isArray(myOffers) && myOffers.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400">
+                <Award className="w-5 h-5" />
+              </span>
+              <div>
+                <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  <span>Verified Placement Offers</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 font-extrabold">
+                    {myOffers.length}
+                  </span>
+                </h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Official employer offers verified by the Placement Cell. Review terms and record your decision below.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {myOffers.map((offer) => (
+              <StudentVerifiedOfferCard
+                key={offer.id}
+                offer={offer}
+                onOfferUpdated={loadData}
+              />
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Status Counters Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -602,9 +646,18 @@ function StudentApplications() {
                     </span>
                   )}
 
-                  {/* Actions: View Snapshot & View Job */}
-                  <div className="flex items-center gap-2 self-end sm:self-auto">
-                    {parentJob?.application_url && !app.external_applied_at && (
+                    {/* Actions: Timeline, View Snapshot & View Job */}
+                    <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                      <button
+                        onClick={() => setSelectedTimelineApp(app)}
+                        className="px-3 py-1.5 text-xs font-semibold bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/50 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 border border-purple-200 dark:border-purple-800"
+                        title="View recruitment rounds progression timeline for this drive"
+                      >
+                        <TrendingUp className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                        <span>Recruitment Timeline</span>
+                      </button>
+
+                      {parentJob?.application_url && !app.external_applied_at && (
                       <button
                         onClick={() => navigate(`/student/jobs/${app.job_posting_id}`)}
                         className="px-3 py-1.5 text-xs font-semibold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 rounded-lg transition-colors cursor-pointer flex items-center gap-1 border border-amber-200 dark:border-amber-800"
@@ -878,6 +931,18 @@ function StudentApplications() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Student Recruitment Progression Timeline Modal (Stage 3.3.6) */}
+      {selectedTimelineApp && (
+        <StudentRecruitmentTimeline
+          isOpen={true}
+          onClose={() => setSelectedTimelineApp(null)}
+          studentId={user?.id}
+          jobId={selectedTimelineApp.job_posting_id}
+          jobTitle={selectedTimelineApp.job_title}
+          companyName={selectedTimelineApp.company_name}
+        />
       )}
     </div>
   );

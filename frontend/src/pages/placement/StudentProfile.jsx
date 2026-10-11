@@ -17,24 +17,35 @@ import {
   Sparkles,
   ExternalLink,
 } from 'lucide-react';
-import { getStudent } from '../../services/placementService';
+import { getStudent, getStudentProgression, getVerifiedOffers } from '../../services/placementService';
+import StudentProgressionModal from '../../components/placement/StudentProgressionModal';
 import toast from 'react-hot-toast';
 
 const StudentProfile = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [student, setStudent] = useState(null);
+  const [progression, setProgression] = useState([]);
+  const [offers, setOffers] = useState([]);
+  const [showProgressionModal, setShowProgressionModal] = useState(false);
+  const [selectedProgressionJobId, setSelectedProgressionJobId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    fetchStudent();
+    fetchStudentData();
   }, [id]);
 
-  const fetchStudent = async () => {
+  const fetchStudentData = async () => {
     setIsLoading(true);
     try {
-      const data = await getStudent(id);
-      setStudent(data);
+      const [studentData, progData, offersData] = await Promise.all([
+        getStudent(id),
+        getStudentProgression(id).catch(() => []),
+        getVerifiedOffers({ student_id: id }).catch(() => []),
+      ]);
+      setStudent(studentData);
+      setProgression(progData || []);
+      setOffers(offersData || []);
     } catch (error) {
       console.error('Failed to fetch student details:', error);
       toast.error('Failed to fetch student details');
@@ -261,9 +272,171 @@ const StudentProfile = () => {
         </div>
       </div>
 
+      {/* Verified Placement Offers Section */}
+      {offers.length > 0 && (
+        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-emerald-200 dark:border-emerald-800/60 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="p-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg text-emerald-600 dark:text-emerald-400">
+                <Award className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Verified Placement Offers ({offers.length})
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Official employer offers verified by Placement Officer
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {offers.map((offer) => (
+              <div
+                key={offer.id}
+                className="p-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/40 space-y-3"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="font-bold text-gray-900 dark:text-white text-sm">
+                      {offer.designation}
+                    </h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-0.5">
+                      <Building2 className="w-3.5 h-3.5" />
+                      <span>{offer.company_name}</span>
+                    </p>
+                  </div>
+                  <span
+                    className={`text-[11px] px-2.5 py-0.5 rounded-full font-bold uppercase ${
+                      offer.status === 'accepted'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : offer.status === 'declined'
+                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                        : offer.status === 'rescinded'
+                        ? 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                    }`}
+                  >
+                    {offer.status}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="p-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700">
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Compensation (CTC)</span>
+                    <p className="font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                      ₹{Number(offer.ctc).toLocaleString()} LPA
+                    </p>
+                  </div>
+                  <div className="p-2 bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700">
+                    <span className="text-[10px] text-gray-400 uppercase font-semibold">Offer Date</span>
+                    <p className="font-medium text-gray-700 dark:text-gray-300 mt-0.5">
+                      {new Date(offer.offer_date).toLocaleDateString()}
+                    </p>
+                  </div>
+                </div>
+
+                {offer.rescission_reason && (
+                  <div className="p-2.5 bg-rose-50 dark:bg-rose-950/30 rounded-lg border border-rose-200 dark:border-rose-800 text-xs text-rose-800 dark:text-rose-300">
+                    <strong>Rescission Reason:</strong> {offer.rescission_reason}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recruitment Progression History Section */}
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <div className="p-2 bg-purple-50 dark:bg-purple-950/50 rounded-lg text-purple-600 dark:text-purple-400">
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                Recruitment Round Progression History ({progression.length} rounds)
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Audited outcomes across recruitment drives
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              setSelectedProgressionJobId(null);
+              setShowProgressionModal(true);
+            }}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Progression Timeline</span>
+          </button>
+        </div>
+
+        {progression.length === 0 ? (
+          <p className="text-gray-400 text-sm text-center py-6">No recruitment round outcomes recorded yet.</p>
+        ) : (
+          <div className="space-y-2.5">
+            {progression.slice(0, 5).map((item, idx) => (
+              <div
+                key={idx}
+                className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-800"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-gray-900 dark:text-white">
+                      Round #{item.round_number}: {item.round_name}
+                    </span>
+                    {item.is_final && (
+                      <span className="px-1.5 py-0.2 bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 rounded text-[10px] font-bold">
+                        FINAL
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {item.job_title} ({item.company_name})
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span
+                    className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase ${
+                      item.outcome === 'CLEARED'
+                        ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                        : item.outcome === 'SELECTED'
+                        ? 'bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300'
+                        : item.outcome === 'REJECTED'
+                        ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                        : item.outcome === 'ABSENT'
+                        ? 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                    }`}
+                  >
+                    {item.outcome}
+                  </span>
+                </div>
+              </div>
+            ))}
+            {progression.length > 5 && (
+              <button
+                onClick={() => {
+                  setSelectedProgressionJobId(null);
+                  setShowProgressionModal(true);
+                }}
+                className="w-full py-2 text-xs font-semibold text-purple-600 hover:text-purple-800 text-center cursor-pointer"
+              >
+                View all {progression.length} round progression entries →
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Applications History */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-        <h3 className="text-base font-bold text-gray-900 flex items-center gap-2 mb-4">
+      <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
+        <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2 mb-4">
           <FileText className="w-5 h-5 text-indigo-600" />
           <span>Job Applications History ({student.applications?.length || 0})</span>
         </h3>
@@ -275,11 +448,11 @@ const StudentProfile = () => {
             {student.applications.map((app) => (
               <div
                 key={app.id}
-                className="flex items-center justify-between p-3.5 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors"
+                className="flex items-center justify-between p-3.5 bg-gray-50 dark:bg-gray-800/40 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors"
               >
                 <div>
-                  <p className="font-semibold text-gray-900 text-sm">{app.job_title}</p>
-                  <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                  <p className="font-semibold text-gray-900 dark:text-white text-sm">{app.job_title}</p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-0.5">
                     <Building2 className="w-3.5 h-3.5" />
                     <span>{app.company_name}</span>
                   </p>
@@ -289,8 +462,18 @@ const StudentProfile = () => {
                     {app.status?.toUpperCase()}
                   </span>
                   <button
+                    onClick={() => {
+                      setSelectedProgressionJobId(app.job_id);
+                      setShowProgressionModal(true);
+                    }}
+                    className="px-2.5 py-1 text-xs bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer font-medium"
+                  >
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    <span>Progression</span>
+                  </button>
+                  <button
                     onClick={() => navigate(`/placement/jobs/${app.job_id}`)}
-                    className="px-3 py-1.5 text-xs bg-white border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 shadow-sm font-medium"
+                    className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 shadow-xs font-medium cursor-pointer"
                   >
                     View Job
                   </button>
@@ -300,6 +483,19 @@ const StudentProfile = () => {
           </div>
         )}
       </div>
+
+      {/* Student Progression Modal */}
+      {showProgressionModal && (
+        <StudentProgressionModal
+          studentId={student.id}
+          studentName={student.name}
+          jobPostingId={selectedProgressionJobId}
+          onClose={() => {
+            setShowProgressionModal(false);
+            setSelectedProgressionJobId(null);
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -543,4 +543,64 @@ class PlacementOfferResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============================================
+# RECRUITMENT ROUND & PROGRESSION SCHEMAS (Phase 3.3.5)
+# ============================================
+
+class RecruitmentRoundCreate(BaseModel):
+    """Schema for creating a recruitment round."""
+    round_number: int = Field(..., gt=0, description="Sequential round number (must be > 0)")
+    name: str = Field(..., min_length=1, max_length=100, description="Round title or name")
+    round_type: Optional[str] = Field("assessment", max_length=50, description="Round type (e.g. assessment, technical, hr)")
+    is_final: Optional[bool] = Field(False, description="Whether this is the final recruitment round")
+    round_date: Optional[datetime] = Field(None, description="Scheduled date for the round")
+
+
+class RecruitmentRoundResponse(BaseModel):
+    """Schema for recruitment round details."""
+    id: int
+    job_posting_id: int
+    round_number: int
+    name: str
+    round_type: str
+    is_final: bool
+    round_date: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    outcomes_count: Optional[int] = 0
+
+    class Config:
+        from_attributes = True
+
+
+class StudentRoundOutcomeCorrectionRequest(BaseModel):
+    """Schema for officer correcting an authoritative student round outcome."""
+    new_outcome: str = Field(..., description="Target outcome: cleared, rejected, absent, on_hold, offered")
+    new_score: Optional[float] = Field(None, description="Optional revised score")
+    reason: str = Field(..., min_length=3, description="Mandatory audit rationale for correcting outcome")
+
+
+class StudentProgressionItem(BaseModel):
+    """Schema for a single round outcome in student progression history."""
+    outcome_id: int
+    application_id: int
+    job_posting_id: int
+    job_title: Optional[str] = None
+    company_name: Optional[str] = None
+    round_id: int
+    round_number: int
+    round_name: str
+    round_type: str
+    is_final_round: bool
+    round_date: Optional[str] = None
+    outcome: str
+    score: Optional[float] = None
+    remarks: Optional[str] = None
+    confirmed_at: Optional[str] = None
+    has_offer: bool = False
+    offer_status: Optional[str] = None
+    offer_ctc_lpa: Optional[float] = None
+
 

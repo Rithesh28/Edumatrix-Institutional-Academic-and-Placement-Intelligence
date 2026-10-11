@@ -39,6 +39,21 @@ import {
   getResultBatch,
   updateResultItemMatch,
   confirmResultBatch,
+  getJobRounds,
+  createJobRound,
+  getRoundDetails,
+  getRoundOutcomes,
+  getStudentProgression,
+  correctRoundOutcome,
+  linkBatchToRound,
+  getVerifiedOffers,
+  getOfferDetails,
+  createVerifiedOffer,
+  updateVerifiedOffer,
+  rescindVerifiedOffer,
+  getPlacementAccounting,
+  getMyOffers,
+  respondToOffer,
 } from '../services/placementService';
 import { useAuthStore } from './authStore';
 
@@ -77,6 +92,28 @@ const usePlacementStore = create((set, get) => ({
   selectedResultBatch: null,
   isResultsLoading: false,
   resultsError: null,
+
+  // Recruitment Rounds & Progression State (Stage 3.3.5)
+  jobRounds: [],
+  isRoundsLoading: false,
+  roundsError: null,
+
+  studentProgression: [],
+  isProgressionLoading: false,
+  progressionError: null,
+
+  // Verified Offers State (Stage 3.3.4 / 3.3.5 / 3.3.6)
+  verifiedOffers: [],
+  isOffersLoading: false,
+  offersError: null,
+  accountingStats: null,
+
+  // Student Verified Offers State (Stage 3.3.6)
+  myOffers: [],
+  isMyOffersLoading: false,
+  myOffersError: null,
+  isRespondingOffer: false,
+  respondOfferError: null,
 
   // Student-specific placement state (isolated from Officer screens)
   jobEligibility: null,
@@ -881,6 +918,190 @@ const usePlacementStore = create((set, get) => ({
   },
 
   // ============================================
+  // RECRUITMENT ROUNDS & PROGRESSION ACTIONS (Stage 3.3.5)
+  // ============================================
+
+  fetchJobRounds: async (jobId) => {
+    set({ isRoundsLoading: true, roundsError: null });
+    try {
+      const rounds = await getJobRounds(jobId);
+      set({ jobRounds: rounds, isRoundsLoading: false });
+      return rounds;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ roundsError: err, isRoundsLoading: false });
+      throw error;
+    }
+  },
+
+  createJobRound: async (jobId, data) => {
+    set({ isRoundsLoading: true, roundsError: null });
+    try {
+      const newRound = await createJobRound(jobId, data);
+      set((state) => ({
+        jobRounds: [...state.jobRounds, newRound].sort((a, b) => a.round_number - b.round_number),
+        isRoundsLoading: false,
+      }));
+      return newRound;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ roundsError: err, isRoundsLoading: false });
+      throw error;
+    }
+  },
+
+  fetchStudentProgression: async (studentId, jobId = null) => {
+    set({ isProgressionLoading: true, progressionError: null });
+    try {
+      const progression = await getStudentProgression(studentId, jobId ? { job_posting_id: jobId } : {});
+      set({ studentProgression: progression, isProgressionLoading: false });
+      return progression;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ progressionError: err, isProgressionLoading: false });
+      throw error;
+    }
+  },
+
+  correctRoundOutcome: async (outcomeId, data) => {
+    try {
+      const result = await correctRoundOutcome(outcomeId, data);
+      set((state) => ({
+        studentProgression: state.studentProgression.map((p) =>
+          p.outcome_id === outcomeId ? { ...p, outcome: result.outcome, score: result.score, remarks: result.remarks } : p
+        ),
+      }));
+      return result;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  linkBatchToRound: async (batchId, roundId) => {
+    try {
+      const updatedBatch = await linkBatchToRound(batchId, roundId);
+      set({ selectedResultBatch: updatedBatch });
+      return updatedBatch;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // ============================================
+  // VERIFIED OFFERS ACTIONS (Stage 3.3.4 / 3.3.5)
+  // ============================================
+
+  fetchVerifiedOffers: async (params = {}) => {
+    set({ isOffersLoading: true, offersError: null });
+    try {
+      const offers = await getVerifiedOffers(params);
+      set({ verifiedOffers: offers, isOffersLoading: false });
+      return offers;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ offersError: err, isOffersLoading: false });
+      throw error;
+    }
+  },
+
+  createVerifiedOffer: async (data) => {
+    set({ isOffersLoading: true, offersError: null });
+    try {
+      const offer = await createVerifiedOffer(data);
+      set((state) => ({
+        verifiedOffers: [offer, ...state.verifiedOffers],
+        isOffersLoading: false,
+      }));
+      return offer;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ offersError: err, isOffersLoading: false });
+      throw error;
+    }
+  },
+
+  updateVerifiedOffer: async (offerId, data) => {
+    set({ isOffersLoading: true, offersError: null });
+    try {
+      const updated = await updateVerifiedOffer(offerId, data);
+      set((state) => ({
+        verifiedOffers: state.verifiedOffers.map((o) => (o.id === offerId ? updated : o)),
+        isOffersLoading: false,
+      }));
+      return updated;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ offersError: err, isOffersLoading: false });
+      throw error;
+    }
+  },
+
+  rescindVerifiedOffer: async (offerId, data) => {
+    set({ isOffersLoading: true, offersError: null });
+    try {
+      const rescinded = await rescindVerifiedOffer(offerId, data);
+      set((state) => ({
+        verifiedOffers: state.verifiedOffers.map((o) => (o.id === offerId ? rescinded : o)),
+        isOffersLoading: false,
+      }));
+      return rescinded;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ offersError: err, isOffersLoading: false });
+      throw error;
+    }
+  },
+
+  fetchPlacementAccounting: async () => {
+    try {
+      const accounting = await getPlacementAccounting();
+      set({ accountingStats: accounting });
+      return accounting;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // ============================================
+  // STUDENT VERIFIED OFFER ACTIONS (Stage 3.3.6)
+  // ============================================
+
+  fetchMyOffers: async () => {
+    set({ isMyOffersLoading: true, myOffersError: null });
+    try {
+      const offers = await getMyOffers();
+      set({ myOffers: offers, isMyOffersLoading: false });
+      return offers;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ myOffersError: err, isMyOffersLoading: false });
+      throw error;
+    }
+  },
+
+  respondToOffer: async (offerId, data) => {
+    set({ isRespondingOffer: true, respondOfferError: null });
+    try {
+      const updated = await respondToOffer(offerId, data);
+      set((state) => ({
+        myOffers: state.myOffers.map((o) => (o.id === offerId ? updated : o)),
+        verifiedOffers: state.verifiedOffers.map((o) => (o.id === offerId ? updated : o)),
+        isRespondingOffer: false,
+      }));
+      // Refresh student placement status authoritatively from backend if accepted
+      const authUser = useAuthStore.getState().user;
+      if (authUser?.id && data?.decision?.toLowerCase() === 'accepted') {
+        get().fetchMyPlacementStatus(authUser.id).catch(() => {});
+      }
+      return updated;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ respondOfferError: err, isRespondingOffer: false });
+      throw error;
+    }
+  },
+
+  // ============================================
   // UTILITY ACTIONS
   // ============================================
 
@@ -915,6 +1136,21 @@ const usePlacementStore = create((set, get) => ({
     selectedResultBatch: null,
     isResultsLoading: false,
     resultsError: null,
+    jobRounds: [],
+    isRoundsLoading: false,
+    roundsError: null,
+    studentProgression: [],
+    isProgressionLoading: false,
+    progressionError: null,
+    verifiedOffers: [],
+    isOffersLoading: false,
+    offersError: null,
+    accountingStats: null,
+    myOffers: [],
+    isMyOffersLoading: false,
+    myOffersError: null,
+    isRespondingOffer: false,
+    respondOfferError: null,
   }),
 }));
 

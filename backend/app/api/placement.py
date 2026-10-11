@@ -28,7 +28,12 @@ from ..models.shortlist import Shortlist
 from ..models.profile import StudentProfileExtended, Skill, Project
 from ..models.certification import Certification
 from ..models.resume import Resume
-from ..models.recruitment_round import PlacementOffer, OfferAcceptanceStatus
+from ..models.recruitment_round import (
+    PlacementOffer,
+    OfferAcceptanceStatus,
+    RecruitmentRound,
+    StudentRoundOutcome,
+)
 from ..schemas.placement import (
     CompanyCreate, CompanyUpdate, CompanyResponse,
     JobPostingCreate, JobPostingUpdate, JobPostingResponse,
@@ -40,10 +45,13 @@ from ..schemas.placement import (
     PlacementOfferCreate, PlacementOfferUpdate,
     PlacementOfferResponseRequest, PlacementOfferRescindRequest,
     PlacementOfferResponse,
+    RecruitmentRoundCreate, RecruitmentRoundResponse,
+    StudentRoundOutcomeCorrectionRequest, StudentProgressionItem,
 )
 from ..services.placement_service import placement_service
 from ..services.jd_parser_service import jd_parser_service
 from ..services.placement_offer_service import placement_offer_service
+from ..services.recruitment_progression_service import recruitment_progression_service
 
 logger = logging.getLogger(__name__)
 
@@ -1119,4 +1127,171 @@ async def get_placement_accounting(
     db: Session = Depends(get_db),
 ):
     """Retrieve detailed placement accounting metrics."""
-    return placement_offer_service.get_placement_accounting_metrics(db)
+    return placement_offer_service.get_placement_accounting_metrics(db)
+
+
+# ============================================
+# RECRUITMENT ROUND & PROGRESSION ENDPOINTS (Phase 3.3.5)
+# ============================================
+
+def _serialize_round(r: RecruitmentRound, db: Session) -> RecruitmentRoundResponse:
+    outcomes_count = db.query(StudentRoundOutcome).filter(StudentRoundOutcome.round_id == r.id).count()
+    return RecruitmentRoundResponse(
+        id=r.id,
+        job_posting_id=r.job_posting_id,
+        round_number=r.round_number,
+        name=r.name,
+        round_type=r.round_type,
+        is_final=r.is_final,
+        round_date=r.round_date,
+        created_at=r.created_at,
+        updated_at=r.updated_at,
+        outcomes_count=outcomes_count,
+    )
+
+
+@router.get("/jobs/{job_id}/rounds", response_model=List[RecruitmentRoundResponse])
+async def get_job_recruitment_rounds(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve all defined recruitment rounds for a job posting, ordered by round number."""
+    try:
+        rounds = recruitment_progression_service.get_job_rounds(db=db, job_posting_id=job_id)
+        return [_serialize_round(r, db) for r in rounds]
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post("/jobs/{job_id}/rounds", response_model=RecruitmentRoundResponse, status_code=status.HTTP_201_CREATED)
+async def create_job_recruitment_round(
+    job_id: int,
+    payload: RecruitmentRoundCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Create a new sequential recruitment round for a job posting.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        new_round = recruitment_progression_service.create_recruitment_round(
+            db=db,
+            job_posting_id=job_id,
+            round_number=payload.round_number,
+            name=payload.name,
+            round_type=payload.round_type or "assessment",
+            is_final=bool(payload.is_final),
+            round_date=payload.round_date,
+            current_user=current_user,
+        )
+        return _serialize_round(new_round, db)
+    except ValueError as e:
+        err = str(e)
+        if "already exists" in err.lower():
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=err)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=err)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get("/rounds/{round_id}", response_model=RecruitmentRoundResponse)
+async def get_recruitment_round(
+    round_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve details of a single recruitment round."""
+    r = recruitment_progression_service.get_round_by_id(db=db, round_id=round_id)
+    if not r:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Recruitment round #{round_id} not found.")
+    return _serialize_round(r, db)
+
+
+@router.get("/rounds/{round_id}/outcomes")
+async def get_round_outcomes(
+    round_id: int,
+    outcome: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Retrieve confirmed candidate outcomes for a specific round."""
+    check_placement_officer_or_admin(current_user)
+    try:
+        outcomes = recruitment_progression_service.get_round_outcomes(db=db, round_id=round_id, outcome_filter=outcome)
+        return [{
+            "id": o.id,
+            "application_id": o.application_id,
+            "student_id": o.student_id,
+            "student_name": o.student.name if o.student else None,
+            "student_email": o.student.email if o.student else None,
+            "outcome": o.outcome.value,
+            "score": o.score,
+            "remarks": o.remarks,
+            "confirmed_at": o.confirmed_at.isoformat() if o.confirmed_at else None,
+        } for o in outcomes]
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.get("/students/{student_id}/progression", response_model=List[StudentProgressionItem])
+async def get_student_recruitment_progression(
+    student_id: int,
+    job_posting_id: Optional[int] = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieve chronological recruitment progression history across rounds for a student.
+    Accessible by Placement Officers, Admins, or the student themselves.
+    """
+    if current_user.role == UserRole.STUDENT and current_user.id != student_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot access another student's progression.")
+    
+    try:
+        progression = recruitment_progression_service.get_student_progression(
+            db=db,
+            student_id=student_id,
+            job_posting_id=job_posting_id,
+        )
+        return [StudentProgressionItem(**item) for item in progression]
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.post("/outcomes/{outcome_id}/correct")
+async def correct_round_outcome(
+    outcome_id: int,
+    payload: StudentRoundOutcomeCorrectionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Administrative correction of a previously recorded round outcome.
+    Requires an explicit audited reason.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        updated = recruitment_progression_service.correct_student_round_outcome(
+            db=db,
+            outcome_id=outcome_id,
+            new_outcome=payload.new_outcome,
+            new_score=payload.new_score,
+            reason=payload.reason,
+            current_user=current_user,
+        )
+        return {
+            "id": updated.id,
+            "outcome": updated.outcome.value,
+            "score": updated.score,
+            "remarks": updated.remarks,
+            "message": "Round outcome corrected successfully."
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+

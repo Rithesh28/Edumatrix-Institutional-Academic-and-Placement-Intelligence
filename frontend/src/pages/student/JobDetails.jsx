@@ -22,9 +22,12 @@ import {
   ChevronRight,
   ExternalLink,
   X,
+  TrendingUp,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import { useAuthStore } from '../../store/authStore';
+import StudentVerifiedOfferCard from '../../components/placement/StudentVerifiedOfferCard';
+import StudentRecruitmentTimeline from '../../components/placement/StudentRecruitmentTimeline';
 import toast from 'react-hot-toast';
 
 function StudentJobDetails() {
@@ -45,6 +48,8 @@ function StudentJobDetails() {
     myApplications,
     isMyApplicationsLoading,
     fetchMyApplications,
+    myOffers,
+    fetchMyOffers,
     createApplication,
     confirmExternalApplication,
     isSubmittingApplication,
@@ -55,6 +60,7 @@ function StudentJobDetails() {
   const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isConfirmingExternal, setIsConfirmingExternal] = useState(false);
+  const [isTimelineOpen, setIsTimelineOpen] = useState(false);
   const [candidateNotes, setCandidateNotes] = useState('');
   const [submittedApplication, setSubmittedApplication] = useState(null);
 
@@ -75,9 +81,10 @@ function StudentJobDetails() {
         checkJobEligibility(jobIdNum, user.id).catch(() => {});
       }
 
-      // Fetch current student applications to detect if already applied
+      // Fetch current student applications and offers to detect if already applied or offered
       if (user?.id) {
         fetchMyApplications(user.id).catch(() => {});
+        fetchMyOffers().catch(() => {});
       }
     }
 
@@ -97,6 +104,12 @@ function StudentJobDetails() {
   const isExternalConfirmed = Boolean(
     activeApplication?.external_applied_at || activeApplication?.is_external_confirmed
   );
+
+  // Check if student has a verified placement offer for this job (Stage 3.3.6)
+  const jobVerifiedOffer = useMemo(() => {
+    if (!jobIdNum || !Array.isArray(myOffers)) return null;
+    return myOffers.find((o) => o.job_posting_id === jobIdNum) || null;
+  }, [jobIdNum, myOffers]);
 
   // Guard: Verify eligibility data belongs to the currently viewed job
   const isEligibilityForCurrentJob =
@@ -438,6 +451,27 @@ function StudentJobDetails() {
           </div>
         </div>
       </div>
+
+      {/* Verified Placement Offer Banner (Stage 3.3.6) */}
+      {jobVerifiedOffer && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <span className="p-1 rounded-md bg-emerald-100 dark:bg-emerald-950/70 text-emerald-600 dark:text-emerald-400">
+              <Award className="w-4 h-4" />
+            </span>
+            <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+              Official Placement Offer Extended for This Position
+            </h3>
+          </div>
+          <StudentVerifiedOfferCard
+            offer={jobVerifiedOffer}
+            onOfferUpdated={() => {
+              fetchMyOffers().catch(() => {});
+              if (user?.id) fetchMyApplications(user.id).catch(() => {});
+            }}
+          />
+        </div>
+      )}
 
       {/* Main Content Layout: 2 Columns */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -982,10 +1016,19 @@ function StudentJobDetails() {
                     </p>
                   </div>
                   <button
-                    onClick={() => navigate('/student/applications')}
-                    className="w-full py-2.5 px-4 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    onClick={() => setIsTimelineOpen(true)}
+                    className="w-full py-2 px-4 bg-purple-50 dark:bg-purple-950/40 hover:bg-purple-100 dark:hover:bg-purple-900/60 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    title="View recruitment rounds progression timeline for this drive"
                   >
-                    <span>View Application History</span>
+                    <TrendingUp className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                    <span>Recruitment Timeline</span>
+                  </button>
+
+                  <button
+                    onClick={() => navigate('/student/applications')}
+                    className="w-full py-2 px-4 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <span>View in Applications</span>
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -1294,6 +1337,18 @@ function StudentJobDetails() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Student Recruitment Progression Timeline Modal (Stage 3.3.6) */}
+      {isTimelineOpen && (
+        <StudentRecruitmentTimeline
+          isOpen={true}
+          onClose={() => setIsTimelineOpen(false)}
+          studentId={user?.id}
+          jobId={jobIdNum}
+          jobTitle={selectedJob?.title}
+          companyName={selectedJob?.company?.name || selectedJob?.company_name}
+        />
       )}
     </div>
   );

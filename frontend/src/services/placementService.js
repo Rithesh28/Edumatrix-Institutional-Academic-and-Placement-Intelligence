@@ -270,4 +270,91 @@ export const searchStudentsForMatching = async (query) => {
     params: { q: query },
   });
   return response.data;
-};
+};
+
+// ============================================
+// RECRUITMENT ROUNDS & PROGRESSION ENDPOINTS (STAGE 3.3.5)
+// ============================================
+
+export const getJobRounds = async (jobId) => {
+  const response = await api.get(`/placement/jobs/${jobId}/rounds`);
+  return response.data;
+};
+
+export const createJobRound = async (jobId, data) => {
+  const response = await api.post(`/placement/jobs/${jobId}/rounds`, data);
+  return response.data;
+};
+
+export const getRoundDetails = async (roundId) => {
+  const response = await api.get(`/placement/rounds/${roundId}`);
+  return response.data;
+};
+
+export const getRoundOutcomes = async (roundId, params = {}) => {
+  const response = await api.get(`/placement/rounds/${roundId}/outcomes`, { params });
+  return response.data;
+};
+
+export const getStudentProgression = async (studentId, params = {}) => {
+  const response = await api.get(`/placement/students/${studentId}/progression`, { params });
+  return response.data;
+};
+
+export const correctRoundOutcome = async (outcomeId, data) => {
+  const response = await api.post(`/placement/outcomes/${outcomeId}/correct`, data);
+  return response.data;
+};
+
+export const linkBatchToRound = async (batchId, roundId) => {
+  const response = await api.post(`/placement/results/batches/${batchId}/link-round`, null, {
+    params: { round_id: roundId },
+  });
+  return response.data;
+};
+
+// ============================================
+// VERIFIED PLACEMENT OFFER ENDPOINTS (STAGE 3.3.4 / 3.3.5)
+// ============================================
+
+export const getVerifiedOffers = async (params = {}) => {
+  const response = await api.get('/placement/offers', { params });
+  return response.data;
+};
+
+export const getOfferDetails = async (offerId) => {
+  const response = await api.get(`/placement/offers/${offerId}`);
+  return response.data;
+};
+
+export const createVerifiedOffer = async (data) => {
+  const response = await api.post('/placement/offers', data);
+  return response.data;
+};
+
+export const updateVerifiedOffer = async (offerId, data) => {
+  const response = await api.put(`/placement/offers/${offerId}`, data);
+  return response.data;
+};
+
+export const rescindVerifiedOffer = async (offerId, data) => {
+  const response = await api.post(`/placement/offers/${offerId}/rescind`, data);
+  return response.data;
+};
+
+export const getPlacementAccounting = async () => {
+  const response = await api.get('/placement/accounting');
+  return response.data;
+};
+
+// Student-Specific Offer Endpoints (Stage 3.3.6)
+export const getMyOffers = async () => {
+  const response = await api.get('/placement/offers/my-offers');
+  return response.data;
+};
+
+export const respondToOffer = async (offerId, data) => {
+  const response = await api.post(`/placement/offers/${offerId}/respond`, data);
+  return response.data;
+};
+

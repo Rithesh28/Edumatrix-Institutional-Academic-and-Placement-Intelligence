@@ -22,9 +22,10 @@ import {
   Info,
   Send,
   RotateCcw,
+  Layers,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
-import { searchStudentsForMatching } from '../../services/placementService';
+import { searchStudentsForMatching, getJobRounds } from '../../services/placementService';
 import toast from 'react-hot-toast';
 
 export default function ResultBatchDetails() {
@@ -36,6 +37,7 @@ export default function ResultBatchDetails() {
     fetchResultBatch,
     updateCandidateMatch,
     confirmBatchResults,
+    linkBatchToRound,
   } = usePlacementStore();
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -49,6 +51,12 @@ export default function ResultBatchDetails() {
   const [isSearchingStudents, setIsSearchingStudents] = useState(false);
   const [matchNotes, setMatchNotes] = useState('');
   const [isSubmittingMatch, setIsSubmittingMatch] = useState(false);
+
+  // Link Round Modal State
+  const [jobRoundsForLinking, setJobRoundsForLinking] = useState([]);
+  const [showLinkRoundModal, setShowLinkRoundModal] = useState(false);
+  const [selectedLinkRoundId, setSelectedLinkRoundId] = useState('');
+  const [isLinkingRound, setIsLinkingRound] = useState(false);
 
   // Confirmation Modal State
   const [showConfirmModal, setShowConfirmModal] = useState(false);
@@ -65,6 +73,33 @@ export default function ResultBatchDetails() {
 
   const batch = selectedResultBatch;
   const items = batch?.items || [];
+
+  // Fetch job rounds when batch has job_posting_id
+  useEffect(() => {
+    if (batch?.job_posting_id) {
+      getJobRounds(batch.job_posting_id)
+        .then((rounds) => setJobRoundsForLinking(rounds || []))
+        .catch(() => setJobRoundsForLinking([]));
+    }
+  }, [batch?.job_posting_id]);
+
+  const handleExecuteLinkRound = async () => {
+    if (!selectedLinkRoundId) {
+      toast.error('Please select a recruitment round.');
+      return;
+    }
+    setIsLinkingRound(true);
+    try {
+      await linkBatchToRound(batch.id, parseInt(selectedLinkRoundId));
+      toast.success('Batch successfully linked to recruitment round.');
+      setShowLinkRoundModal(false);
+      fetchResultBatch(batchId);
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Failed to link batch to round.');
+    } finally {
+      setIsLinkingRound(false);
+    }
+  };
 
   // Filtered Items
   const filteredItems = useMemo(() => {
@@ -232,6 +267,19 @@ export default function ResultBatchDetails() {
       toast.error('Please select at least one matched candidate to confirm.');
       return;
     }
+
+    // Require all candidate identities to be resolved before confirmation
+    const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
+    const unresolved = selectedItems.filter(
+      (item) => !item.matched_student_id && item.review_status !== 'IGNORED'
+    );
+    if (unresolved.length > 0) {
+      toast.error(
+        `Cannot confirm ${unresolved.length} candidate(s) without student identity matches. Please assign students or mark them as ignored before confirming.`
+      );
+      return;
+    }
+
     setIsConfirming(true);
     try {
       const payload = {
@@ -290,16 +338,31 @@ export default function ResultBatchDetails() {
 
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
           <div className="space-y-1">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">
                 {batch.round_name}
               </h1>
+              {batch.round_id ? (
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                  <Layers className="w-3.5 h-3.5 mr-1" />
+                  Round #{batch.round_number || batch.round_id}
+                </span>
+              ) : batch.job_posting_id ? (
+                <button
+                  onClick={() => setShowLinkRoundModal(true)}
+                  className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-100 cursor-pointer transition-colors"
+                  title="Link this result batch to an authoritative Recruitment Round"
+                >
+                  <Layers className="w-3.5 h-3.5 mr-1" />
+                  Link to Round
+                </button>
+              ) : null}
               <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium uppercase tracking-wide bg-indigo-50 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
                 {batch.round_type}
               </span>
               {batch.is_final_round ? (
-                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                  <Award className="w-3.5 h-3.5 mr-1" /> Final Offer Round
+                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                  <Award className="w-3.5 h-3.5 mr-1" /> Final Process Selection
                 </span>
               ) : (
                 <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">
@@ -351,7 +414,7 @@ export default function ResultBatchDetails() {
               <button
                 onClick={() => setShowConfirmModal(true)}
                 disabled={selectedItemIds.size === 0}
-                className="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white rounded-lg text-sm font-medium shadow-sm transition-colors"
+                className="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white rounded-lg text-sm font-medium shadow-sm transition-colors cursor-pointer"
               >
                 <CheckCircle className="w-4 h-4 mr-1.5" />
                 Confirm Selected ({selectedItemIds.size})
@@ -403,7 +466,7 @@ export default function ResultBatchDetails() {
       <div
         className={`p-4 rounded-xl border flex items-start gap-3 ${
           batch.is_final_round
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-900 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-200'
+            ? 'bg-purple-50 border-purple-200 text-purple-900 dark:bg-purple-950/30 dark:border-purple-800 dark:text-purple-200'
             : 'bg-blue-50 border-blue-200 text-blue-900 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-200'
         }`}
       >
@@ -411,13 +474,13 @@ export default function ResultBatchDetails() {
         <div className="text-sm">
           <p className="font-semibold">
             {batch.is_final_round
-              ? 'Final Placement Offer Round'
+              ? 'Final Recruitment Selection Round'
               : 'Intermediate Recruitment Round'}
           </p>
           <p className="mt-0.5 opacity-90">
             {batch.is_final_round
-              ? 'Confirming candidates with "SELECTED" in this final round will officially mark them as PLACED, update institutional placement statistics, and send official selection notices.'
-              : 'Confirming candidates in this round updates their round progress notes and sends shortlist progression alerts. It will NOT alter institutional placement counts or mark candidates as placed.'}
+              ? 'Confirming candidates with "SELECTED" in this final round updates their job application status to SELECTED (cleared all selection rounds). Note: Verified placement offers with CTC and offer letters are recorded separately in the Verified Offers tab.'
+              : 'Confirming candidates in this round records chronological round outcomes and sends progression alerts. It will NOT alter institutional placement counts or create verified offers.'}
           </p>
         </div>
       </div>
@@ -817,17 +880,38 @@ export default function ResultBatchDetails() {
                 <strong>{batch.round_name}</strong>.
               </p>
 
+              {batch.round_id ? (
+                <div className="p-2.5 bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs text-indigo-900 dark:text-indigo-200 flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-indigo-600 shrink-0" />
+                  <span>
+                    Linked to <strong>Round #{batch.round_number || batch.round_id}: {batch.round_name}</strong>. Outcomes will be written to student progression ledger.
+                  </span>
+                </div>
+              ) : (
+                <div className="p-2.5 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-xs text-amber-900 dark:text-amber-200 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>
+                    This batch is unlinked. To maintain chronological round progression, link this batch to an authoritative round.
+                  </span>
+                </div>
+              )}
+
               {batch.is_final_round ? (
-                <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg text-emerald-900 dark:text-emerald-200 text-xs">
-                  <strong>Final Selection Round:</strong> Confirmed candidates with result status{' '}
-                  <span className="font-semibold">SELECTED</span> will be marked as{' '}
-                  <strong>PLACED</strong>, updating institutional statistics. Notifications will be
-                  dispatched to verified student accounts.
+                <div className="p-3 bg-purple-50 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800 rounded-lg text-purple-900 dark:text-purple-200 text-xs space-y-1">
+                  <p className="font-bold text-purple-800 dark:text-purple-200">
+                    Final Recruitment Selection Round:
+                  </p>
+                  <p>
+                    Confirmed candidates with status <span className="font-semibold">SELECTED</span> will have their job application status set to <strong>SELECTED</strong> (cleared all selection rounds).
+                  </p>
+                  <p className="font-semibold text-amber-800 dark:text-amber-300 pt-1">
+                    ⚠️ Policy Notice: Final process selection does NOT automatically issue or verify a placement offer. Formal offers must be inspected and verified in Verified Offers with verified CTC and offer letter attachment.
+                  </p>
                 </div>
               ) : (
                 <div className="p-3 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-lg text-blue-900 dark:text-blue-200 text-xs">
                   <strong>Intermediate Round:</strong> Confirmed candidates will have their round
-                  progression recorded. Institutional placement rates will remain unchanged.
+                  outcomes recorded in their progression history. Institutional placement statistics remain unchanged.
                 </div>
               )}
 
@@ -850,7 +934,7 @@ export default function ResultBatchDetails() {
                 type="button"
                 onClick={() => setShowConfirmModal(false)}
                 disabled={isConfirming}
-                className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
               >
                 Cancel
               </button>
@@ -858,9 +942,76 @@ export default function ResultBatchDetails() {
                 type="button"
                 onClick={handleConfirmSelected}
                 disabled={isConfirming}
-                className="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium shadow-sm transition-colors"
+                className="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium shadow-sm transition-colors cursor-pointer"
               >
                 {isConfirming ? 'Processing...' : 'Confirm & Dispatch'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Link Round Modal */}
+      {showLinkRoundModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 pb-3">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                <Layers className="w-5 h-5 text-indigo-600" />
+                Link Batch to Recruitment Round
+              </h3>
+              <button
+                onClick={() => setShowLinkRoundModal(false)}
+                className="text-gray-400 hover:text-gray-500 dark:hover:text-gray-300"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-gray-600 dark:text-gray-300">
+              Select an authoritative recruitment round defined for this job posting to associate with this result batch.
+            </p>
+
+            {jobRoundsForLinking.length === 0 ? (
+              <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg text-center text-xs text-gray-500">
+                No recruitment rounds found for this job posting yet. Create rounds under Job Details &gt; Recruitment Rounds first.
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Available Rounds <span className="text-rose-500">*</span>
+                </label>
+                <select
+                  value={selectedLinkRoundId}
+                  onChange={(e) => setSelectedLinkRoundId(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                  <option value="">-- Select Round --</option>
+                  {jobRoundsForLinking.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      Round #{r.round_number}: {r.round_name} ({r.round_type}) {r.is_final ? '[FINAL]' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+              <button
+                type="button"
+                onClick={() => setShowLinkRoundModal(false)}
+                disabled={isLinkingRound}
+                className="px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteLinkRound}
+                disabled={isLinkingRound || !selectedLinkRoundId}
+                className="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium shadow-sm transition-colors cursor-pointer"
+              >
+                {isLinkingRound ? 'Linking...' : 'Link to Round'}
               </button>
             </div>
           </div>
