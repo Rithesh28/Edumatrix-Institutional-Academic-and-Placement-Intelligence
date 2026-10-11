@@ -8,7 +8,7 @@ Defines request/response validation for placement operations:
 - Shortlists
 """
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, model_validator
 from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 from enum import Enum
@@ -78,6 +78,24 @@ class CompanyResponse(CompanyBase):
     model_config = ConfigDict(from_attributes=True)
 
 
+import urllib.parse
+
+
+def validate_http_or_https_url(v: Optional[str]) -> Optional[str]:
+    """Validate that the URL uses http or https and has a valid domain, rejecting unsafe schemes."""
+    if v is None:
+        return None
+    v_clean = v.strip()
+    if not v_clean:
+        return None
+    parsed = urllib.parse.urlparse(v_clean)
+    if parsed.scheme.lower() not in ("http", "https"):
+        raise ValueError("Application URL must use http or https scheme (unsafe schemes like javascript: or file: are rejected)")
+    if not parsed.netloc:
+        raise ValueError("Application URL must include a valid host or domain")
+    return v_clean
+
+
 # ============================================
 # JOB POSTING SCHEMAS
 # ============================================
@@ -94,9 +112,15 @@ class JobPostingBase(BaseModel):
     branch_eligibility: List[str] = Field(default=[], description="Eligible branches")
     location: Optional[str] = Field(None, max_length=255, description="Job location")
     salary_range: Optional[str] = Field(None, max_length=100, description="Salary range")
+    application_url: Optional[str] = Field(None, max_length=2048, description="Official external company application URL")
     application_deadline: Optional[datetime] = Field(None, description="Application deadline")
     drive_date: Optional[datetime] = Field(None, description="Placement drive date")
     status: JobStatus = Field(JobStatus.DRAFT, description="Job status")
+
+    @field_validator("application_url")
+    @classmethod
+    def check_application_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_http_or_https_url(v)
 
 
 class JobPostingCreate(JobPostingBase):
@@ -116,9 +140,15 @@ class JobPostingUpdate(BaseModel):
     branch_eligibility: Optional[List[str]] = None
     location: Optional[str] = Field(None, max_length=255)
     salary_range: Optional[str] = Field(None, max_length=100)
+    application_url: Optional[str] = Field(None, max_length=2048)
     application_deadline: Optional[datetime] = None
     drive_date: Optional[datetime] = None
     status: Optional[JobStatus] = None
+
+    @field_validator("application_url")
+    @classmethod
+    def check_application_url(cls, v: Optional[str]) -> Optional[str]:
+        return validate_http_or_https_url(v)
 
 
 class JobPostingResponse(JobPostingBase):
@@ -183,6 +213,16 @@ class ApplicationResponse(ApplicationBase):
     match_snapshot: Optional[Dict[str, Any]] = Field(None, description="Immutable application-time snapshot")
     has_low_match_warning: Optional[bool] = Field(None, description="Whether required skill match is below 50%")
     low_match_warning: Optional[str] = Field(None, description="Low skill match warning message")
+
+    # External Application Confirmation
+    external_applied_at: Optional[datetime] = Field(None, description="Timestamp when student confirmed external submission")
+    is_external_confirmed: bool = Field(False, description="Whether student confirmed external submission")
+
+    @model_validator(mode="after")
+    def compute_is_external_confirmed(self) -> "ApplicationResponse":
+        if self.external_applied_at is not None:
+            self.is_external_confirmed = True
+        return self
 
     @field_validator("match_snapshot", mode="before")
     @classmethod

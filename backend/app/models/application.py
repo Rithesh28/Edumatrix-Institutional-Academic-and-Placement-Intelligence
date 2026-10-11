@@ -35,6 +35,7 @@ class Application(Base):
     match_snapshot = Column(JSONB, nullable=True)  # Immutable snapshot at application submission time
     notes = Column(Text, nullable=True)
     applied_at = Column(DateTime(timezone=True), server_default=func.now())
+    external_applied_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     
     # Relationships
@@ -47,6 +48,10 @@ class Application(Base):
     @property
     def created_at(self):
         return self.applied_at
+
+    @property
+    def is_external_confirmed(self) -> bool:
+        return self.external_applied_at is not None
 
     @property
     def has_low_match_warning(self):
@@ -76,5 +81,7 @@ class Application(Base):
             "low_match_warning": self.low_match_warning,
             "notes": self.notes,
             "applied_at": self.applied_at.isoformat() if self.applied_at else None,
+            "external_applied_at": self.external_applied_at.isoformat() if self.external_applied_at else None,
+            "is_external_confirmed": self.is_external_confirmed,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

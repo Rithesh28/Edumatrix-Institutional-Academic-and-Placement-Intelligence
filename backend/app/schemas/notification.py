@@ -8,6 +8,7 @@ class NotificationCreate(BaseModel):
     title: str
     message: str
     reference_id: Optional[int] = None
+    event_key: Optional[str] = None
 
 class NotificationResponse(BaseModel):
     id: int
@@ -16,6 +17,7 @@ class NotificationResponse(BaseModel):
     title: str
     message: str
     reference_id: Optional[int] = None
+    event_key: Optional[str] = None
     is_read: bool
     created_at: datetime
     

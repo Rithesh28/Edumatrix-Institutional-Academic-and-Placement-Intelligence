@@ -100,6 +100,22 @@ const UnifiedBell = () => {
       } else {
         navigate('/lecturer/exam-duties')
       }
+    } else if (notif.type?.startsWith('placement')) {
+      if (role === 'student') {
+        if (notif.reference_id) {
+          navigate(`/student/jobs/${notif.reference_id}`)
+        } else {
+          navigate('/student/jobs')
+        }
+      } else if (role === 'placement_officer' || role === 'admin') {
+        if (notif.reference_id) {
+          navigate(`/placement/jobs/${notif.reference_id}`)
+        } else {
+          navigate('/placement/jobs')
+        }
+      } else {
+        navigate(`/${role}/dashboard`)
+      }
     } else if (notif.type?.includes('circular') || notif.reference_id) {
       navigate(`/${role}/circulars`)
     }
@@ -249,11 +265,12 @@ const UnifiedBell = () => {
                   setShowDropdown(false)
                   if (role === 'lecturer') navigate('/lecturer/exam-duties')
                   else if (role === 'hod') navigate('/hod/exam-duties')
+                  else if (role === 'placement_officer') navigate('/placement/jobs')
                   else navigate(`/${role}/circulars`)
                 }}
                 className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium py-1"
               >
-                Go to {role === 'lecturer' ? 'Exam Duties' : 'Dashboard'} →
+                Go to {role === 'lecturer' ? 'Exam Duties' : (role === 'placement_officer' ? 'Campus Jobs' : 'Dashboard')} →
               </button>
             </div>
           )}

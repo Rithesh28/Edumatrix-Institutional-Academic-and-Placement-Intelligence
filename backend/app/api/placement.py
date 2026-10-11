@@ -397,6 +397,61 @@ async def update_application(
     return ApplicationResponse.model_validate(application)
 
 
+@router.post("/applications/{app_id}/confirm-external", response_model=ApplicationResponse)
+async def confirm_external_application(
+    app_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Idempotently confirm that the student submitted an external application on the company's website.
+    Validates ownership, job visibility, and external URL configuration.
+    """
+    # 1. Fetch application
+    application = placement_service.get_application(db, app_id)
+    if not application:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Application with ID {app_id} not found"
+        )
+
+    # 2. RBAC and Ownership: Only the authenticated student owner can confirm
+    if current_user.role != UserRole.STUDENT or application.student_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only confirm your own applications"
+        )
+
+    # 3. Validate job existence and visibility
+    job = application.job_posting or placement_service.get_job_posting(db, application.job_posting_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Associated job posting not found"
+        )
+
+    if job.status != JobStatus.OPEN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job posting is no longer open for applications"
+        )
+
+    # 4. Validate job has external application URL
+    if not job.application_url or not job.application_url.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This job posting does not have an external application URL to confirm"
+        )
+
+    # 5. Idempotent confirmation
+    confirmed_app = placement_service.confirm_external_application(db, application, current_user)
+    resp = ApplicationResponse.model_validate(confirmed_app)
+    if confirmed_app.match_snapshot:
+        resp.has_low_match_warning = confirmed_app.match_snapshot.get("has_low_match_warning", False)
+        resp.low_match_warning = confirmed_app.match_snapshot.get("low_match_warning")
+    return resp
+
+
 # ============================================
 # SHORTLIST ENDPOINTS
 # ============================================
@@ -715,7 +770,9 @@ async def get_all_placement_students(
                 "job_id": a.job_posting_id,
                 "status": a.status.value if hasattr(a.status, "value") else str(a.status),
                 "created_at": a.applied_at.isoformat() if getattr(a, "applied_at", None) else None,
-                "applied_at": a.applied_at.isoformat() if getattr(a, "applied_at", None) else None
+                "applied_at": a.applied_at.isoformat() if getattr(a, "applied_at", None) else None,
+                "external_applied_at": a.external_applied_at.isoformat() if getattr(a, "external_applied_at", None) else None,
+                "is_external_confirmed": bool(getattr(a, "external_applied_at", None))
             } for a in apps]
         })
     
@@ -816,7 +873,9 @@ async def get_student_details_for_placement(
             "has_low_match_warning": a.match_snapshot.get("has_low_match_warning", False) if a.match_snapshot else False,
             "low_match_warning": a.match_snapshot.get("low_match_warning") if a.match_snapshot else None,
             "created_at": a.applied_at.isoformat() if a.applied_at else None,
-            "applied_at": a.applied_at.isoformat() if a.applied_at else None
+            "applied_at": a.applied_at.isoformat() if a.applied_at else None,
+            "external_applied_at": a.external_applied_at.isoformat() if getattr(a, "external_applied_at", None) else None,
+            "is_external_confirmed": bool(getattr(a, "external_applied_at", None))
         } for a in apps],
         "total_applications": len(apps),
         "total_shortlists": len(shortlists)

@@ -26,7 +26,8 @@ import {
   Award,
   BookOpen,
   X,
-  FileCheck
+  FileCheck,
+  ExternalLink
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import toast from 'react-hot-toast';
@@ -464,6 +465,28 @@ const JobDetails = () => {
             </div>
           )}
         </div>
+
+        {/* Official External Application Link */}
+        {selectedJob.application_url && (
+          <div className="mt-4 p-3 bg-blue-50/60 dark:bg-blue-950/30 rounded-xl border border-blue-100 dark:border-blue-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 text-blue-900 dark:text-blue-200 min-w-0">
+              <ExternalLink className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+              <span className="truncate">
+                <strong>Official Application URL:</strong>{' '}
+                <span className="font-mono text-blue-700 dark:text-blue-300">{selectedJob.application_url}</span>
+              </span>
+            </div>
+            <a
+              href={selectedJob.application_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-3 py-1 bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 hover:text-blue-800 border border-blue-200 dark:border-blue-800 rounded-lg font-semibold shrink-0"
+            >
+              <span>Open Link</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+        )}
       </div>
 
       {/* Candidate Skill Matching Section */}
@@ -1065,6 +1088,18 @@ const JobDetails = () => {
                   <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${getAppStatusColor(app.status)}`}>
                     {app.status?.toUpperCase()}
                   </span>
+                  {app.external_applied_at ? (
+                    <span
+                      className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800"
+                      title={`Student confirmed external submission on ${new Date(app.external_applied_at).toLocaleString()}`}
+                    >
+                      ✓ External Confirmed ({new Date(app.external_applied_at).toLocaleDateString()})
+                    </span>
+                  ) : selectedJob?.application_url ? (
+                    <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
+                      External: Pending
+                    </span>
+                  ) : null}
                   {(app.has_low_match_warning || app.match_snapshot?.has_low_match_warning) && (
                     <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800" title={app.low_match_warning || app.match_snapshot?.low_match_warning || 'Required skill match < 50%'}>
                       ⚠️ Low match (&lt;50%)

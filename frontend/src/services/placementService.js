@@ -109,6 +109,11 @@ export const updateApplication = async (id, data) => {
   return response.data;
 };
 
+export const confirmExternalApplication = async (id) => {
+  const response = await api.post(`/placement/applications/${id}/confirm-external`);
+  return response.data;
+};
+
 // ============================================
 // SHORTLIST ENDPOINTS
 // ============================================

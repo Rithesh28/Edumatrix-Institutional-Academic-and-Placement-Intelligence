@@ -75,6 +75,7 @@ app.add_middleware(
 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc: RequestValidationError):
@@ -89,7 +90,7 @@ async def validation_exception_handler(request, exc: RequestValidationError):
     clean_msg = ", ".join(error_messages) if error_messages else "Invalid input data"
     return JSONResponse(
         status_code=422,
-        content={"detail": clean_msg, "errors": errors}
+        content={"detail": clean_msg, "errors": jsonable_encoder(errors)}
     )
 
 # Register routers

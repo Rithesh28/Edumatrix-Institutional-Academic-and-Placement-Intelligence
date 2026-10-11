@@ -12,7 +12,7 @@ Handles all placement operations:
 """
 
 import logging
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Union
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, or_
 from datetime import datetime
@@ -24,6 +24,7 @@ from ..models.shortlist import Shortlist
 from ..models.user import User, UserRole
 from ..models.profile import StudentProfile, Skill, StudentProfileExtended, PlacementStatus
 from ..models.resume import Resume
+from ..models.notification import Notification
 from ..schemas.placement import (
     CompanyCreate, CompanyUpdate,
     JobPostingCreate, JobPostingUpdate,
@@ -119,6 +120,7 @@ class PlacementService:
             branch_eligibility=job_data.branch_eligibility,
             location=job_data.location,
             salary_range=job_data.salary_range,
+            application_url=getattr(job_data, 'application_url', None),
             application_deadline=job_data.application_deadline,
             drive_date=job_data.drive_date,
             status=job_data.status if job_data.status else JobStatus.DRAFT,
@@ -144,12 +146,100 @@ class PlacementService:
                 "Job cannot be published without skill requirements unless explicitly confirmed with confirm_no_skills=True"
             )
 
+        was_open = (job.status == JobStatus.OPEN)
         job.status = JobStatus.OPEN
         job.updated_at = datetime.utcnow()
         db.commit()
         db.refresh(job)
         logger.info(f"📢 Job posting published: {job.title} (ID: {job.id})")
+
+        # Notify students only on real transition to OPEN (not on repeated publish of an already-open job)
+        if not was_open:
+            try:
+                self.notify_students_on_job_publish(db, job)
+            except Exception as e:
+                logger.error(f"❌ Failed to dispatch job publication notifications for job {job.id}: {e}", exc_info=True)
+
         return job
+
+    def notify_students_on_job_publish(self, db: Session, job: JobPosting) -> int:
+        """
+        Notify appropriate students when a job is published (status -> OPEN).
+        Respects branch eligibility targeting if specified, or all active students otherwise.
+        Uses event_key to ensure strict idempotency and deduplication.
+        Returns the number of notifications created.
+        """
+        # 1. Determine eligible branches if configured
+        target_branches: Optional[set] = None
+        if job.branch_eligibility and isinstance(job.branch_eligibility, (list, tuple)) and len(job.branch_eligibility) > 0:
+            target_branches = {
+                str(b).strip().lower() for b in job.branch_eligibility if b and str(b).strip()
+            }
+
+        # 2. Query active students with profile
+        students = db.query(User).options(
+            joinedload(User.student_profile)
+        ).filter(
+            User.role == UserRole.STUDENT,
+            User.is_active == True
+        ).all()
+
+        company_name = job.company.name if job.company else "Campus Recruiter"
+        title = f"💼 New Job: {job.title} at {company_name}"
+
+        deadline_str = ""
+        if job.application_deadline:
+            if hasattr(job.application_deadline, "strftime"):
+                deadline_str = f" • Deadline: {job.application_deadline.strftime('%d %b %Y')}"
+            else:
+                deadline_str = f" • Deadline: {job.application_deadline}"
+
+        message = (
+            f"{company_name} is hiring for {job.title}{deadline_str}. "
+            f"Check your skill match and apply via Campus Jobs."
+        )
+
+        notif_count = 0
+        for student in students:
+            # Check branch eligibility if targeted
+            if target_branches:
+                s_branch = None
+                if student.student_profile and student.student_profile.branch:
+                    s_branch = student.student_profile.branch
+                elif student.department:
+                    s_branch = student.department
+
+                if not s_branch or str(s_branch).strip().lower() not in target_branches:
+                    continue
+
+            event_key = f"job_publish:{job.id}:student:{student.id}"
+
+            # Check if notification with this event_key already exists
+            existing = db.query(Notification).filter(Notification.event_key == event_key).first()
+            if existing:
+                continue
+
+            notif = Notification(
+                user_id=student.id,
+                type="placement_job",
+                title=title,
+                message=message,
+                reference_id=job.id,
+                event_key=event_key,
+                is_read=False
+            )
+            db.add(notif)
+            notif_count += 1
+
+        if notif_count > 0:
+            try:
+                db.commit()
+                logger.info(f"📢 Created {notif_count} job-publication notifications for job {job.id}")
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Handled notification commit for job {job.id}: {e}")
+
+        return notif_count
     
     def get_job_posting(self, db: Session, job_id: int) -> Optional[JobPosting]:
         """Get a job posting by ID with company data."""
@@ -177,6 +267,7 @@ class PlacementService:
         if not job:
             return None
         
+        old_status = job.status
         update_dict = job_data.model_dump(exclude_unset=True)
         for key, value in update_dict.items():
             setattr(job, key, value)
@@ -185,6 +276,14 @@ class PlacementService:
         db.commit()
         db.refresh(job)
         logger.info(f"✅ Job posting updated: {job.title} (ID: {job.id})")
+
+        # If updated to OPEN from a non-OPEN status, dispatch notifications safely
+        if old_status != JobStatus.OPEN and job.status == JobStatus.OPEN:
+            try:
+                self.notify_students_on_job_publish(db, job)
+            except Exception as e:
+                logger.error(f"❌ Failed to dispatch job publication notifications on update for job {job.id}: {e}", exc_info=True)
+
         return job
     
     def delete_job_posting(self, db: Session, job_id: int) -> bool:
@@ -368,6 +467,149 @@ class PlacementService:
         db.refresh(application)
         logger.info(f"✅ Application updated: ID {app_id}")
         return application
+
+    def confirm_external_application(
+        self,
+        db: Session,
+        application_or_id: Union[Application, int],
+        current_user: Optional[User] = None
+    ) -> Application:
+        """
+        Idempotently confirm student external application submission.
+        Validates ownership, job visibility, and external URL presence.
+        Preserves original confirmation timestamp on repeated requests.
+        """
+        from datetime import timezone
+
+        if isinstance(application_or_id, Application):
+            application = application_or_id
+        else:
+            application = self.get_application(db, application_or_id)
+            if not application:
+                raise ValueError(f"Application with ID {application_or_id} not found")
+
+        if current_user:
+            if current_user.role == UserRole.STUDENT and application.student_id != current_user.id:
+                raise PermissionError("You can only confirm your own applications")
+
+        job = application.job_posting or self.get_job_posting(db, application.job_posting_id)
+        if not job:
+            raise ValueError("Associated job posting not found")
+
+        if job.status != JobStatus.OPEN:
+            raise ValueError("Job posting is no longer open for applications")
+
+        if not job.application_url or not job.application_url.strip():
+            raise ValueError("Job posting does not have an external application URL to confirm")
+
+        # Idempotent: preserve original timestamp if already set
+        if application.external_applied_at is not None:
+            logger.info(f"External application already confirmed for app {application.id} at {application.external_applied_at}")
+            return application
+
+        now_utc = datetime.now(timezone.utc)
+        application.external_applied_at = now_utc
+        application.updated_at = now_utc
+        db.commit()
+        db.refresh(application)
+        logger.info(f"✅ External application confirmed: Student {application.student_id} -> Job {job.id} at {now_utc}")
+
+        # Notify Placement Officers of first-time external confirmation
+        try:
+            student_user = current_user if (current_user and current_user.id == application.student_id) else application.student
+            self.notify_officers_on_external_confirm(db, application, job, student_user)
+        except Exception as e:
+            logger.error(f"❌ Failed to dispatch external confirmation notifications for app {application.id}: {e}", exc_info=True)
+
+        return application
+
+    def notify_officers_on_external_confirm(
+        self,
+        db: Session,
+        application: Application,
+        job: JobPosting,
+        student: Optional[User] = None
+    ) -> int:
+        """
+        Notify Placement Officers when a student confirms external application submission.
+        Uses event_key for deduplication and protects sensitive student data.
+        Returns the number of notifications created.
+        """
+        # 1. Identify recipient placement officers
+        officers = db.query(User).filter(
+            User.role == UserRole.PLACEMENT_OFFICER,
+            User.is_active == True
+        ).all()
+
+        recipient_ids = {u.id for u in officers}
+        # If job creator is an active placement officer or admin, ensure they are included
+        if job.created_by and job.created_by not in recipient_ids:
+            creator = db.query(User).filter(
+                User.id == job.created_by,
+                User.is_active == True,
+                User.role.in_([UserRole.PLACEMENT_OFFICER, UserRole.ADMIN])
+            ).first()
+            if creator:
+                recipient_ids.add(creator.id)
+
+        if not recipient_ids:
+            logger.warning(f"No active Placement Officers found to notify for external confirmation of app {application.id}")
+            return 0
+
+        # Resolve student name safely
+        student_name = None
+        if student and hasattr(student, 'name') and student.name:
+            student_name = student.name
+        elif application.student and hasattr(application.student, 'name') and application.student.name:
+            student_name = application.student.name
+        else:
+            student_rec = db.query(User).filter(User.id == application.student_id).first()
+            student_name = student_rec.name if student_rec else f"Student #{application.student_id}"
+
+        # Resolve company name safely
+        company_name = job.company.name if job.company else "Company"
+
+        applied_time_str = ""
+        if application.external_applied_at and hasattr(application.external_applied_at, "strftime"):
+            applied_time_str = application.external_applied_at.strftime("%d %b %Y, %H:%M UTC")
+        else:
+            applied_time_str = datetime.utcnow().strftime("%d %b %Y, %H:%M UTC")
+
+        title = f"📝 External Application: {student_name} - {job.title}"
+        message = (
+            f"{student_name} confirmed external application submission for "
+            f"{job.title} at {company_name} on {applied_time_str}."
+        )
+
+        notif_count = 0
+        for officer_id in recipient_ids:
+            event_key = f"external_confirm:{application.id}:officer:{officer_id}"
+
+            existing = db.query(Notification).filter(Notification.event_key == event_key).first()
+            if existing:
+                continue
+
+            notif = Notification(
+                user_id=officer_id,
+                type="placement_confirm",
+                title=title,
+                message=message,
+                reference_id=job.id,
+                event_key=event_key,
+                is_read=False
+            )
+            db.add(notif)
+            notif_count += 1
+
+        if notif_count > 0:
+            try:
+                db.commit()
+                logger.info(f"📢 Created {notif_count} external application confirmation notifications for app {application.id}")
+            except Exception as e:
+                db.rollback()
+                logger.warning(f"Handled notification commit for app {application.id}: {e}")
+
+        return notif_count
     
     # ============================================
     # SHORTLIST MANAGEMENT

@@ -46,12 +46,15 @@ function StudentJobDetails() {
     isMyApplicationsLoading,
     fetchMyApplications,
     createApplication,
+    confirmExternalApplication,
     isSubmittingApplication,
     applicationSubmitError,
   } = usePlacementStore();
 
   // Modal and submission state
   const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isConfirmingExternal, setIsConfirmingExternal] = useState(false);
   const [candidateNotes, setCandidateNotes] = useState('');
   const [submittedApplication, setSubmittedApplication] = useState(null);
 
@@ -91,6 +94,9 @@ function StudentJobDetails() {
 
   const activeApplication = submittedApplication || existingApplication;
   const isAlreadyApplied = Boolean(activeApplication);
+  const isExternalConfirmed = Boolean(
+    activeApplication?.external_applied_at || activeApplication?.is_external_confirmed
+  );
 
   // Guard: Verify eligibility data belongs to the currently viewed job
   const isEligibilityForCurrentJob =
@@ -160,6 +166,45 @@ function StudentJobDetails() {
       const errMsg =
         err.response?.data?.detail || err.message || 'Failed to submit application';
       toast.error(typeof errMsg === 'string' ? errMsg : 'Application submission failed');
+    }
+  };
+
+  const handleConfirmExternal = async () => {
+    if (!jobIdNum || !selectedJob?.application_url) {
+      toast.error('This job does not have an external application URL to confirm.');
+      return;
+    }
+
+    setIsConfirmingExternal(true);
+    try {
+      let targetApp = activeApplication;
+
+      // If no internal application exists yet, create one through server-authoritative flow
+      if (!targetApp) {
+        if (isEligibilityForCurrentJob && !jobEligibility.is_eligible) {
+          toast.error('You do not meet the minimum academic criteria for this position.');
+          setIsConfirmingExternal(false);
+          return;
+        }
+
+        const payload = {
+          job_posting_id: jobIdNum,
+          notes: 'Applied via external company portal',
+        };
+        targetApp = await createApplication(payload);
+      }
+
+      // Now confirm external application
+      const confirmedApp = await confirmExternalApplication(targetApp.id);
+      setSubmittedApplication(confirmedApp);
+      setIsConfirmModalOpen(false);
+      toast.success('External application confirmed successfully!');
+    } catch (err) {
+      const errMsg =
+        err.response?.data?.detail || err.message || 'Failed to confirm external application';
+      toast.error(typeof errMsg === 'string' ? errMsg : 'Confirmation failed');
+    } finally {
+      setIsConfirmingExternal(false);
     }
   };
 
@@ -274,6 +319,37 @@ function StudentJobDetails() {
 
           {/* Quick CTA on Header */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
+            {selectedJob.application_url && (
+              <a
+                href={selectedJob.application_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <span>Apply on Company Website</span>
+                <ExternalLink className="w-4 h-4" />
+              </a>
+            )}
+
+            {selectedJob.application_url && (
+              isExternalConfirmed ? (
+                <span className="px-4 py-2.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5" title={`Confirmed: ${activeApplication?.external_applied_at ? new Date(activeApplication.external_applied_at).toLocaleString() : 'Recorded'}`}>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                  <span>External Applied</span>
+                </span>
+              ) : (
+                <button
+                  onClick={() => setIsConfirmModalOpen(true)}
+                  disabled={isConfirmingExternal || (isEligibilityForCurrentJob && !jobEligibility.is_eligible)}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  id="header-confirm-external-btn"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  <span>{isConfirmingExternal ? 'Confirming...' : "I've Applied"}</span>
+                </button>
+              )
+            )}
+
             {isAlreadyApplied ? (
               <button
                 onClick={() => navigate('/student/applications')}
@@ -382,6 +458,95 @@ function StudentJobDetails() {
                 </p>
               )}
             </div>
+          </div>
+
+          {/* Official Company Application Portal Card */}
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <ExternalLink className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <span>Official Company Application Portal</span>
+              </h2>
+              {selectedJob.application_url && (
+                <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                  External Portal
+                </span>
+              )}
+            </div>
+
+            {selectedJob.application_url ? (
+              <div className="space-y-3">
+                <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+                  This recruitment drive requires submitting an application directly on the employer's official career portal or job website.
+                </p>
+
+                <div className="p-3.5 bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200/80 dark:border-blue-800/60 rounded-xl text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2.5">
+                  <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-semibold">Important instructions:</p>
+                    <ol className="list-decimal list-inside space-y-0.5 text-blue-800 dark:text-blue-300 text-[11px]">
+                      <li>Click <strong>Apply on Company Website</strong> below to open the official application form in a new tab.</li>
+                      <li>Complete and submit your application on the company's website.</li>
+                      <li>Return to EduMatrix after applying. Opening the external URL does not automatically record your application.</li>
+                    </ol>
+                  </div>
+                </div>
+
+                <div className="pt-1 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                  <a
+                    href={selectedJob.application_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm hover:shadow cursor-pointer"
+                  >
+                    <span>Apply on Company Website</span>
+                    <ExternalLink className="w-4 h-4" />
+                  </a>
+
+                  {isExternalConfirmed ? (
+                    <div className="flex items-center gap-2 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 rounded-xl text-xs font-semibold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                      <span>
+                        External Application Confirmed{' '}
+                        {activeApplication?.external_applied_at &&
+                          `(${new Date(activeApplication.external_applied_at).toLocaleDateString()})`}
+                      </span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setIsConfirmModalOpen(true)}
+                      disabled={isConfirmingExternal || (isEligibilityForCurrentJob && !jobEligibility.is_eligible)}
+                      className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm hover:shadow cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                      id="confirm-external-application-btn"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>{isConfirmingExternal ? 'Confirming...' : "I've Applied on Company Website"}</span>
+                    </button>
+                  )}
+                </div>
+
+                {isExternalConfirmed ? (
+                  <div className="p-3 bg-emerald-50/60 dark:bg-emerald-950/30 border border-emerald-200/60 dark:border-emerald-800/50 rounded-xl text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-semibold">Student-confirmed external submission recorded.</p>
+                      <p className="text-[11px] text-emerald-800 dark:text-emerald-300 mt-0.5">
+                        Your confirmation timestamp ({activeApplication?.external_applied_at ? new Date(activeApplication.external_applied_at).toLocaleString() : 'Recorded'}) is linked to your application record. Placement Cell will be able to view your confirmed status.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 italic">
+                    Click <strong>I've Applied on Company Website</strong> only after completing your submission on the external portal.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="p-3.5 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-200 dark:border-gray-800 text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                <Info className="w-4 h-4 text-gray-400 shrink-0" />
+                <span>External application link not provided yet. Please check back later or monitor placement cell circulars.</span>
+              </div>
+            )}
           </div>
 
           {/* Academic Criteria Card */}
@@ -850,6 +1015,53 @@ function StudentJobDetails() {
                 </button>
               )}
             </div>
+
+            {/* External Application Portal CTA in Sidebar */}
+            {selectedJob.application_url ? (
+              <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
+                <a
+                  href={selectedJob.application_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Apply on Company Website</span>
+                </a>
+                {isExternalConfirmed ? (
+                  <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl text-center space-y-0.5">
+                    <div className="flex items-center justify-center gap-1.5 text-xs font-bold text-emerald-800 dark:text-emerald-300">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                      <span>External Applied</span>
+                    </div>
+                    <p className="text-[10px] text-emerald-700 dark:text-emerald-400">
+                      Confirmed on{' '}
+                      {activeApplication?.external_applied_at
+                        ? new Date(activeApplication.external_applied_at).toLocaleDateString()
+                        : 'Recorded'}
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setIsConfirmModalOpen(true)}
+                    disabled={isConfirmingExternal || (isEligibilityForCurrentJob && !jobEligibility.is_eligible)}
+                    className="w-full py-2 px-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{isConfirmingExternal ? 'Confirming...' : "I've Applied"}</span>
+                  </button>
+                )}
+                <p className="text-[11px] text-gray-500 dark:text-gray-400 text-center leading-normal">
+                  Opens external website in a new tab. Remember to confirm after applying.
+                </p>
+              </div>
+            ) : (
+              <div className="pt-3 border-t border-gray-100 dark:border-gray-800">
+                <p className="text-[11px] text-gray-400 dark:text-gray-500 text-center italic">
+                  External application link not provided yet.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -961,6 +1173,78 @@ function StudentJobDetails() {
                   <>
                     <Send className="w-3.5 h-3.5" />
                     <span>Confirm & Apply</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* External Application Confirmation Modal */}
+      {isConfirmModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full p-6 shadow-xl border border-gray-200 dark:border-gray-800 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-2 text-gray-900 dark:text-white font-bold text-lg">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+                <span>Confirm External Application</span>
+              </div>
+              <button
+                onClick={() => setIsConfirmModalOpen(false)}
+                disabled={isConfirmingExternal}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3.5 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/60 space-y-1">
+              <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">Opportunity:</p>
+              <p className="text-sm font-bold text-gray-900 dark:text-white">{selectedJob.title}</p>
+              <p className="text-xs text-gray-600 dark:text-gray-300">
+                Company: <strong>{selectedJob.company_name || 'Assigned Company'}</strong>
+              </p>
+            </div>
+
+            <div className="p-3.5 bg-blue-50/70 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/60 rounded-xl text-xs text-blue-900 dark:text-blue-200 space-y-2">
+              <div className="flex items-center gap-1.5 font-bold">
+                <Info className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                <span>External Application Confirmation</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-blue-800 dark:text-blue-300">
+                Please verify that you have successfully submitted your application on the company's official portal.
+              </p>
+              <p className="text-[11px] text-blue-700 dark:text-blue-400 italic">
+                EduMatrix will record your confirmation timestamp and link it to your placement records. We do not independently verify external corporate portals.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+              <button
+                type="button"
+                onClick={() => setIsConfirmModalOpen(false)}
+                disabled={isConfirmingExternal}
+                className="px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExternal}
+                disabled={isConfirmingExternal}
+                className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                id="modal-confirm-external-btn"
+              >
+                {isConfirmingExternal ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Confirming Submission...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>Yes, I've Applied</span>
                   </>
                 )}
               </button>

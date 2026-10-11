@@ -464,8 +464,35 @@ function StudentApplications() {
                     </h3>
                   </div>
 
-                  <div className="flex items-center gap-2 self-start sm:self-auto flex-shrink-0">
+                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto flex-shrink-0">
+                    {/* Official round status */}
                     {getStatusBadge(app.status)}
+
+                    {/* External confirmation badge */}
+                    {app.external_applied_at ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                        title={`Student confirmed external submission on ${new Date(app.external_applied_at).toLocaleString()}`}
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                        <span>External: Confirmed ({new Date(app.external_applied_at).toLocaleDateString()})</span>
+                      </span>
+                    ) : parentJob?.application_url ? (
+                      <span
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 dark:bg-amber-950/50 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                        title="Application created internally on EduMatrix. External company submission not yet confirmed."
+                      >
+                        <Clock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                        <span>External: Pending</span>
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700"
+                        title="Standard campus placement drive application"
+                      >
+                        <span>Internal Drive</span>
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -480,6 +507,18 @@ function StudentApplications() {
                       </strong>
                     </span>
                   </span>
+
+                  {app.external_applied_at && (
+                    <span className="flex items-center gap-1.5" title="Date external application was confirmed">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>
+                        External Confirmed:{' '}
+                        <strong className="text-emerald-800 dark:text-emerald-300 font-semibold">
+                          {new Date(app.external_applied_at).toLocaleDateString()}
+                        </strong>
+                      </span>
+                    </span>
+                  )}
 
                   {location && (
                     <span className="flex items-center gap-1.5" title="Location">
@@ -565,6 +604,17 @@ function StudentApplications() {
 
                   {/* Actions: View Snapshot & View Job */}
                   <div className="flex items-center gap-2 self-end sm:self-auto">
+                    {parentJob?.application_url && !app.external_applied_at && (
+                      <button
+                        onClick={() => navigate(`/student/jobs/${app.job_posting_id}`)}
+                        className="px-3 py-1.5 text-xs font-semibold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 rounded-lg transition-colors cursor-pointer flex items-center gap-1 border border-amber-200 dark:border-amber-800"
+                        title="Complete external submission confirmation"
+                      >
+                        <Clock className="w-3 h-3 text-amber-600" />
+                        <span>Confirm External</span>
+                      </button>
+                    )}
+
                     {hasSnapshot && (
                       <button
                         onClick={() => setSelectedSnapshotApp(app)}

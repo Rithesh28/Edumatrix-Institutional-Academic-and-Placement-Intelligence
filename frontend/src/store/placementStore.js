@@ -13,6 +13,7 @@ import {
   createApplication,
   getApplications,
   updateApplication,
+  confirmExternalApplication,
   createShortlist,
   getShortlists,
   removeFromShortlist,
@@ -385,6 +386,23 @@ const usePlacementStore = create((set, get) => ({
       return application;
     } catch (error) {
       set({ isLoading: false, error: formatErrorMessage(error) });
+      throw error;
+    }
+  },
+
+  confirmExternalApplication: async (id) => {
+    set({ isLoading: true, error: null });
+    try {
+      const application = await confirmExternalApplication(id);
+      set((state) => ({
+        applications: state.applications.map((a) => (a.id === id ? { ...a, ...application } : a)),
+        myApplications: state.myApplications.map((a) => (a.id === id ? { ...a, ...application } : a)),
+        isLoading: false,
+      }));
+      return application;
+    } catch (error) {
+      const errMsg = formatErrorMessage(error);
+      set({ isLoading: false, error: errMsg });
       throw error;
     }
   },

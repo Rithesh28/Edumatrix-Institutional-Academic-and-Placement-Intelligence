@@ -33,6 +33,7 @@ class JobPosting(Base):
     branch_eligibility = Column(JSONB, nullable=True, default=[])  # List of eligible branches
     location = Column(String(255), nullable=True)
     salary_range = Column(String(100), nullable=True)
+    application_url = Column(String(2048), nullable=True)  # Official external company application URL
     application_deadline = Column(DateTime(timezone=True), nullable=True)
     drive_date = Column(DateTime(timezone=True), nullable=True)
     status = Column(Enum(JobStatus), default=JobStatus.DRAFT)
@@ -55,6 +56,7 @@ class JobPosting(Base):
             "company_name": self.company.name if self.company else None,
             "title": self.title,
             "description": self.description,
+            "application_url": self.application_url,
             "required_skills": self.required_skills or [],
             "preferred_skills": self.preferred_skills or [],
             "experience_level": self.experience_level,

@@ -53,6 +53,7 @@ const JobForm = () => {
     branch_eligibility: [],
     location: '',
     salary_range: '',
+    application_url: '',
     application_deadline: '',
     drive_date: '',
     status: 'draft',
@@ -109,6 +110,7 @@ const JobForm = () => {
         branch_eligibility: selectedJob.branch_eligibility || [],
         location: selectedJob.location || '',
         salary_range: selectedJob.salary_range || '',
+        application_url: selectedJob.application_url || '',
         application_deadline: selectedJob.application_deadline ? selectedJob.application_deadline.slice(0, 16) : '',
         drive_date: selectedJob.drive_date ? selectedJob.drive_date.slice(0, 16) : '',
         status: selectedJob.status || 'draft',
@@ -340,6 +342,7 @@ const JobForm = () => {
     try {
       const submitData = {
         ...formData,
+        application_url: formData.application_url?.trim() || null,
         cgpa_criteria: formData.cgpa_criteria ? parseFloat(formData.cgpa_criteria) : null,
         required_skills: formData.required_skills || [],
         preferred_skills: formData.preferred_skills || [],
@@ -996,6 +999,24 @@ const JobForm = () => {
                 placeholder="e.g., ₹8 - ₹12 LPA or Stipend: ₹25,000/mo → CTC: ₹6.5 LPA"
               />
             </div>
+          </div>
+
+          {/* Official External Application URL */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Official Application URL <span className="text-xs font-normal text-gray-500 dark:text-gray-400">(Optional)</span>
+            </label>
+            <input
+              type="url"
+              name="application_url"
+              value={formData.application_url}
+              onChange={handleChange}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-indigo-500"
+              placeholder="https://company.careers.com/apply/job-12345"
+            />
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              Direct HTTP/HTTPS link where students apply on the company's official career website. Students will open this page to submit their external application before confirming on EduMatrix.
+            </p>
           </div>
 
           {/* Deadlines */}
