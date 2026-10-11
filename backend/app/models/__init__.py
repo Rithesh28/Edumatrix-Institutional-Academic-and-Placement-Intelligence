@@ -14,6 +14,13 @@ from .company import Company
 from .job_posting import JobPosting, JobStatus
 from .application import Application, ApplicationStatus
 from .shortlist import Shortlist
+from .recruitment_circular import (
+    RecruitmentCircular,
+    RecruitmentCircularStatus,
+    RecruitmentCircularAttachment,
+    RecruitmentCircularJob,
+    AttachmentType,
+)
 from .audit_log import AuditLog
 
 __all__ = [
@@ -53,5 +60,10 @@ __all__ = [
     'Application',
     'ApplicationStatus',
     'Shortlist',
+    'RecruitmentCircular',
+    'RecruitmentCircularStatus',
+    'RecruitmentCircularAttachment',
+    'RecruitmentCircularJob',
+    'AttachmentType',
     'AuditLog'
 ]

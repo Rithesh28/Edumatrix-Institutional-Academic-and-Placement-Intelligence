@@ -20,7 +20,7 @@ from uuid import UUID
 from ..core.database import get_db
 from ..api.auth import get_current_user
 from ..models.user import User, UserRole
-from ..models.file import File, FileStatus
+from ..models.file import File, FileStatus, FileType
 from ..models.file_version import FileVersion
 from ..schemas.file import (
     FileResponse,
@@ -219,6 +219,62 @@ async def get_recent_files(
 # RETRIEVAL ENDPOINTS
 # ============================================
 
+def check_file_permission(db: Session, file: File, current_user: User) -> bool:
+    """
+    Check if current_user has access to the given file.
+    Permits:
+    - Admin (system-wide)
+    - HOD (department)
+    - Placement Officer (placement docs, circular attachments)
+    - Same department or uploader
+    - Cross-department access for students if file is attached to a PUBLISHED recruitment circular they are eligible for.
+    Draft recruitment circular attachments are strictly not permitted to students cross-department.
+    """
+    if current_user.role == UserRole.ADMIN:
+        return True
+
+    if current_user.role == UserRole.HOD and file.department == current_user.department:
+        return True
+
+    if file.uploaded_by == current_user.id:
+        return True
+
+    if file.department and current_user.department and file.department == current_user.department:
+        return True
+
+    if current_user.role == UserRole.PLACEMENT_OFFICER:
+        if file.file_type in [FileType.PLACEMENT_DOC, FileType.CIRCULAR]:
+            return True
+        from ..models.recruitment_circular import RecruitmentCircularAttachment
+        if db.query(RecruitmentCircularAttachment).filter(RecruitmentCircularAttachment.file_id == file.id).first():
+            return True
+
+    if current_user.role == UserRole.STUDENT:
+        from ..models.recruitment_circular import RecruitmentCircular, RecruitmentCircularAttachment, RecruitmentCircularStatus
+        published_rcs = db.query(RecruitmentCircular).join(
+            RecruitmentCircularAttachment,
+            RecruitmentCircularAttachment.circular_id == RecruitmentCircular.id
+        ).filter(
+            RecruitmentCircularAttachment.file_id == file.id,
+            RecruitmentCircular.status == RecruitmentCircularStatus.PUBLISHED
+        ).all()
+
+        for rc in published_rcs:
+            if not rc.branch_eligibility or len(rc.branch_eligibility) == 0:
+                return True
+            s_branch = None
+            if current_user.student_profile and current_user.student_profile.branch:
+                s_branch = current_user.student_profile.branch
+            elif current_user.department:
+                s_branch = current_user.department
+            if s_branch:
+                target_branches = {str(b).strip().lower() for b in rc.branch_eligibility if b}
+                if str(s_branch).strip().lower() in target_branches:
+                    return True
+
+    return False
+
+
 @router.get("/{file_id}", response_model=FileDetailResponse)
 async def get_file(
     file_id: UUID,
@@ -232,7 +288,7 @@ async def get_file(
         raise HTTPException(status_code=404, detail="File not found")
     
     # Check permissions
-    if file.department != current_user.department and current_user.role not in [UserRole.ADMIN, UserRole.HOD]:
+    if not check_file_permission(db, file, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. File belongs to another department."
@@ -269,7 +325,7 @@ async def download_file(
         raise HTTPException(status_code=404, detail="File not found")
     
     # Check permissions
-    if file.department != current_user.department and current_user.role not in [UserRole.ADMIN, UserRole.HOD]:
+    if not check_file_permission(db, file, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. File belongs to another department."
@@ -308,7 +364,7 @@ async def preview_file(
         raise HTTPException(status_code=404, detail="File not found")
     
     # Check permissions
-    if file.department != current_user.department and current_user.role not in [UserRole.ADMIN, UserRole.HOD]:
+    if not check_file_permission(db, file, current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. File belongs to another department."

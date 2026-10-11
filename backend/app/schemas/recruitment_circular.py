@@ -1,0 +1,147 @@
+"""
+Recruitment Circular Pydantic Schemas
+
+Defines request/response validation for company recruitment circular operations:
+- Draft creation, update, retrieval, listing
+- Attachment association and metadata
+- Job link association and metadata
+- Safe publication response
+"""
+
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+from datetime import datetime
+from typing import Optional, List, Dict, Any
+from uuid import UUID
+from enum import Enum
+
+from ..models.recruitment_circular import RecruitmentCircularStatus, AttachmentType
+
+
+# ============================================
+# ATTACHMENT SCHEMAS
+# ============================================
+
+class CircularAttachmentCreate(BaseModel):
+    """Schema for adding an attachment to a circular."""
+    file_id: UUID = Field(..., description="UUID of the existing uploaded file")
+    attachment_type: AttachmentType = Field(AttachmentType.OTHER, description="Attachment category")
+    display_order: int = Field(0, description="Display order for UI rendering")
+
+
+class CircularAttachmentResponse(BaseModel):
+    """Schema for attachment details in response."""
+    id: int
+    circular_id: int
+    file_id: UUID
+    attachment_type: str
+    display_order: int
+    created_at: datetime
+
+    # Populated file metadata
+    filename: Optional[str] = None
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    download_url: Optional[str] = None
+    preview_url: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================
+# LINKED JOB SCHEMAS
+# ============================================
+
+class CircularJobLinkRequest(BaseModel):
+    """Schema for linking job postings to a circular."""
+    job_posting_ids: List[int] = Field(..., min_length=1, description="List of JobPosting IDs to link")
+
+
+class CircularJobUnlinkRequest(BaseModel):
+    """Schema for unlinking a job posting from a circular."""
+    job_posting_id: int = Field(..., description="JobPosting ID to unlink")
+
+
+class CircularJobResponse(BaseModel):
+    """Schema for linked job summary inside circular response."""
+    id: int
+    circular_id: int
+    job_posting_id: int
+    created_at: datetime
+
+    # Populated job details
+    title: Optional[str] = None
+    status: Optional[str] = None
+    company_name: Optional[str] = None
+    experience_level: Optional[str] = None
+    salary_range: Optional[str] = None
+    location: Optional[str] = None
+    required_skills: Optional[List[str]] = None
+    branch_eligibility: Optional[List[str]] = None
+    application_deadline: Optional[datetime] = None
+    drive_date: Optional[datetime] = None
+    application_url: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================
+# CIRCULAR SCHEMAS
+# ============================================
+
+class RecruitmentCircularCreate(BaseModel):
+    """Schema for creating a recruitment circular draft."""
+    company_id: int = Field(..., description="ID of the recruitment drive company")
+    title: str = Field(..., min_length=2, max_length=255, description="Circular title")
+    summary: Optional[str] = Field(None, description="Drive summary or overview")
+    instructions: Optional[str] = Field(None, description="Registration / drive instructions")
+    application_deadline: Optional[datetime] = Field(None, description="Application submission deadline")
+    drive_date: Optional[datetime] = Field(None, description="Drive or interview date")
+    branch_eligibility: Optional[List[str]] = Field(default_factory=list, description="List of eligible engineering branches")
+    job_posting_ids: Optional[List[int]] = Field(default_factory=list, description="Initial job postings to link")
+    attachments: Optional[List[CircularAttachmentCreate]] = Field(default_factory=list, description="Initial attachments")
+
+
+class RecruitmentCircularUpdate(BaseModel):
+    """Schema for updating a recruitment circular draft."""
+    title: Optional[str] = Field(None, min_length=2, max_length=255)
+    summary: Optional[str] = None
+    instructions: Optional[str] = None
+    application_deadline: Optional[datetime] = None
+    drive_date: Optional[datetime] = None
+    branch_eligibility: Optional[List[str]] = None
+    company_id: Optional[int] = None
+
+
+class RecruitmentCircularResponse(BaseModel):
+    """Full recruitment circular response schema."""
+    id: int
+    company_id: int
+    company_name: Optional[str] = None
+    company_logo_url: Optional[str] = None
+    title: str
+    summary: Optional[str] = None
+    instructions: Optional[str] = None
+    application_deadline: Optional[datetime] = None
+    drive_date: Optional[datetime] = None
+    branch_eligibility: Optional[List[str]] = []
+    status: RecruitmentCircularStatus
+    created_by: Optional[int] = None
+    creator_name: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    published_at: Optional[datetime] = None
+
+    attachments: List[CircularAttachmentResponse] = []
+    linked_jobs: List[CircularJobResponse] = []
+    linked_jobs_count: int = 0
+    attachments_count: int = 0
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RecruitmentCircularPublishResponse(BaseModel):
+    """Response returned upon successful atomic circular publication."""
+    success: bool
+    circular: RecruitmentCircularResponse
+    published_jobs_count: int
+    message: str

@@ -24,6 +24,16 @@ import {
   uploadJdFile,
   checkStudentEligibility,
   getStudentPlacementStatus,
+  getRecruitmentCirculars,
+  getRecruitmentCircular,
+  createRecruitmentCircular,
+  updateRecruitmentCircular,
+  publishRecruitmentCircular,
+  archiveRecruitmentCircular,
+  addCircularAttachment,
+  removeCircularAttachment,
+  linkCircularJobs,
+  unlinkCircularJob,
 } from '../services/placementService';
 import { useAuthStore } from './authStore';
 
@@ -50,6 +60,12 @@ const usePlacementStore = create((set, get) => ({
   selectedJob: null,
   isLoading: false,
   error: null,
+
+  // Recruitment Circulars State
+  circulars: [],
+  selectedCircular: null,
+  isCircularsLoading: false,
+  circularsError: null,
 
   // Student-specific placement state (isolated from Officer screens)
   jobEligibility: null,
@@ -577,6 +593,173 @@ const usePlacementStore = create((set, get) => ({
   },
 
   // ============================================
+  // RECRUITMENT CIRCULARS ACTIONS
+  // ============================================
+
+  fetchCirculars: async (params = {}) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const circulars = await getRecruitmentCirculars(params);
+      set({ circulars, isCircularsLoading: false });
+      return circulars;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  fetchCircular: async (id) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const circular = await getRecruitmentCircular(id);
+      set({ selectedCircular: circular, isCircularsLoading: false });
+      return circular;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  createCircular: async (data) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const circular = await createRecruitmentCircular(data);
+      set((state) => ({
+        circulars: [circular, ...state.circulars],
+        selectedCircular: circular,
+        isCircularsLoading: false,
+      }));
+      return circular;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  updateCircular: async (id, data) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const updated = await updateRecruitmentCircular(id, data);
+      set((state) => ({
+        circulars: state.circulars.map((c) => (c.id === id ? updated : c)),
+        selectedCircular: updated,
+        isCircularsLoading: false,
+      }));
+      return updated;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  publishCircular: async (id, params = {}) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const response = await publishRecruitmentCircular(id, params);
+      const publishedCircular = response.circular;
+      set((state) => ({
+        circulars: state.circulars.map((c) => (c.id === id ? publishedCircular : c)),
+        selectedCircular: publishedCircular,
+        isCircularsLoading: false,
+      }));
+      return response;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  archiveCircular: async (id) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const archived = await archiveRecruitmentCircular(id);
+      set((state) => ({
+        circulars: state.circulars.map((c) => (c.id === id ? archived : c)),
+        selectedCircular: archived,
+        isCircularsLoading: false,
+      }));
+      return archived;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  addCircularAttachment: async (circularId, data) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const updated = await addCircularAttachment(circularId, data);
+      set((state) => ({
+        circulars: state.circulars.map((c) => (c.id === circularId ? updated : c)),
+        selectedCircular: updated,
+        isCircularsLoading: false,
+      }));
+      return updated;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  removeCircularAttachment: async (circularId, attachmentId) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const updated = await removeCircularAttachment(circularId, attachmentId);
+      set((state) => ({
+        circulars: state.circulars.map((c) => (c.id === circularId ? updated : c)),
+        selectedCircular: updated,
+        isCircularsLoading: false,
+      }));
+      return updated;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  linkCircularJobs: async (circularId, data) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const updated = await linkCircularJobs(circularId, data);
+      set((state) => ({
+        circulars: state.circulars.map((c) => (c.id === circularId ? updated : c)),
+        selectedCircular: updated,
+        isCircularsLoading: false,
+      }));
+      return updated;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  unlinkCircularJob: async (circularId, jobPostingId) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const updated = await unlinkCircularJob(circularId, jobPostingId);
+      set((state) => ({
+        circulars: state.circulars.map((c) => (c.id === circularId ? updated : c)),
+        selectedCircular: updated,
+        isCircularsLoading: false,
+      }));
+      return updated;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  // ============================================
   // MATCHING ACTIONS
   // ============================================
 
@@ -612,7 +795,7 @@ const usePlacementStore = create((set, get) => ({
   // UTILITY ACTIONS
   // ============================================
 
-  clearError: () => set({ error: null }),
+  clearError: () => set({ error: null, circularsError: null }),
   reset: () => set({
     companies: [],
     jobs: [],
@@ -623,6 +806,10 @@ const usePlacementStore = create((set, get) => ({
     selectedJob: null,
     isLoading: false,
     error: null,
+    circulars: [],
+    selectedCircular: null,
+    isCircularsLoading: false,
+    circularsError: null,
     jobEligibility: null,
     eligibilityJobId: null,
     isEligibilityLoading: false,

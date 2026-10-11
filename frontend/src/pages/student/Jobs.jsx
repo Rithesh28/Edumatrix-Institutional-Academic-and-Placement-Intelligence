@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Briefcase,
   Search,
@@ -19,12 +19,17 @@ import {
   GraduationCap,
   Banknote,
   Send,
+  Megaphone,
+  Paperclip,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import { useAuthStore } from '../../store/authStore';
 
 function StudentJobs() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get('tab') === 'circulars' ? 'circulars' : 'jobs';
+
   const { user } = useAuthStore();
   const {
     jobs,
@@ -35,6 +40,10 @@ function StudentJobs() {
     isMyApplicationsLoading,
     myApplicationsError,
     fetchMyApplications,
+    circulars,
+    isCircularsLoading,
+    circularsError,
+    fetchCirculars,
   } = usePlacementStore();
 
   // Search and filter state
@@ -52,11 +61,12 @@ function StudentJobs() {
       await Promise.allSettled([
         fetchJobPostings(),
         fetchMyApplications(user?.id),
+        fetchCirculars(),
       ]);
     } finally {
       setIsRefreshing(false);
     }
-  }, [fetchJobPostings, fetchMyApplications, user?.id]);
+  }, [fetchJobPostings, fetchMyApplications, fetchCirculars, user?.id]);
 
   useEffect(() => {
     loadData();

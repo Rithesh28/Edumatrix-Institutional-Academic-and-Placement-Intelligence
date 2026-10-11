@@ -179,3 +179,57 @@ export const getStudentPlacementStatus = async (studentId) => {
   const response = await api.get(`/placement/students/${studentId}/placement-status`);
   return response.data;
 };
+
+// ============================================
+// RECRUITMENT CIRCULAR ENDPOINTS
+// ============================================
+
+export const getRecruitmentCirculars = async (params = {}) => {
+  const response = await api.get('/placement/circulars', { params });
+  return response.data;
+};
+
+export const getRecruitmentCircular = async (id) => {
+  const response = await api.get(`/placement/circulars/${id}`);
+  return response.data;
+};
+
+export const createRecruitmentCircular = async (data) => {
+  const response = await api.post('/placement/circulars', data);
+  return response.data;
+};
+
+export const updateRecruitmentCircular = async (id, data) => {
+  const response = await api.put(`/placement/circulars/${id}`, data);
+  return response.data;
+};
+
+export const publishRecruitmentCircular = async (id, params = {}) => {
+  const response = await api.post(`/placement/circulars/${id}/publish`, null, { params });
+  return response.data;
+};
+
+export const archiveRecruitmentCircular = async (id) => {
+  const response = await api.post(`/placement/circulars/${id}/archive`);
+  return response.data;
+};
+
+export const addCircularAttachment = async (circularId, data) => {
+  const response = await api.post(`/placement/circulars/${circularId}/attachments`, data);
+  return response.data;
+};
+
+export const removeCircularAttachment = async (circularId, attachmentId) => {
+  const response = await api.delete(`/placement/circulars/${circularId}/attachments/${attachmentId}`);
+  return response.data;
+};
+
+export const linkCircularJobs = async (circularId, data) => {
+  const response = await api.post(`/placement/circulars/${circularId}/jobs`, data);
+  return response.data;
+};
+
+export const unlinkCircularJob = async (circularId, jobPostingId) => {
+  const response = await api.delete(`/placement/circulars/${circularId}/jobs/${jobPostingId}`);
+  return response.data;
+};

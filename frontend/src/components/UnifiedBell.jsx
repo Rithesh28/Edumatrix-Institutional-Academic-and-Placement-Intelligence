@@ -100,6 +100,22 @@ const UnifiedBell = () => {
       } else {
         navigate('/lecturer/exam-duties')
       }
+    } else if (notif.type === 'placement_circular') {
+      if (role === 'student') {
+        if (notif.reference_id) {
+          navigate(`/student/jobs/circulars/${notif.reference_id}`)
+        } else {
+          navigate('/student/jobs?tab=circulars')
+        }
+      } else if (role === 'placement_officer' || role === 'admin') {
+        if (notif.reference_id) {
+          navigate(`/placement/circulars/${notif.reference_id}`)
+        } else {
+          navigate('/placement/circulars')
+        }
+      } else {
+        navigate(`/${role}/dashboard`)
+      }
     } else if (notif.type?.startsWith('placement')) {
       if (role === 'student') {
         if (notif.reference_id) {
