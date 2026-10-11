@@ -28,6 +28,13 @@ from .recruitment_result import (
     RecruitmentResultItemStatus,
     RecruitmentResultReviewState,
 )
+from .recruitment_round import (
+    RecruitmentRound,
+    StudentRoundOutcome,
+    RoundOutcome,
+    PlacementOffer,
+    OfferAcceptanceStatus,
+)
 from .audit_log import AuditLog
 
 __all__ = [
@@ -77,5 +84,10 @@ __all__ = [
     'RecruitmentResultItem',
     'RecruitmentResultItemStatus',
     'RecruitmentResultReviewState',
+    'RecruitmentRound',
+    'StudentRoundOutcome',
+    'RoundOutcome',
+    'PlacementOffer',
+    'OfferAcceptanceStatus',
     'AuditLog'
 ]

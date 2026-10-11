@@ -41,6 +41,8 @@ class Application(Base):
     # Relationships
     student = relationship("User", foreign_keys=[student_id])
     job_posting = relationship("JobPosting", back_populates="applications")
+    round_outcomes = relationship("StudentRoundOutcome", back_populates="application", cascade="all, delete-orphan", order_by="StudentRoundOutcome.id")
+    placement_offer = relationship("PlacementOffer", back_populates="application", uselist=False, cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Application {self.student_id} -> {self.job_posting_id}>"

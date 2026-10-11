@@ -232,4 +232,42 @@ export const linkCircularJobs = async (circularId, data) => {
 export const unlinkCircularJob = async (circularId, jobPostingId) => {
   const response = await api.delete(`/placement/circulars/${circularId}/jobs/${jobPostingId}`);
   return response.data;
+};
+
+// ============================================
+// RECRUITMENT RESULT ENDPOINTS (STAGE 3.2)
+// ============================================
+
+export const uploadResultFile = async (formData) => {
+  const response = await api.post('/placement/results/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
+};
+
+export const getResultBatches = async (params = {}) => {
+  const response = await api.get('/placement/results/batches', { params });
+  return response.data;
+};
+
+export const getResultBatch = async (id) => {
+  const response = await api.get(`/placement/results/batches/${id}`);
+  return response.data;
+};
+
+export const updateResultItemMatch = async (itemId, data) => {
+  const response = await api.put(`/placement/results/items/${itemId}/match`, data);
+  return response.data;
+};
+
+export const confirmResultBatch = async (batchId, data = {}) => {
+  const response = await api.post(`/placement/results/batches/${batchId}/confirm`, data);
+  return response.data;
+};
+
+export const searchStudentsForMatching = async (query) => {
+  const response = await api.get('/placement/results/students/search', {
+    params: { q: query },
+  });
+  return response.data;
 };

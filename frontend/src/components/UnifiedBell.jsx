@@ -113,6 +113,20 @@ const UnifiedBell = () => {
         } else {
           navigate('/placement/circulars')
         }
+      }
+    } else if (notif.type === 'placement_result') {
+      if (role === 'student') {
+        if (notif.reference_id) {
+          navigate(`/student/jobs/${notif.reference_id}`)
+        } else {
+          navigate('/student/applications')
+        }
+      } else if (role === 'placement_officer' || role === 'admin') {
+        if (notif.reference_id) {
+          navigate(`/placement/results/${notif.reference_id}`)
+        } else {
+          navigate('/placement/results')
+        }
       } else {
         navigate(`/${role}/dashboard`)
       }

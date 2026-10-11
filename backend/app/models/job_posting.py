@@ -45,6 +45,7 @@ class JobPosting(Base):
     company = relationship("Company", back_populates="job_postings")
     applications = relationship("Application", back_populates="job_posting", cascade="all, delete-orphan")
     shortlists = relationship("Shortlist", back_populates="job_posting")
+    rounds = relationship("RecruitmentRound", back_populates="job_posting", cascade="all, delete-orphan", order_by="RecruitmentRound.round_number")
     
     def __repr__(self):
         return f"<JobPosting {self.title} at {self.company.name if self.company else 'Unknown'}>"

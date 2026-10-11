@@ -52,6 +52,7 @@ class RecruitmentResultBatch(Base):
     job_posting_id = Column(Integer, ForeignKey("job_postings.id", ondelete="SET NULL"), nullable=True, index=True)
     circular_id = Column(Integer, ForeignKey("recruitment_circulars.id", ondelete="SET NULL"), nullable=True, index=True)
     file_id = Column(UUID(as_uuid=True), ForeignKey("files.id", ondelete="RESTRICT"), nullable=False, index=True)
+    round_id = Column(Integer, ForeignKey("recruitment_rounds.id", ondelete="SET NULL"), nullable=True, index=True)
     round_name = Column(String(100), nullable=False)
     round_type = Column(String(50), nullable=False, default="assessment")
     is_final_round = Column(Boolean, default=False, nullable=False)
@@ -74,6 +75,7 @@ class RecruitmentResultBatch(Base):
     job_posting = relationship("JobPosting", lazy="joined")
     circular = relationship("RecruitmentCircular", lazy="joined")
     file = relationship("File", lazy="joined")
+    round = relationship("RecruitmentRound", back_populates="result_batches", foreign_keys=[round_id], lazy="joined")
     uploader = relationship("User", foreign_keys=[uploaded_by], lazy="joined")
     items = relationship(
         "RecruitmentResultItem",

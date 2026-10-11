@@ -14,6 +14,7 @@ from .api import (
     files_router,
     placement_router,
     recruitment_circulars_router,
+    recruitment_results_router,
     admin_router
 )
 from contextlib import asynccontextmanager
@@ -108,6 +109,7 @@ app.include_router(exam_duties_router)
 app.include_router(files_router)
 app.include_router(placement_router)
 app.include_router(recruitment_circulars_router)
+app.include_router(recruitment_results_router)
 app.include_router(admin_router)
 
 # Root endpoint

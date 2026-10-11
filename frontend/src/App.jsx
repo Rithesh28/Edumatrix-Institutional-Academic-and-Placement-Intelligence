@@ -50,6 +50,8 @@ import Circulars from './pages/placement/Circulars'
 import CircularForm from './pages/placement/CircularForm'
 import CircularDetails from './pages/placement/CircularDetails'
 import StudentRecruitmentCircularDetails from './pages/student/RecruitmentCircularDetails'
+import Results from './pages/placement/Results'
+import ResultBatchDetails from './pages/placement/ResultBatchDetails'
 
 // Resume Analyzer Import
 import ResumeAnalyzer from './pages/placement/ResumeAnalyzer'
@@ -169,6 +171,8 @@ function App() {
               <Route path="/placement/circulars/new" element={<CircularForm />} />
               <Route path="/placement/circulars/:id" element={<CircularDetails />} />
               <Route path="/placement/circulars/:id/edit" element={<CircularForm />} />
+              <Route path="/placement/results" element={<Results />} />
+              <Route path="/placement/results/:batchId" element={<ResultBatchDetails />} />
               <Route path="/placement/students" element={<Students />} />
               <Route path="/placement/students/:id" element={<PlacementStudentProfile />} />
               <Route path="/placement/shortlist" element={<Shortlist />} />

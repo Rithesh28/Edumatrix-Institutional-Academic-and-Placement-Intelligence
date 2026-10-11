@@ -34,6 +34,11 @@ import {
   removeCircularAttachment,
   linkCircularJobs,
   unlinkCircularJob,
+  uploadResultFile,
+  getResultBatches,
+  getResultBatch,
+  updateResultItemMatch,
+  confirmResultBatch,
 } from '../services/placementService';
 import { useAuthStore } from './authStore';
 
@@ -66,6 +71,12 @@ const usePlacementStore = create((set, get) => ({
   selectedCircular: null,
   isCircularsLoading: false,
   circularsError: null,
+
+  // Recruitment Results State (Stage 3.2)
+  resultBatches: [],
+  selectedResultBatch: null,
+  isResultsLoading: false,
+  resultsError: null,
 
   // Student-specific placement state (isolated from Officer screens)
   jobEligibility: null,
@@ -776,6 +787,84 @@ const usePlacementStore = create((set, get) => ({
   },
 
   // ============================================
+  // RECRUITMENT RESULTS ACTIONS (STAGE 3.2)
+  // ============================================
+
+  fetchResultBatches: async (params = {}) => {
+    set({ isResultsLoading: true, resultsError: null });
+    try {
+      const batches = await getResultBatches(params);
+      set({ resultBatches: batches, isResultsLoading: false });
+      return batches;
+    } catch (error) {
+      set({ isResultsLoading: false, resultsError: formatErrorMessage(error) });
+      throw error;
+    }
+  },
+
+  fetchResultBatch: async (id) => {
+    set({ isResultsLoading: true, resultsError: null });
+    try {
+      const batch = await getResultBatch(id);
+      set({ selectedResultBatch: batch, isResultsLoading: false });
+      return batch;
+    } catch (error) {
+      set({ isResultsLoading: false, resultsError: formatErrorMessage(error) });
+      throw error;
+    }
+  },
+
+  uploadResultDocument: async (formData) => {
+    set({ isResultsLoading: true, resultsError: null });
+    try {
+      const batch = await uploadResultFile(formData);
+      set((state) => ({
+        resultBatches: [batch, ...state.resultBatches],
+        selectedResultBatch: batch,
+        isResultsLoading: false,
+      }));
+      return batch;
+    } catch (error) {
+      set({ isResultsLoading: false, resultsError: formatErrorMessage(error) });
+      throw error;
+    }
+  },
+
+  updateCandidateMatch: async (itemId, data) => {
+    set({ isResultsLoading: true, resultsError: null });
+    try {
+      const updatedBatch = await updateResultItemMatch(itemId, data);
+      set((state) => ({
+        selectedResultBatch: updatedBatch,
+        resultBatches: state.resultBatches.map((b) => (b.id === updatedBatch.id ? updatedBatch : b)),
+        isResultsLoading: false,
+      }));
+      return updatedBatch;
+    } catch (error) {
+      set({ isResultsLoading: false, resultsError: formatErrorMessage(error) });
+      throw error;
+    }
+  },
+
+  confirmBatchResults: async (batchId, data = {}) => {
+    set({ isResultsLoading: true, resultsError: null });
+    try {
+      const result = await confirmResultBatch(batchId, data);
+      // Refresh batch details
+      const updatedBatch = await getResultBatch(batchId);
+      set((state) => ({
+        selectedResultBatch: updatedBatch,
+        resultBatches: state.resultBatches.map((b) => (b.id === batchId ? updatedBatch : b)),
+        isResultsLoading: false,
+      }));
+      return result;
+    } catch (error) {
+      set({ isResultsLoading: false, resultsError: formatErrorMessage(error) });
+      throw error;
+    }
+  },
+
+  // ============================================
   // STATISTICS ACTIONS
   // ============================================
 
@@ -822,6 +911,10 @@ const usePlacementStore = create((set, get) => ({
     placementStatusError: null,
     isSubmittingApplication: false,
     applicationSubmitError: null,
+    resultBatches: [],
+    selectedResultBatch: null,
+    isResultsLoading: false,
+    resultsError: null,
   }),
 }));
 

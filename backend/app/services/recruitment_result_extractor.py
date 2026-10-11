@@ -50,8 +50,17 @@ HEADER_SYNONYMS = {
 }
 
 
+class RecruitmentResultExtractionError(ValueError):
+    """Raised when recruitment result extraction fails."""
+    pass
+
+
 class RecruitmentResultExtractor:
     """Service for extracting structured candidate rows from recruitment result documents."""
+
+    def extract(self, file_bytes: bytes, filename: str, mime_type: Optional[str] = None) -> Dict[str, Any]:
+        """Convenience alias for extract_candidates_from_bytes."""
+        return self.extract_candidates_from_bytes(file_bytes, filename)
 
     def extract_candidates_from_bytes(
         self, file_bytes: bytes, filename: str
@@ -60,7 +69,7 @@ class RecruitmentResultExtractor:
         Extract structured candidate records from file bytes based on file extension.
         """
         if not file_bytes or len(file_bytes) == 0:
-            raise ValueError("The uploaded result file is empty.")
+            raise RecruitmentResultExtractionError("The uploaded result file is empty.")
 
         ext = os.path.splitext(filename)[1].lower()
 
@@ -71,7 +80,7 @@ class RecruitmentResultExtractor:
         elif ext == ".pdf":
             return self._extract_pdf(file_bytes)
         else:
-            raise ValueError(f"Unsupported result file format: '{ext}'. Supported formats: .csv, .xlsx, .xls, .pdf")
+            raise RecruitmentResultExtractionError(f"Unsupported result file format: '{ext}'. Supported formats: .csv, .xlsx, .xls, .pdf")
 
     # =========================================================================
     # CSV EXTRACTION
@@ -173,6 +182,16 @@ class RecruitmentResultExtractor:
 
                 for page_idx, page in enumerate(pdf.pages, start=1):
                     tables = page.extract_tables()
+                    if not tables:
+                        # Fallback for tables without explicit graphic grid lines
+                        try:
+                            tables = page.extract_tables(table_settings={
+                                "vertical_strategy": "text",
+                                "horizontal_strategy": "text",
+                            })
+                        except Exception:
+                            tables = []
+
                     for table in tables:
                         if not table or len(table) == 0:
                             continue

@@ -70,6 +70,7 @@ function Layout() {
         { name: 'Companies', path: '/placement/companies', icon: '🏢' },
         { name: 'Jobs', path: '/placement/jobs', icon: '💼' },
         { name: 'Circulars', path: '/placement/circulars', icon: '📢' },
+        { name: 'Results', path: '/placement/results', icon: '🏆' },
         { name: 'Students', path: '/placement/students', icon: '👨‍🎓' },
         { name: 'Shortlist', path: '/placement/shortlist', icon: '📋' },
         { name: 'Reports', path: '/placement/reports', icon: '📈' },

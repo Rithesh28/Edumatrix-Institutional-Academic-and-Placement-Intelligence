@@ -115,6 +115,22 @@ class RecruitmentResultMatcher:
                 .first()
             )
 
+        # Handle USN collision if multiple profiles have the exact same USN
+        if norm_usn and len(matched_profiles) > 1:
+            if student_by_email and any(p.user_id == student_by_email.id for p in matched_profiles):
+                student_by_usn = student_by_email
+            else:
+                return {
+                    "matched_student_id": None,
+                    "match_confidence": 0.40,
+                    "match_method": "USN_COLLISION",
+                    "review_status": RecruitmentResultReviewState.AMBIGUOUS,
+                    "match_evidence": {
+                        "reason": f"USN {norm_usn} maps to multiple active student accounts.",
+                        "candidates": [self._serialize_student(p.user) for p in matched_profiles],
+                    },
+                }
+
         # CHECK FOR IDENTIFIER CONFLICTS
         if student_by_usn and student_by_email and student_by_usn.id != student_by_email.id:
             logger.warning(
