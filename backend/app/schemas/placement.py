@@ -540,6 +540,7 @@ class PlacementOfferResponse(BaseModel):
     offer_date: Optional[datetime] = None
     response_date: Optional[datetime] = None
     verified_by: Optional[int] = None
+    rescission_reason: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 

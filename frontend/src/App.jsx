@@ -52,6 +52,7 @@ import CircularDetails from './pages/placement/CircularDetails'
 import StudentRecruitmentCircularDetails from './pages/student/RecruitmentCircularDetails'
 import Results from './pages/placement/Results'
 import ResultBatchDetails from './pages/placement/ResultBatchDetails'
+import ManageTestData from './pages/placement/ManageTestData'
 
 // Resume Analyzer Import
 import ResumeAnalyzer from './pages/placement/ResumeAnalyzer'
@@ -177,6 +178,7 @@ function App() {
               <Route path="/placement/students/:id" element={<PlacementStudentProfile />} />
               <Route path="/placement/shortlist" element={<Shortlist />} />
               <Route path="/placement/reports" element={<Reports />} />
+              <Route path="/placement/manage-test-data" element={<ManageTestData />} />
             </Route>
 
             {/* Resume Analyzer Route (students, placement officers, admins) */}

@@ -769,8 +769,8 @@ class RecruitmentCircularService:
                 rounds_summary.append({
                     "round_id": r.id,
                     "round_number": r.round_number,
-                    "round_name": r.round_name,
-                    "round_type": r.round_type.value if hasattr(r.round_type, "value") else str(r.round_type),
+                    "round_name": getattr(r, "name", None) or getattr(r, "round_name", f"Round {r.round_number}"),
+                    "round_type": r.round_type.value if hasattr(r.round_type, "value") else str(r.round_type or "assessment"),
                     "job_posting_id": r.job_posting_id,
                     "job_title": job_title_map.get(r.job_posting_id, "Unknown Role"),
                     "cleared_count": cleared_count,

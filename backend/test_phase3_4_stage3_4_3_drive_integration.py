@@ -207,7 +207,6 @@ class TestPhase343DriveIntegration(unittest.TestCase):
             student_id=cls.students[0].id,
             job_posting_id=cls.job_a.id,
             status=ApplicationStatus.SELECTED,
-            is_external_confirmed=True,
             external_applied_at=datetime.utcnow(),
         )
         # Student 1: Applied to Job A (pending confirmation, shortlisted) AND Job B (applied) -> tests multi-role student aggregation!
@@ -215,13 +214,12 @@ class TestPhase343DriveIntegration(unittest.TestCase):
             student_id=cls.students[1].id,
             job_posting_id=cls.job_a.id,
             status=ApplicationStatus.SHORTLISTED,
-            is_external_confirmed=False,
+            external_applied_at=None,
         )
         cls.app_1_b = Application(
             student_id=cls.students[1].id,
             job_posting_id=cls.job_b.id,
             status=ApplicationStatus.APPLIED,
-            is_external_confirmed=True,
             external_applied_at=datetime.utcnow(),
         )
         # Student 2: Applied to Job B (external confirmed, selected)
@@ -229,7 +227,6 @@ class TestPhase343DriveIntegration(unittest.TestCase):
             student_id=cls.students[2].id,
             job_posting_id=cls.job_b.id,
             status=ApplicationStatus.SELECTED,
-            is_external_confirmed=True,
             external_applied_at=datetime.utcnow(),
         )
         # Student 3: Applied to Job B (rejected)
@@ -237,14 +234,14 @@ class TestPhase343DriveIntegration(unittest.TestCase):
             student_id=cls.students[3].id,
             job_posting_id=cls.job_b.id,
             status=ApplicationStatus.REJECTED,
-            is_external_confirmed=False,
+            external_applied_at=None,
         )
         # Student 4: Applied to unlinked Job C (must NOT show in drive!)
         cls.app_4_c = Application(
             student_id=cls.students[4].id,
             job_posting_id=cls.job_c.id,
             status=ApplicationStatus.SELECTED,
-            is_external_confirmed=True,
+            external_applied_at=datetime.utcnow(),
         )
 
         cls.db.add_all([cls.app_0_a, cls.app_1_a, cls.app_1_b, cls.app_2_b, cls.app_3_b, cls.app_4_c])
@@ -348,7 +345,6 @@ class TestPhase343DriveIntegration(unittest.TestCase):
         cls.db.commit()
         cls.db.refresh(cls.test_file)
 
-        # Setup Result Batches:
         # Batch 1: Directly linked via circular_id
         cls.batch_1 = RecruitmentResultBatch(
             company_id=cls.company.id,
@@ -356,7 +352,7 @@ class TestPhase343DriveIntegration(unittest.TestCase):
             file_id=cls.test_file.id,
             round_name="Drive Coding Round",
             round_type="coding",
-            status=RecruitmentResultBatchStatus.CONFIRMED,
+            status=RecruitmentResultBatchStatus.FULLY_CONFIRMED,
             uploaded_by=cls.officer.id,
         )
         # Batch 2: Legacy / unlinked circular_id, but linked to Job A

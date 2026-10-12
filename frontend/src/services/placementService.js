@@ -364,4 +364,18 @@ export const getCircularDriveReport = async (circularId) => {
   return response.data;
 };
 
+// ============================================
+// SAFE TEST DATA CLEANUP ENDPOINTS (STAGE 3.4.1 / 3.4.5)
+// ============================================
+
+export const getCleanupPreview = async (params = {}) => {
+  const response = await api.get('/placement/cleanup/preview', { params });
+  return response.data;
+};
+
+export const executeCleanup = async (data) => {
+  const response = await api.post('/placement/cleanup/execute', data);
+  return response.data;
+};
+
 

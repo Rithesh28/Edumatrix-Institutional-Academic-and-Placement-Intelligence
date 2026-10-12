@@ -11,7 +11,7 @@ Provides REST API for placement operations:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, File, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, subqueryload
 from typing import List, Optional
 import io
 import csv
@@ -28,6 +28,8 @@ from ..models.shortlist import Shortlist
 from ..models.profile import StudentProfileExtended, Skill, Project
 from ..models.certification import Certification
 from ..models.resume import Resume
+from ..models.recruitment_circular import RecruitmentCircular, RecruitmentCircularJob
+from ..models.audit_log import AuditLog
 from ..models.recruitment_round import (
     PlacementOffer,
     OfferAcceptanceStatus,
@@ -847,7 +849,17 @@ async def get_student_details_for_placement(
     certifications = db.query(Certification).filter(Certification.student_id == profile.id).all() if profile else []
     projects = db.query(Project).filter(Project.student_id == profile.id, Project.is_active == 1).all() if profile else []
     resumes = db.query(Resume).filter(Resume.student_id == student_id).order_by(Resume.created_at.desc()).all()
-    apps = db.query(Application).filter(Application.student_id == student_id).all()
+    apps = (
+        db.query(Application)
+        .options(
+            joinedload(Application.job_posting).joinedload(JobPosting.company),
+            subqueryload(Application.round_outcomes).joinedload(StudentRoundOutcome.round),
+            joinedload(Application.placement_offer),
+        )
+        .filter(Application.student_id == student_id)
+        .order_by(Application.applied_at.desc())
+        .all()
+    )
     shortlists = db.query(Shortlist).filter(Shortlist.student_id == student_id).all()
     
     latest_resume = resumes[0] if resumes else None
@@ -862,6 +874,122 @@ async def get_student_details_for_placement(
         status_val = "applied"
     elif profile and profile.placement_status:
         status_val = profile.placement_status.value if hasattr(profile.placement_status, "value") else str(profile.placement_status)
+
+    # Batch circular lookup for linked jobs
+    job_ids = [a.job_posting_id for a in apps if a.job_posting_id]
+    circular_map = {}
+    if job_ids:
+        links = (
+            db.query(RecruitmentCircularJob, RecruitmentCircular)
+            .join(RecruitmentCircular, RecruitmentCircular.id == RecruitmentCircularJob.circular_id)
+            .filter(RecruitmentCircularJob.job_posting_id.in_(job_ids))
+            .all()
+        )
+        for link, circ in links:
+            circular_map[link.job_posting_id] = {
+                "id": circ.id,
+                "title": circ.title,
+                "summary": circ.summary,
+                "drive_date": circ.drive_date.isoformat() if circ.drive_date else None,
+                "application_deadline": circ.application_deadline.isoformat() if circ.application_deadline else None,
+                "status": circ.status.value if hasattr(circ.status, "value") else str(circ.status),
+                "branch_eligibility": circ.branch_eligibility or [],
+            }
+
+    # Rescission reasons lookup for offers
+    rescinded_offer_ids = [str(a.placement_offer.id) for a in apps if a.placement_offer and a.placement_offer.acceptance_status == OfferAcceptanceStatus.RESCINDED]
+    rescission_reasons = {}
+    if rescinded_offer_ids:
+        audit_entries = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "PLACEMENT_OFFER_RESCINDED",
+                AuditLog.target_type == "placement_offer",
+                AuditLog.target_id.in_(rescinded_offer_ids),
+            )
+            .order_by(AuditLog.id.desc())
+            .all()
+        )
+        for entry in audit_entries:
+            if entry.target_id not in rescission_reasons and entry.details and isinstance(entry.details, dict):
+                rescission_reasons[entry.target_id] = entry.details.get("rescission_reason")
+
+    serialized_apps = []
+    for a in apps:
+        job = a.job_posting
+        company = job.company if job else None
+        circ_info = circular_map.get(a.job_posting_id)
+
+        # Round outcomes
+        outcomes_list = []
+        for ro in (a.round_outcomes or []):
+            rec_round = ro.round
+            outcomes_list.append({
+                "id": ro.id,
+                "outcome_id": ro.id,
+                "round_id": ro.round_id,
+                "round_number": rec_round.round_number if rec_round else None,
+                "round_name": getattr(rec_round, "name", None) or f"Round {rec_round.round_number}" if rec_round else "Round",
+                "round_type": rec_round.round_type if rec_round else "assessment",
+                "is_final": rec_round.is_final if rec_round else False,
+                "outcome": ro.outcome.value if hasattr(ro.outcome, "value") else str(ro.outcome),
+                "score": ro.score,
+                "remarks": ro.remarks,
+                "confirmed_at": ro.confirmed_at.isoformat() if ro.confirmed_at else None,
+            })
+
+        # Offer
+        offer_info = None
+        if a.placement_offer:
+            po = a.placement_offer
+            offer_info = {
+                "id": po.id,
+                "application_id": po.application_id,
+                "student_id": po.student_id,
+                "job_posting_id": po.job_posting_id,
+                "designation": po.designation,
+                "ctc_lpa": po.ctc_lpa,
+                "acceptance_status": po.acceptance_status.value if hasattr(po.acceptance_status, "value") else str(po.acceptance_status),
+                "offer_letter_file_id": str(po.offer_letter_file_id) if po.offer_letter_file_id else None,
+                "offer_date": po.offer_date.isoformat() if po.offer_date else None,
+                "response_date": po.response_date.isoformat() if po.response_date else None,
+                "rescission_reason": rescission_reasons.get(str(po.id)),
+                "created_at": po.created_at.isoformat() if po.created_at else None,
+            }
+
+        serialized_apps.append({
+            "id": a.id,
+            "job_id": a.job_posting_id,
+            "job_posting_id": a.job_posting_id,
+            "job_title": job.title if job else f"Job #{a.job_posting_id}",
+            "job_location": job.location if job else None,
+            "location": job.location if job else None,
+            "application_url": job.application_url if job else None,
+            "cgpa_criteria": job.cgpa_criteria if job else None,
+            "branch_eligibility": job.branch_eligibility if job else [],
+            "salary_range": job.salary_range if job else None,
+            "job_deadline": job.application_deadline.isoformat() if (job and job.application_deadline) else None,
+            "job_drive_date": job.drive_date.isoformat() if (job and job.drive_date) else None,
+            "company_id": company.id if company else None,
+            "company_name": company.name if company else "Company",
+            "circular_id": circ_info["id"] if circ_info else None,
+            "circular_title": circ_info["title"] if circ_info else None,
+            "circular_drive_date": circ_info["drive_date"] if circ_info else None,
+            "circular_deadline": circ_info["application_deadline"] if circ_info else None,
+            "circular": circ_info,
+            "status": a.status.value if hasattr(a.status, "value") else str(a.status),
+            "match_percentage": a.match_percentage,
+            "eligibility_score": a.eligibility_score,
+            "match_snapshot": a.match_snapshot,
+            "has_low_match_warning": a.match_snapshot.get("has_low_match_warning", False) if a.match_snapshot else False,
+            "low_match_warning": a.match_snapshot.get("low_match_warning") if a.match_snapshot else None,
+            "created_at": a.applied_at.isoformat() if a.applied_at else None,
+            "applied_at": a.applied_at.isoformat() if a.applied_at else None,
+            "external_applied_at": a.external_applied_at.isoformat() if getattr(a, "external_applied_at", None) else None,
+            "is_external_confirmed": bool(getattr(a, "external_applied_at", None)),
+            "round_outcomes": outcomes_list,
+            "offer": offer_info,
+        })
     
     return {
         "id": user.id,
@@ -902,22 +1030,7 @@ async def get_student_details_for_placement(
             "skills": r.skills,
             "created_at": r.created_at
         } for r in resumes],
-        "applications": [{
-            "id": a.id,
-            "job_id": a.job_posting_id,
-            "job_title": a.job_posting.title if a.job_posting else f"Job #{a.job_posting_id}",
-            "company_name": a.job_posting.company.name if (a.job_posting and a.job_posting.company) else "Company",
-            "status": a.status.value if hasattr(a.status, "value") else str(a.status),
-            "match_percentage": a.match_percentage,
-            "eligibility_score": a.eligibility_score,
-            "match_snapshot": a.match_snapshot,
-            "has_low_match_warning": a.match_snapshot.get("has_low_match_warning", False) if a.match_snapshot else False,
-            "low_match_warning": a.match_snapshot.get("low_match_warning") if a.match_snapshot else None,
-            "created_at": a.applied_at.isoformat() if a.applied_at else None,
-            "applied_at": a.applied_at.isoformat() if a.applied_at else None,
-            "external_applied_at": a.external_applied_at.isoformat() if getattr(a, "external_applied_at", None) else None,
-            "is_external_confirmed": bool(getattr(a, "external_applied_at", None))
-        } for a in apps],
+        "applications": serialized_apps,
         "total_applications": len(apps),
         "total_shortlists": len(shortlists)
     }
@@ -927,10 +1040,25 @@ async def get_student_details_for_placement(
 # VERIFIED PLACEMENT OFFER ENDPOINTS (Phase 3.3.4)
 # ============================================
 
-def _serialize_placement_offer(offer: PlacementOffer) -> PlacementOfferResponse:
+def _serialize_placement_offer(offer: PlacementOffer, db: Optional[Session] = None) -> PlacementOfferResponse:
     job = offer.job_posting
     company = job.company if job else None
     student = offer.student
+    rescission_reason = None
+    if db is not None and offer.acceptance_status == OfferAcceptanceStatus.RESCINDED:
+        log_entry = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.action == "PLACEMENT_OFFER_RESCINDED",
+                AuditLog.target_type == "placement_offer",
+                AuditLog.target_id == str(offer.id),
+            )
+            .order_by(AuditLog.id.desc())
+            .first()
+        )
+        if log_entry and log_entry.details and isinstance(log_entry.details, dict):
+            rescission_reason = log_entry.details.get("rescission_reason")
+
     return PlacementOfferResponse(
         id=offer.id,
         application_id=offer.application_id,
@@ -947,6 +1075,7 @@ def _serialize_placement_offer(offer: PlacementOffer) -> PlacementOfferResponse:
         offer_date=offer.offer_date,
         response_date=offer.response_date,
         verified_by=offer.verified_by,
+        rescission_reason=rescission_reason,
         created_at=offer.created_at,
         updated_at=offer.updated_at,
     )
@@ -975,7 +1104,7 @@ async def create_verified_offer(
             job_posting_id=payload.job_posting_id,
             current_user=current_user,
         )
-        return _serialize_placement_offer(offer)
+        return _serialize_placement_offer(offer, db)
     except ValueError as e:
         if "already exists" in str(e).lower():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
@@ -1007,7 +1136,7 @@ async def update_offer_terms(
             reason=payload.reason,
             current_user=current_user,
         )
-        return _serialize_placement_offer(offer)
+        return _serialize_placement_offer(offer, db)
     except ValueError as e:
         if "not found" in str(e).lower():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -1035,7 +1164,7 @@ async def respond_to_offer(
             remarks=payload.remarks,
             current_user=current_user,
         )
-        return _serialize_placement_offer(offer)
+        return _serialize_placement_offer(offer, db)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ValueError as e:
@@ -1066,7 +1195,7 @@ async def rescind_offer(
             reason=payload.reason,
             current_user=current_user,
         )
-        return _serialize_placement_offer(offer)
+        return _serialize_placement_offer(offer, db)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ValueError as e:
@@ -1084,7 +1213,7 @@ async def get_my_placement_offers(
     if current_user.role != UserRole.STUDENT and current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only students can view their offers")
     offers = placement_offer_service.get_student_offers(db=db, student_id=current_user.id, current_user=current_user)
-    return [_serialize_placement_offer(o) for o in offers]
+    return [_serialize_placement_offer(o, db) for o in offers]
 
 
 @router.get("/offers/{offer_id}", response_model=PlacementOfferResponse)
@@ -1096,7 +1225,7 @@ async def get_placement_offer_details(
     """Get placement offer details. Accessible by Placement Officers, Admins, or offer recipient."""
     try:
         offer = placement_offer_service.get_placement_offer_by_id(db=db, offer_id=offer_id, current_user=current_user)
-        return _serialize_placement_offer(offer)
+        return _serialize_placement_offer(offer, db)
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except ValueError as e:
@@ -1126,7 +1255,7 @@ async def list_placement_offers(
         limit=limit,
         current_user=current_user,
     )
-    return [_serialize_placement_offer(o) for o in offers]
+    return [_serialize_placement_offer(o, db) for o in offers]
 
 
 @router.get("/accounting")

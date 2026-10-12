@@ -62,8 +62,15 @@ class TestApplicationResponseImport(unittest.TestCase):
         mock_app.notes = "Top candidate"
         mock_app.student_name = "Test Student"
         mock_app.student_email = "student@vcet.ac.in"
+        mock_app.student_branch = "AIML"
+        mock_app.student_cgpa = 8.75
         mock_app.job_title = "AI Engineer"
         mock_app.company_name = "Tech Corp"
+        mock_app.match_snapshot = None
+        mock_app.has_low_match_warning = False
+        mock_app.low_match_warning = None
+        mock_app.external_applied_at = None
+        mock_app.is_external_confirmed = False
         
         mock_db.query.return_value.filter.return_value.first.side_effect = [mock_user, mock_profile]
         mock_db.query.return_value.filter.return_value.all.return_value = [mock_app]

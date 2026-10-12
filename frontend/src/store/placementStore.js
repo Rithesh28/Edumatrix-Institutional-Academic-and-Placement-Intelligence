@@ -55,6 +55,8 @@ import {
   getMyOffers,
   respondToOffer,
   getCircularDriveReport,
+  getCleanupPreview,
+  executeCleanup,
 } from '../services/placementService';
 import { useAuthStore } from './authStore';
 
@@ -111,6 +113,12 @@ const usePlacementStore = create((set, get) => ({
   isOffersLoading: false,
   offersError: null,
   accountingStats: null,
+
+  // Safe Placement Test-Data Cleanup State (Stage 3.4.1 / 3.4.5)
+  cleanupPreview: null,
+  isCleanupLoading: false,
+  cleanupError: null,
+  cleanupResult: null,
 
   // Student Verified Offers State (Stage 3.3.6)
   myOffers: [],
@@ -1119,10 +1127,42 @@ const usePlacementStore = create((set, get) => ({
   },
 
   // ============================================
+  // SAFE TEST DATA CLEANUP ACTIONS (STAGE 3.4.1 / 3.4.5)
+  // ============================================
+
+  fetchCleanupPreview: async (params = {}) => {
+    set({ isCleanupLoading: true, cleanupError: null });
+    try {
+      const data = await getCleanupPreview(params);
+      set({ cleanupPreview: data, isCleanupLoading: false });
+      return data;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ cleanupError: err, isCleanupLoading: false });
+      throw error;
+    }
+  },
+
+  runCleanup: async (payload) => {
+    set({ isCleanupLoading: true, cleanupError: null, cleanupResult: null });
+    try {
+      const result = await executeCleanup(payload);
+      set({ cleanupResult: result, isCleanupLoading: false });
+      return result;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ cleanupError: err, isCleanupLoading: false });
+      throw error;
+    }
+  },
+
+  clearCleanupResult: () => set({ cleanupResult: null, cleanupError: null }),
+
+  // ============================================
   // UTILITY ACTIONS
   // ============================================
 
-  clearError: () => set({ error: null, circularsError: null }),
+  clearError: () => set({ error: null, circularsError: null, cleanupError: null }),
   reset: () => set({
     companies: [],
     jobs: [],
@@ -1140,6 +1180,10 @@ const usePlacementStore = create((set, get) => ({
     driveReport: null,
     isDriveReportLoading: false,
     driveReportError: null,
+    cleanupPreview: null,
+    isCleanupLoading: false,
+    cleanupError: null,
+    cleanupResult: null,
     jobEligibility: null,
     eligibilityJobId: null,
     isEligibilityLoading: false,
