@@ -218,7 +218,7 @@ const JobForm = () => {
   // Handle JD File & Text Parsing
   const handleParseJd = async () => {
     if (jdParseMode === 'upload' && !jdSelectedFile) {
-      toast.error('Please select a JD document file (.pdf, .docx, .txt)');
+      toast.error('Please select a JD document, recruitment poster, or eligibility file');
       return;
     }
     if (jdParseMode === 'text' && !jdRawText.trim()) {
@@ -240,18 +240,58 @@ const JobForm = () => {
       if (parsed) {
         setParsedResult(parsed);
 
+        // Build rich auto-populated description combining summary and structured criteria
+        let richDescription = parsed.description || '';
+        const extraParts = [];
+        if (parsed.academic_percentages) {
+          const p = parsed.academic_percentages;
+          const parts = [];
+          if (p.tenth) parts.push(`10th: ${p.tenth}%`);
+          if (p.twelfth) parts.push(`12th: ${p.twelfth}%`);
+          if (p.diploma) parts.push(`Diploma: ${p.diploma}%`);
+          if (p.degree) parts.push(`Graduation/Degree: ${p.degree}%`);
+          if (parts.length > 0) extraParts.push(`Academic Percentages: ${parts.join(', ')}`);
+        }
+        if (parsed.backlog_criteria) extraParts.push(`Backlog Criteria: ${parsed.backlog_criteria}`);
+        if (parsed.work_mode) extraParts.push(`Work Mode: ${parsed.work_mode}`);
+        if (parsed.bond_details) extraParts.push(`Service Agreement / Bond: ${parsed.bond_details}`);
+        if (parsed.selection_rounds?.length > 0) extraParts.push(`Selection Process: ${parsed.selection_rounds.join(' → ')}`);
+        if (parsed.graduation_years?.length > 0) extraParts.push(`Eligible Batches: ${parsed.graduation_years.join(', ')}`);
+        if (parsed.degree_eligibility?.length > 0) extraParts.push(`Eligible Degrees: ${parsed.degree_eligibility.join(', ')}`);
+        if (parsed.application_instructions) extraParts.push(`Application Instructions: ${parsed.application_instructions}`);
+
+        if (extraParts.length > 0) {
+          const extraBlock = '\n\n--- ADDITIONAL REQUIREMENTS & DETAILS ---\n• ' + extraParts.join('\n• ');
+          if (!richDescription.includes('--- ADDITIONAL REQUIREMENTS')) {
+            richDescription = richDescription ? (richDescription + extraBlock) : extraBlock.trim();
+          }
+        }
+
+        // Normalize experience level to match dropdown values
+        const normalizeExp = (exp) => {
+          if (!exp) return '';
+          const s = String(exp).toLowerCase().trim();
+          if (s.includes('fresh') || s.includes('trainee') || s === '0') return 'fresher';
+          if (s.startsWith('0-1') || s.includes('0 to 1')) return '0-1';
+          if (s.startsWith('1-3') || s.includes('1 to 3')) return '1-3';
+          if (s.startsWith('3-5') || s.includes('3 to 5')) return '3-5';
+          if (s.startsWith('5+') || s.startsWith('5') || s.includes('5+')) return '5+';
+          return exp;
+        };
+
         // Update form fields with extracted data
         setFormData((prev) => ({
           ...prev,
           title: parsed.title || prev.title,
-          description: parsed.description || prev.description,
+          description: richDescription || prev.description,
           required_skills: Array.from(new Set([...(parsed.required_skills || []), ...prev.required_skills])),
           preferred_skills: Array.from(new Set([...(parsed.preferred_skills || []), ...prev.preferred_skills])),
-          experience_level: parsed.experience_level || prev.experience_level,
+          experience_level: normalizeExp(parsed.experience_level) || prev.experience_level,
           cgpa_criteria: parsed.cgpa_criteria !== null && parsed.cgpa_criteria !== undefined ? String(parsed.cgpa_criteria) : prev.cgpa_criteria,
           branch_eligibility: parsed.branch_eligibility?.length ? parsed.branch_eligibility : prev.branch_eligibility,
           location: parsed.location || prev.location,
           salary_range: parsed.salary_range || prev.salary_range,
+          application_url: parsed.application_url || prev.application_url,
           application_deadline: parsed.application_deadline ? parsed.application_deadline.slice(0, 16) : prev.application_deadline,
           drive_date: parsed.drive_date ? parsed.drive_date.slice(0, 16) : prev.drive_date,
         }));
@@ -447,7 +487,7 @@ const JobForm = () => {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.docx,.doc,.txt"
+                accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
                 className="hidden"
                 onChange={(e) => {
                   if (e.target.files && e.target.files[0]) {
@@ -471,7 +511,7 @@ const JobForm = () => {
                     Click to browse or drop Job Description file
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Supports PDF, DOCX, or TXT format (Preserves tables & paragraphs)
+                    Supports PDF, DOCX, TXT, recruitment images (.png, .jpg), and eligibility sheets (.xlsx, .csv)
                   </p>
                 </div>
               )}

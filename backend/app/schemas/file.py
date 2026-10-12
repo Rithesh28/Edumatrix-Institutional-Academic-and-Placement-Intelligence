@@ -201,6 +201,8 @@ class FileBulkDeleteResponse(BaseModel):
     """Schema for bulk delete response."""
     deleted_count: int
     failed_ids: List[UUID] = []
+    failed_reasons: Dict[str, str] = {}
+
 
 
 class FileBulkMoveRequest(BaseModel):

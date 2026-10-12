@@ -13,6 +13,7 @@ import {
   ShieldAlert,
   ShieldX,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   Search,
   Filter,
@@ -25,10 +26,15 @@ import {
   AlertCircle,
   FileText,
   Info,
+  Layers,
+  Calendar,
+  ExternalLink,
+  Clock,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
+import BulkDriveCleanupModal from './BulkDriveCleanupModal';
 
 const CONFIRMATION_PHRASE = 'CONFIRM_PURGE_TEST_DATA';
 
@@ -37,10 +43,12 @@ const ManageTestData = () => {
   const { user } = useAuthStore();
   const {
     cleanupPreview,
+    drivesCleanupPreview,
     isCleanupLoading,
     cleanupError,
     cleanupResult,
     fetchCleanupPreview,
+    fetchDrivesCleanupPreview,
     runCleanup,
     clearCleanupResult,
     fetchCirculars,
@@ -51,17 +59,30 @@ const ManageTestData = () => {
     user?.role === 'placement' ||
     user?.role === 'admin';
 
-  // Local state
+  // Active Scope Tab: 'companies' | 'drives'
+  const [activeTab, setActiveTab] = useState('companies');
+
+  // Company Cleanup State
   const [searchTerm, setSearchTerm] = useState('');
   const [safetyFilter, setSafetyFilter] = useState('all');
   const [selectedIds, setSelectedIds] = useState([]);
   const [expandedRowIds, setExpandedRowIds] = useState(new Set());
-
-  // Modal states
   const [archiveModalOpen, setArchiveModalOpen] = useState(false);
   const [purgeModalOpen, setPurgeModalOpen] = useState(false);
   const [confirmationInput, setConfirmationInput] = useState('');
   const [actionError, setActionError] = useState(null);
+
+  // Drive Cleanup State
+  const [drivesSearchTerm, setDrivesSearchTerm] = useState('');
+  const [drivesSafetyFilter, setDrivesSafetyFilter] = useState('all');
+  const [drivesStatusFilter, setDrivesStatusFilter] = useState('all');
+  const [selectedDriveIds, setSelectedDriveIds] = useState([]);
+  const [expandedDriveRowIds, setExpandedDriveRowIds] = useState(new Set());
+  const [driveModalOpen, setDriveModalOpen] = useState(false);
+  const [driveModalSelection, setDriveModalSelection] = useState([]);
+  const [selectedOrphanedJobIds, setSelectedOrphanedJobIds] = useState([]);
+  const [orphanPurgeConfirmOpen, setOrphanPurgeConfirmOpen] = useState(false);
+  const [orphanConfirmInput, setOrphanConfirmInput] = useState('');
 
   // Initial load
   useEffect(() => {
@@ -73,7 +94,10 @@ const ManageTestData = () => {
   const loadPreview = async () => {
     try {
       setActionError(null);
-      await fetchCleanupPreview({ include_all_candidates: true });
+      await Promise.allSettled([
+        fetchCleanupPreview({ include_all_candidates: true }),
+        fetchDrivesCleanupPreview({ include_all_candidates: true }),
+      ]);
     } catch (err) {
       const msg = err.response?.data?.detail || err.message || 'Failed to load cleanup preview';
       setActionError(msg);
@@ -81,8 +105,9 @@ const ManageTestData = () => {
     }
   };
 
+  // Company Data & Filters
   const candidates = cleanupPreview?.candidates || [];
-  const summary = cleanupPreview?.summary || {
+  const companySummary = cleanupPreview?.summary || {
     total_candidates_flagged: 0,
     total_safe_to_purge: 0,
     total_requires_archive: 0,
@@ -97,7 +122,6 @@ const ManageTestData = () => {
     total_shared_files_preserved: 0,
   };
 
-  // Filter candidates
   const filteredCandidates = useMemo(() => {
     return candidates.filter((item) => {
       const matchesSearch =
@@ -112,7 +136,6 @@ const ManageTestData = () => {
     });
   }, [candidates, searchTerm, safetyFilter]);
 
-  // Selected companies details
   const selectedCompanies = useMemo(() => {
     return candidates.filter((c) => selectedIds.includes(c.company_id));
   }, [candidates, selectedIds]);
@@ -130,7 +153,56 @@ const ManageTestData = () => {
     );
   }, [selectedCompanies]);
 
-  // Selection handlers
+  // Drive Data & Filters
+  const drives = drivesCleanupPreview?.drives || [];
+  const orphanedJobs = drivesCleanupPreview?.orphaned_jobs || [];
+  const driveSummary = drivesCleanupPreview?.summary || {
+    total_candidates_flagged: 0,
+    total_drives_flagged: 0,
+    total_drives_safe_to_purge: 0,
+    total_drives_requires_archive: 0,
+    total_drives_protected_genuine: 0,
+    total_orphaned_jobs: 0,
+    total_dependent_jobs: 0,
+    total_dependent_circulars: 0,
+    total_dependent_applications: 0,
+    total_dependent_result_batches: 0,
+    total_dependent_offers: 0,
+    total_dependent_accepted_offers: 0,
+    total_files_identified: 0,
+    total_shared_files_preserved: 0,
+  };
+
+  const filteredDrives = useMemo(() => {
+    return drives.filter((item) => {
+      const matchesSearch =
+        !drivesSearchTerm ||
+        item.title?.toLowerCase().includes(drivesSearchTerm.toLowerCase()) ||
+        item.company_name?.toLowerCase().includes(drivesSearchTerm.toLowerCase()) ||
+        String(item.circular_id).includes(drivesSearchTerm);
+
+      const matchesSafety =
+        drivesSafetyFilter === 'all' || item.safety_classification === drivesSafetyFilter;
+
+      const matchesStatus =
+        drivesStatusFilter === 'all' || item.status?.toLowerCase() === drivesStatusFilter.toLowerCase();
+
+      return matchesSearch && matchesSafety && matchesStatus;
+    });
+  }, [drives, drivesSearchTerm, drivesSafetyFilter, drivesStatusFilter]);
+
+  const selectedDrives = useMemo(() => {
+    return drives.filter((d) => selectedDriveIds.includes(d.circular_id));
+  }, [drives, selectedDriveIds]);
+
+  const selectedDriveSafetyBreakdown = useMemo(() => {
+    const safe = selectedDrives.filter((d) => d.safety_classification === 'SAFE_TO_PURGE').length;
+    const requiresArchive = selectedDrives.filter((d) => d.safety_classification === 'REQUIRES_ARCHIVE').length;
+    const protectedCount = selectedDrives.filter((d) => d.safety_classification === 'PROTECTED_GENUINE').length;
+    return { safe, requiresArchive, protectedCount };
+  }, [selectedDrives]);
+
+  // Company Selection Handlers
   const handleToggleSelect = (id) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
@@ -159,7 +231,52 @@ const ManageTestData = () => {
     });
   };
 
-  // Execution Handlers
+  // Drive Selection Handlers
+  const handleToggleSelectDrive = (id) => {
+    setSelectedDriveIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllVisibleDrives = () => {
+    const visibleIds = filteredDrives.map((d) => d.circular_id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedDriveIds.includes(id));
+    if (allSelected) {
+      setSelectedDriveIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedDriveIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleSelectSafeDrivesOnly = () => {
+    const safeIds = filteredDrives
+      .filter((d) => d.safety_classification === 'SAFE_TO_PURGE')
+      .map((d) => d.circular_id);
+    setSelectedDriveIds(safeIds);
+  };
+
+  const toggleDriveRowExpand = (id) => {
+    setExpandedDriveRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleOpenDriveModal = (circularIds) => {
+    if (!circularIds || circularIds.length === 0) {
+      toast.error('Select at least one recruitment drive to inspect.');
+      return;
+    }
+    setDriveModalSelection(circularIds);
+    setDriveModalOpen(true);
+  };
+
+  // Company Execution Handlers
   const handleOpenArchive = () => {
     if (selectedIds.length === 0) {
       toast.error('Select at least one company to archive.');
@@ -229,6 +346,38 @@ const ManageTestData = () => {
     }
   };
 
+  // Orphaned Roles Cleanup Handlers
+  const handleToggleSelectOrphan = (id) => {
+    setSelectedOrphanedJobIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleConfirmOrphanPurge = async () => {
+    if (orphanConfirmInput.trim() !== CONFIRMATION_PHRASE) {
+      setActionError(`Confirmation phrase must match "${CONFIRMATION_PHRASE}" exactly.`);
+      return;
+    }
+    setActionError(null);
+    try {
+      const payload = {
+        orphaned_job_ids: selectedOrphanedJobIds,
+        mode: 'purge',
+        confirmation_phrase: CONFIRMATION_PHRASE,
+      };
+      await runCleanup(payload);
+      toast.success(`Successfully purged ${selectedOrphanedJobIds.length} orphaned test role(s).`);
+      setOrphanPurgeConfirmOpen(false);
+      setSelectedOrphanedJobIds([]);
+      setOrphanConfirmInput('');
+      await loadPreview();
+    } catch (err) {
+      const msg = err.response?.data?.detail || err.message || 'Orphaned role purge failed.';
+      setActionError(msg);
+      toast.error(msg);
+    }
+  };
+
   const getSafetyBadge = (classification) => {
     switch (classification) {
       case 'SAFE_TO_PURGE':
@@ -256,6 +405,42 @@ const ManageTestData = () => {
         return (
           <span className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
             {classification}
+          </span>
+        );
+    }
+  };
+
+  const getStatusBadge = (status) => {
+    const s = (status || '').toLowerCase();
+    switch (s) {
+      case 'published':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+            Published
+          </span>
+        );
+      case 'draft':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+            Draft
+          </span>
+        );
+      case 'archived':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
+            Archived
+          </span>
+        );
+      case 'closed':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+            Closed
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+            {status}
           </span>
         );
     }
@@ -298,7 +483,7 @@ const ManageTestData = () => {
             <span>Manage Test Data</span>
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-            Safe, preview-first administrative interface to inspect test candidate companies and execute archive or purge actions.
+            Safe, preview-first administrative interface to inspect test candidate companies and recruitment drives, and execute archive or purge actions.
           </p>
         </div>
 
@@ -315,6 +500,49 @@ const ManageTestData = () => {
         </div>
       </div>
 
+      {/* Scope Switcher Tabs */}
+      <div className="flex border-b border-gray-200 dark:border-gray-800">
+        <button
+          type="button"
+          onClick={() => setActiveTab('companies')}
+          className={`flex items-center gap-2 py-3 px-5 text-sm font-semibold border-b-2 transition-all cursor-pointer ${
+            activeTab === 'companies'
+              ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400 bg-indigo-50/40 dark:bg-indigo-950/20 rounded-t-lg'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+          }`}
+        >
+          <Building2 className="w-4 h-4" />
+          <span>Candidate Companies</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            activeTab === 'companies'
+              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 font-bold'
+              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+          }`}>
+            {candidates.length}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('drives')}
+          className={`flex items-center gap-2 py-3 px-5 text-sm font-semibold border-b-2 transition-all cursor-pointer ${
+            activeTab === 'drives'
+              ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400 dark:border-indigo-400 bg-indigo-50/40 dark:bg-indigo-950/20 rounded-t-lg'
+              : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+          }`}
+        >
+          <Layers className="w-4 h-4" />
+          <span>Recruitment Drives</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full ${
+            activeTab === 'drives'
+              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/60 dark:text-indigo-300 font-bold'
+              : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400'
+          }`}>
+            {drives.length}
+          </span>
+        </button>
+      </div>
+
       {/* Mandatory Safety Notice Banner */}
       <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded-xl flex items-start gap-3">
         <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
@@ -323,7 +551,7 @@ const ManageTestData = () => {
             Administrative Review Aid — Verification Required
           </p>
           <p>
-            The test-pattern detector flags candidate companies using automated naming signals (e.g., timestamps, "test", "mock", "temp").
+            The test-pattern detector flags candidates using automated naming signals (e.g., timestamps, "test", "mock", "temp").
             <strong> A test-like name is an evaluation signal only, never an authorization to delete records.</strong>
           </p>
           <p className="text-amber-700 dark:text-amber-300">
@@ -332,405 +560,834 @@ const ManageTestData = () => {
         </div>
       </div>
 
-      {/* Aggregate Preview Metrics */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
-          <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
-            Flagged Candidates
-          </span>
-          <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">
-            {summary.total_candidates_flagged}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60 shadow-sm">
-          <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
-            Safe to Purge
-          </span>
-          <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-            {summary.total_safe_to_purge}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-amber-200 dark:border-amber-800/60 shadow-sm">
-          <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider block">
-            Requires Archive
-          </span>
-          <p className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">
-            {summary.total_requires_archive}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-red-200 dark:border-red-800/60 shadow-sm">
-          <span className="text-[11px] font-medium text-red-600 dark:text-red-400 uppercase tracking-wider block">
-            Protected Genuine
-          </span>
-          <p className="text-xl font-bold text-red-600 dark:text-red-400 mt-1">
-            {summary.total_protected_genuine}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
-          <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
-            Dependent Jobs
-          </span>
-          <p className="text-xl font-bold text-gray-700 dark:text-gray-300 mt-1">
-            {summary.total_dependent_jobs}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
-          <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
-            Dependent Drives
-          </span>
-          <p className="text-xl font-bold text-gray-700 dark:text-gray-300 mt-1">
-            {summary.total_dependent_circulars}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm col-span-2 sm:col-span-1">
-          <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
-            Shared Files Preserved
-          </span>
-          <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">
-            {summary.total_shared_files_preserved}
-          </p>
-        </div>
-      </div>
+      {/* ========================================================================= */}
+      {/* TAB 1: CANDIDATE COMPANIES                                               */}
+      {/* ========================================================================= */}
+      {activeTab === 'companies' && (
+        <div className="space-y-6">
+          {/* Aggregate Preview Metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+                Flagged Candidates
+              </span>
+              <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">
+                {companySummary.total_candidates_flagged}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60 shadow-sm">
+              <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                Safe to Purge
+              </span>
+              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                {companySummary.total_safe_to_purge}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-amber-200 dark:border-amber-800/60 shadow-sm">
+              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider block">
+                Requires Archive
+              </span>
+              <p className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+                {companySummary.total_requires_archive}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-red-200 dark:border-red-800/60 shadow-sm">
+              <span className="text-[11px] font-medium text-red-600 dark:text-red-400 uppercase tracking-wider block">
+                Protected Genuine
+              </span>
+              <p className="text-xl font-bold text-red-600 dark:text-red-400 mt-1">
+                {companySummary.total_protected_genuine}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+                Dependent Jobs
+              </span>
+              <p className="text-xl font-bold text-gray-700 dark:text-gray-300 mt-1">
+                {companySummary.total_dependent_jobs}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+                Dependent Drives
+              </span>
+              <p className="text-xl font-bold text-gray-700 dark:text-gray-300 mt-1">
+                {companySummary.total_dependent_circulars}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm col-span-2 sm:col-span-1">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+                Shared Files Preserved
+              </span>
+              <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+                {companySummary.total_shared_files_preserved}
+              </p>
+            </div>
+          </div>
 
-      {/* Action Toolbar */}
-      <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-3">
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
-              Selected: <strong className="text-indigo-600 dark:text-indigo-400">{selectedIds.length}</strong> of {candidates.length}
-            </span>
-            {selectedIds.length > 0 && (
-              <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
-                <span>(Safe: {selectedSafetyBreakdown.safe},</span>
-                <span>Archive: {selectedSafetyBreakdown.requiresArchive},</span>
-                <span>Protected: {selectedSafetyBreakdown.protectedCount})</span>
+          {/* Action Toolbar */}
+          <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-3">
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Selected: <strong className="text-indigo-600 dark:text-indigo-400">{selectedIds.length}</strong> of {candidates.length}
+                </span>
+                {selectedIds.length > 0 && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                    <span>(Safe: {selectedSafetyBreakdown.safe},</span>
+                    <span>Archive: {selectedSafetyBreakdown.requiresArchive},</span>
+                    <span>Protected: {selectedSafetyBreakdown.protectedCount})</span>
+                    <button
+                      onClick={() => setSelectedIds([])}
+                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline ml-1 cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setSelectedIds([])}
-                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline ml-1 cursor-pointer"
+                  onClick={handleOpenArchive}
+                  disabled={selectedIds.length === 0 || isCleanupLoading}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Deactivate companies and archive dependent jobs and circulars"
                 >
-                  Clear Selection
+                  <Archive className="w-3.5 h-3.5" />
+                  <span>Archive Selected ({selectedIds.length})</span>
                 </button>
+
+                <button
+                  onClick={handleOpenPurge}
+                  disabled={selectedIds.length === 0 || hasIneligibleForPurge || isCleanupLoading}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  title={
+                    hasIneligibleForPurge
+                      ? 'Cannot purge: Selected companies include protected or archival-required records'
+                      : 'Permanently purge selected test records'
+                  }
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Purge Selected ({selectedIds.length})</span>
+                </button>
+              </div>
+            </div>
+
+            {hasIneligibleForPurge && (
+              <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/80 rounded-lg text-xs text-amber-800 dark:text-amber-200 flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                <span>
+                  <strong>Purge blocked for current selection:</strong> One or more selected companies have genuine placement history (applications, confirmed outcomes, offers) or require archival. Uncheck them or use <strong>Archive Selected</strong> instead.
+                </span>
               </div>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleOpenArchive}
-              disabled={selectedIds.length === 0 || isCleanupLoading}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Deactivate companies and archive dependent jobs and circulars"
-            >
-              <Archive className="w-3.5 h-3.5" />
-              <span>Archive Selected ({selectedIds.length})</span>
-            </button>
+          {/* Search and Safety Filter */}
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search candidate company name or ID..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
+              />
+            </div>
 
-            <button
-              onClick={handleOpenPurge}
-              disabled={selectedIds.length === 0 || hasIneligibleForPurge || isCleanupLoading}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              title={
-                hasIneligibleForPurge
-                  ? 'Cannot purge: Selected companies include protected or archival-required records'
-                  : 'Permanently purge selected test records'
-              }
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Purge Selected ({selectedIds.length})</span>
-            </button>
+            <div className="flex items-center gap-1.5 overflow-x-auto">
+              {[
+                { id: 'all', label: 'All Candidates' },
+                { id: 'SAFE_TO_PURGE', label: 'Safe to Purge' },
+                { id: 'REQUIRES_ARCHIVE', label: 'Requires Archive' },
+                { id: 'PROTECTED_GENUINE', label: 'Protected Genuine' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setSafetyFilter(tab.id)}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                    safetyFilter === tab.id
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        {hasIneligibleForPurge && (
-          <div className="p-2.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/80 rounded-lg text-xs text-amber-800 dark:text-amber-200 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0" />
-            <span>
-              <strong>Purge blocked for current selection:</strong> One or more selected companies have genuine placement history (applications, confirmed outcomes, offers) or require archival. Uncheck them or use <strong>Archive Selected</strong> instead.
-            </span>
-          </div>
-        )}
-      </div>
+          {/* Candidate Companies Table */}
+          {isCleanupLoading && candidates.length === 0 ? (
+            <div className="p-12 text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
+              <div className="animate-spin w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3" />
+              <p className="text-sm">Evaluating recruitment cleanup candidates...</p>
+            </div>
+          ) : filteredCandidates.length === 0 ? (
+            <div className="p-12 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 text-center space-y-2">
+              <Database className="w-10 h-10 text-gray-400 mx-auto" />
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                No cleanup candidates found
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {searchTerm || safetyFilter !== 'all'
+                  ? 'Try adjusting your search query or filter criteria.'
+                  : 'No test-pattern companies or cleanup candidates detected in the system.'}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300">
+                  <thead className="bg-gray-50 dark:bg-gray-800/70 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-200 dark:border-gray-800">
+                    <tr>
+                      <th className="py-3 px-4 w-10">
+                        <input
+                          type="checkbox"
+                          checked={
+                            filteredCandidates.length > 0 &&
+                            filteredCandidates.every((c) => selectedIds.includes(c.company_id))
+                          }
+                          onChange={handleSelectAllVisible}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </th>
+                      <th className="py-3 px-4">Company</th>
+                      <th className="py-3 px-4">Safety Status</th>
+                      <th className="py-3 px-4">Dependencies Summary</th>
+                      <th className="py-3 px-4">Protection Notes</th>
+                      <th className="py-3 px-4 text-right">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {filteredCandidates.map((candidate) => {
+                      const isSelected = selectedIds.includes(candidate.company_id);
+                      const isExpanded = expandedRowIds.has(candidate.company_id);
+                      const dep = candidate.dependent_counts;
 
-      {/* Search and Safety Filter */}
-      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search candidate company name or ID..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-9 pr-4 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
-          />
-        </div>
-
-        <div className="flex items-center gap-1.5 overflow-x-auto">
-          {[
-            { id: 'all', label: 'All Candidates' },
-            { id: 'SAFE_TO_PURGE', label: 'Safe to Purge' },
-            { id: 'REQUIRES_ARCHIVE', label: 'Requires Archive' },
-            { id: 'PROTECTED_GENUINE', label: 'Protected Genuine' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setSafetyFilter(tab.id)}
-              className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
-                safetyFilter === tab.id
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Candidate Companies Table */}
-      {isCleanupLoading && candidates.length === 0 ? (
-        <div className="p-12 text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
-          <div className="animate-spin w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3" />
-          <p className="text-sm">Evaluating recruitment cleanup candidates...</p>
-        </div>
-      ) : filteredCandidates.length === 0 ? (
-        <div className="p-12 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 text-center space-y-2">
-          <Database className="w-10 h-10 text-gray-400 mx-auto" />
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white">
-            No cleanup candidates found
-          </h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            {searchTerm || safetyFilter !== 'all'
-              ? 'Try adjusting your search query or filter criteria.'
-              : 'No test-pattern companies or cleanup candidates detected in the system.'}
-          </p>
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300">
-              <thead className="bg-gray-50 dark:bg-gray-800/70 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-200 dark:border-gray-800">
-                <tr>
-                  <th className="py-3 px-4 w-10">
-                    <input
-                      type="checkbox"
-                      checked={
-                        filteredCandidates.length > 0 &&
-                        filteredCandidates.every((c) => selectedIds.includes(c.company_id))
-                      }
-                      onChange={handleSelectAllVisible}
-                      className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                    />
-                  </th>
-                  <th className="py-3 px-3">Company</th>
-                  <th className="py-3 px-3">Status</th>
-                  <th className="py-3 px-3">Classification</th>
-                  <th className="py-3 px-3">Dependencies</th>
-                  <th className="py-3 px-3">Protection & Signal Reasons</th>
-                  <th className="py-3 px-4 text-right">Details</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                {filteredCandidates.map((cand) => {
-                  const isSelected = selectedIds.includes(cand.company_id);
-                  const isExpanded = expandedRowIds.has(cand.company_id);
-                  const counts = cand.dependent_counts;
-
-                  return (
-                    <React.Fragment key={cand.company_id}>
-                      <tr
-                        className={`hover:bg-gray-50/70 dark:hover:bg-gray-800/40 transition-colors ${
-                          isSelected ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''
-                        }`}
-                      >
-                        <td className="py-3.5 px-4">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => handleToggleSelect(cand.company_id)}
-                            className="rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                          />
-                        </td>
-                        <td className="py-3.5 px-3">
-                          <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
-                            <Building2 className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
-                            <span>{cand.company_name}</span>
-                          </div>
-                          <span className="text-[11px] text-gray-400">ID: #{cand.company_id}</span>
-                        </td>
-                        <td className="py-3.5 px-3">
-                          {cand.is_active ? (
-                            <span className="px-2 py-0.5 text-[11px] font-medium rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300">
-                              Active
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 text-[11px] font-medium rounded-full bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                              Inactive
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-3">
-                          {getSafetyBadge(cand.safety_classification)}
-                        </td>
-                        <td className="py-3.5 px-3">
-                          <div className="flex flex-wrap gap-1.5 text-[11px]">
-                            <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-600 dark:text-gray-300" title="Job Postings">
-                              💼 {counts.jobs_count}
-                            </span>
-                            <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-600 dark:text-gray-300" title="Recruitment Drives">
-                              📢 {counts.circulars_count}
-                            </span>
-                            <span className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 rounded text-gray-600 dark:text-gray-300" title="Student Applications">
-                              📋 {counts.applications_count}
-                            </span>
-                            {counts.offers_count > 0 && (
-                              <span className="px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 rounded font-medium" title="Offers">
-                                🏆 {counts.offers_count} ({counts.accepted_offers_count} acc)
-                              </span>
-                            )}
-                            {counts.files_count > 0 && (
-                              <span className="px-1.5 py-0.5 bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 rounded" title="Files">
-                                📎 {counts.files_count}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-3">
-                          <div className="space-y-1 max-w-xs">
-                            {cand.protection_reasons && cand.protection_reasons.length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
-                                {cand.protection_reasons.map((pr, idx) => (
-                                  <span
-                                    key={idx}
-                                    className="px-1.5 py-0.5 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 rounded text-[10px] font-medium leading-tight"
-                                  >
-                                    🛡️ {pr}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                                No blocking dependencies
-                              </span>
-                            )}
-
-                            {cand.flag_reasons && cand.flag_reasons.length > 0 && (
-                              <div className="text-[10px] text-gray-400">
-                                Signal: {cand.flag_reasons.join(', ')}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3.5 px-4 text-right">
-                          <button
-                            onClick={() => toggleRowExpand(cand.company_id)}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 cursor-pointer"
+                      return (
+                        <React.Fragment key={candidate.company_id}>
+                          <tr
+                            className={`hover:bg-gray-50/70 dark:hover:bg-gray-800/50 transition-colors ${
+                              isSelected ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''
+                            }`}
                           >
-                            <span>{isExpanded ? 'Hide' : 'Inspect'}</span>
-                            {isExpanded ? (
-                              <ChevronDown className="w-3.5 h-3.5" />
-                            ) : (
-                              <ChevronRight className="w-3.5 h-3.5" />
-                            )}
-                          </button>
-                        </td>
-                      </tr>
-
-                      {/* Expandable Breakdown Card */}
-                      {isExpanded && (
-                        <tr className="bg-gray-50/70 dark:bg-gray-800/50">
-                          <td colSpan={7} className="p-4 border-t border-b border-gray-100 dark:border-gray-800">
-                            <div className="space-y-3">
-                              <h4 className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                                <Info className="w-3.5 h-3.5 text-indigo-500" />
-                                <span>Detailed Dependency Breakdown for {cand.company_name}</span>
-                              </h4>
-
-                              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5 text-[11px]">
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Job Postings:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.jobs_count}</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Circulars:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.circulars_count}</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Circular-Job Links:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.circular_job_links_count}</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Applications:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.applications_count}</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Shortlists:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.shortlists_count}</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Recruitment Rounds:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.rounds_count}</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Round Outcomes:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.outcomes_count} (Confirmed: {counts.confirmed_outcomes_count})</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Result Batches:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.result_batches_count}</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Result Items:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.result_items_count} (Confirmed: {counts.confirmed_result_items_count})</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Placement Offers:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.offers_count} (Accepted: {counts.accepted_offers_count})</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Attached Files:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{counts.files_count} (Shared Preserved: {counts.shared_files_count})</span>
-                                </div>
-                                <div className="p-2 bg-white dark:bg-gray-900 rounded border border-gray-200 dark:border-gray-700">
-                                  <span className="text-gray-400 block">Affected Students:</span>
-                                  <span className="font-semibold text-gray-800 dark:text-gray-200">{cand.affected_student_count} unique student(s)</span>
-                                </div>
+                            <td className="py-3 px-4">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleSelect(candidate.company_id)}
+                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
+                                <Building2 className="w-3.5 h-3.5 text-gray-400" />
+                                <span>{candidate.company_name}</span>
                               </div>
-
-                              {/* Warnings & Notes */}
-                              <div className="space-y-1.5 pt-1 text-[11px]">
-                                {counts.accepted_offers_count > 0 && (
-                                  <div className="p-2 bg-red-100 dark:bg-red-950/60 border border-red-200 dark:border-red-800 rounded text-red-800 dark:text-red-200 font-medium">
-                                    🔴 CRITICAL: Students have accepted verified offers through this company. Deletion is permanently blocked by institutional placement accounting rules.
-                                  </div>
-                                )}
-                                {counts.active_offers_count > 0 && counts.accepted_offers_count === 0 && (
-                                  <div className="p-2 bg-amber-100 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-800 rounded text-amber-800 dark:text-amber-200 font-medium">
-                                    🟠 Pending active verified placement offers exist for this company.
-                                  </div>
-                                )}
-                                {counts.confirmed_outcomes_count > 0 && (
-                                  <div className="p-2 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 rounded text-amber-800 dark:text-amber-200">
-                                    🟠 Confirmed round progression outcomes exist. Archiving preserves this recruitment history.
-                                  </div>
-                                )}
-                                {counts.shared_files_count > 0 && (
-                                  <div className="p-2 bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded text-blue-800 dark:text-blue-200">
-                                    ℹ️ {counts.shared_files_count} file(s) are shared with academic circulars or other records and will be preserved even if this recruitment record is purged.
-                                  </div>
+                              <div className="text-[11px] text-gray-400 mt-0.5">
+                                ID #{candidate.company_id} • Created {new Date(candidate.created_at).toLocaleDateString()}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              {getSafetyBadge(candidate.safety_classification)}
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-medium text-gray-700 dark:text-gray-300" title="Job Postings">
+                                  {dep.jobs_count} Jobs
+                                </span>
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-medium text-gray-700 dark:text-gray-300" title="Recruitment Circulars">
+                                  {dep.circulars_count} Circulars
+                                </span>
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-medium text-gray-700 dark:text-gray-300" title="Student Applications">
+                                  {dep.applications_count} Apps
+                                </span>
+                                {dep.offers_count > 0 && (
+                                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 rounded font-medium" title="Offers">
+                                    {dep.offers_count} Offers ({dep.accepted_offers_count} Accepted)
+                                  </span>
                                 )}
                               </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                            </td>
+                            <td className="py-3 px-4 max-w-xs">
+                              {candidate.protection_reasons.length > 0 ? (
+                                <p className="text-[11px] text-amber-700 dark:text-amber-400 line-clamp-1" title={candidate.protection_reasons.join(', ')}>
+                                  {candidate.protection_reasons[0]}
+                                  {candidate.protection_reasons.length > 1 && ` (+${candidate.protection_reasons.length - 1} more)`}
+                                </p>
+                              ) : (
+                                <span className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                                  Pure test candidate, eligible for purge
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <button
+                                onClick={() => toggleRowExpand(candidate.company_id)}
+                                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded cursor-pointer"
+                                title="Expand dependency details"
+                              >
+                                {isExpanded ? (
+                                  <ChevronUp className="w-4 h-4" />
+                                ) : (
+                                  <ChevronDown className="w-4 h-4" />
+                                )}
+                              </button>
+                            </td>
+                          </tr>
+
+                          {/* Expanded Dependency Inspection Row */}
+                          {isExpanded && (
+                            <tr className="bg-gray-50/60 dark:bg-gray-800/40">
+                              <td colSpan={6} className="py-4 px-6 space-y-3">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* Candidate Flag Signals */}
+                                  <div className="space-y-1.5">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 block">
+                                      Detection Signals
+                                    </span>
+                                    <ul className="list-disc pl-4 text-xs text-gray-600 dark:text-gray-300 space-y-0.5">
+                                      {candidate.candidate_reasons.map((r, idx) => (
+                                        <li key={idx}>{r}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+
+                                  {/* Detailed Protection Reasons */}
+                                  <div className="space-y-1.5">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 block">
+                                      Safety Verification & Protection Rules
+                                    </span>
+                                    {candidate.protection_reasons.length > 0 ? (
+                                      <ul className="list-disc pl-4 text-xs text-amber-700 dark:text-amber-400 space-y-0.5">
+                                        {candidate.protection_reasons.map((r, idx) => (
+                                          <li key={idx}>{r}</li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                                        No genuine student records or accepted offers linked. Safe for permanent purge.
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Files & Shared Preservations */}
+                                {dep.files_count > 0 && (
+                                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 flex items-center gap-4">
+                                    <span className="flex items-center gap-1">
+                                      <Paperclip className="w-3.5 h-3.5 text-gray-400" />
+                                      {dep.files_count} total file references
+                                    </span>
+                                    {dep.shared_files_count > 0 && (
+                                      <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                        🛡️ {dep.shared_files_count} shared files will be preserved
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* TAB 2: RECRUITMENT DRIVES                                                */}
+      {/* ========================================================================= */}
+      {activeTab === 'drives' && (
+        <div className="space-y-6">
+          {/* Drives Aggregate Preview Metrics */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+                Flagged Drives
+              </span>
+              <p className="text-xl font-bold text-gray-900 dark:text-white mt-1">
+                {driveSummary.total_drives_flagged || drives.length}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/60 shadow-sm">
+              <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider block">
+                Safe to Purge
+              </span>
+              <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                {driveSummary.total_drives_safe_to_purge}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-amber-200 dark:border-amber-800/60 shadow-sm">
+              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider block">
+                Requires Archive
+              </span>
+              <p className="text-xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+                {driveSummary.total_drives_requires_archive}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-red-200 dark:border-red-800/60 shadow-sm">
+              <span className="text-[11px] font-medium text-red-600 dark:text-red-400 uppercase tracking-wider block">
+                Protected Genuine
+              </span>
+              <p className="text-xl font-bold text-red-600 dark:text-red-400 mt-1">
+                {driveSummary.total_drives_protected_genuine}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+                Dependent Roles
+              </span>
+              <p className="text-xl font-bold text-gray-700 dark:text-gray-300 mt-1">
+                {driveSummary.total_dependent_jobs}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+                Dependent Apps
+              </span>
+              <p className="text-xl font-bold text-gray-700 dark:text-gray-300 mt-1">
+                {driveSummary.total_dependent_applications}
+              </p>
+            </div>
+            <div className="bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm col-span-2 sm:col-span-1">
+              <span className="text-[11px] font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider block">
+                Orphaned Roles
+              </span>
+              <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
+                {driveSummary.total_orphaned_jobs || orphanedJobs.length}
+              </p>
+            </div>
+          </div>
+
+          {/* Action Toolbar */}
+          <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm space-y-3">
+            <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                  Selected: <strong className="text-indigo-600 dark:text-indigo-400">{selectedDriveIds.length}</strong> of {drives.length} drives
+                </span>
+                {selectedDriveIds.length > 0 && (
+                  <div className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                    <span>(Safe: {selectedDriveSafetyBreakdown.safe},</span>
+                    <span>Archive: {selectedDriveSafetyBreakdown.requiresArchive},</span>
+                    <span>Protected: {selectedDriveSafetyBreakdown.protectedCount})</span>
+                    <button
+                      onClick={() => setSelectedDriveIds([])}
+                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline ml-1 cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleSelectSafeDrivesOnly}
+                  className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:hover:bg-emerald-900/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Select Safe to Purge ({driveSummary.total_drives_safe_to_purge})
+                </button>
+
+                <button
+                  onClick={() => handleOpenDriveModal(selectedDriveIds)}
+                  disabled={selectedDriveIds.length === 0}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Preview & Clean Up ({selectedDriveIds.length})</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Search, Status and Safety Filters */}
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between bg-white dark:bg-gray-900 p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Search drive title, company, or ID..."
+                value={drivesSearchTerm}
+                onChange={(e) => setDrivesSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:text-white"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 overflow-x-auto">
+              {/* Status Filter */}
+              <select
+                value={drivesStatusFilter}
+                onChange={(e) => setDrivesStatusFilter(e.target.value)}
+                className="px-2.5 py-1.5 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="all">All Statuses</option>
+                <option value="draft">Draft</option>
+                <option value="published">Published</option>
+                <option value="archived">Archived</option>
+                <option value="closed">Closed</option>
+              </select>
+
+              {/* Safety Filter Tabs */}
+              {[
+                { id: 'all', label: 'All Safety' },
+                { id: 'SAFE_TO_PURGE', label: 'Safe to Purge' },
+                { id: 'REQUIRES_ARCHIVE', label: 'Requires Archive' },
+                { id: 'PROTECTED_GENUINE', label: 'Protected Genuine' },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setDrivesSafetyFilter(tab.id)}
+                  className={`px-2.5 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer whitespace-nowrap ${
+                    drivesSafetyFilter === tab.id
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Candidate Drives Table */}
+          {isCleanupLoading && drives.length === 0 ? (
+            <div className="p-12 text-center text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
+              <div className="animate-spin w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-3" />
+              <p className="text-sm">Evaluating recruitment drive cleanup candidates...</p>
+            </div>
+          ) : filteredDrives.length === 0 ? (
+            <div className="p-12 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 text-center space-y-2">
+              <Layers className="w-10 h-10 text-gray-400 mx-auto" />
+              <h3 className="text-base font-semibold text-gray-900 dark:text-white">
+                No recruitment drive candidates found
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {drivesSearchTerm || drivesSafetyFilter !== 'all' || drivesStatusFilter !== 'all'
+                  ? 'Try adjusting your search query or filter criteria.'
+                  : 'No test-generated or flagged recruitment drives found.'}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300">
+                  <thead className="bg-gray-50 dark:bg-gray-800/70 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-200 dark:border-gray-800">
+                    <tr>
+                      <th className="py-3 px-4 w-10">
+                        <input
+                          type="checkbox"
+                          checked={
+                            filteredDrives.length > 0 &&
+                            filteredDrives.every((d) => selectedDriveIds.includes(d.circular_id))
+                          }
+                          onChange={handleSelectAllVisibleDrives}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </th>
+                      <th className="py-3 px-4">Recruitment Drive</th>
+                      <th className="py-3 px-4">Status</th>
+                      <th className="py-3 px-4">Safety Status</th>
+                      <th className="py-3 px-4">Dependencies</th>
+                      <th className="py-3 px-4">Protection Notes</th>
+                      <th className="py-3 px-4 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {filteredDrives.map((drive) => {
+                      const isSelected = selectedDriveIds.includes(drive.circular_id);
+                      const isExpanded = expandedDriveRowIds.has(drive.circular_id);
+                      const dep = drive.dependent_counts;
+
+                      return (
+                        <React.Fragment key={drive.circular_id}>
+                          <tr
+                            className={`hover:bg-gray-50/70 dark:hover:bg-gray-800/50 transition-colors ${
+                              isSelected ? 'bg-indigo-50/40 dark:bg-indigo-950/20' : ''
+                            }`}
+                          >
+                            <td className="py-3 px-4">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleSelectDrive(drive.circular_id)}
+                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                              />
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
+                                <FileText className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                                <span>{drive.title}</span>
+                              </div>
+                              <div className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-2">
+                                <span className="flex items-center gap-1">
+                                  <Building2 className="w-3 h-3" />
+                                  {drive.company_name}
+                                </span>
+                                <span>• ID #{drive.circular_id}</span>
+                                {drive.drive_date && (
+                                  <span>• Drive: {new Date(drive.drive_date).toLocaleDateString()}</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">
+                              {getStatusBadge(drive.status)}
+                            </td>
+                            <td className="py-3 px-4">
+                              {getSafetyBadge(drive.safety_classification)}
+                            </td>
+                            <td className="py-3 px-4">
+                              <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-medium text-gray-700 dark:text-gray-300" title="Linked Roles">
+                                  {dep.jobs_count} Roles
+                                </span>
+                                <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-medium text-gray-700 dark:text-gray-300" title="Applications">
+                                  {dep.applications_count} Apps
+                                </span>
+                                {dep.offers_count > 0 && (
+                                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 rounded font-medium" title="Offers">
+                                    {dep.offers_count} Offers
+                                  </span>
+                                )}
+                                {dep.attachments_count > 0 && (
+                                  <span className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 rounded font-medium text-gray-700 dark:text-gray-300" title="Attachments">
+                                    {dep.attachments_count} Files
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 max-w-xs">
+                              {drive.protection_reasons.length > 0 ? (
+                                <p className="text-[11px] text-amber-700 dark:text-amber-400 line-clamp-1" title={drive.protection_reasons.join(', ')}>
+                                  {drive.protection_reasons[0]}
+                                  {drive.protection_reasons.length > 1 && ` (+${drive.protection_reasons.length - 1} more)`}
+                                </p>
+                              ) : (
+                                <span className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                                  Disposable test drive, safe to purge
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleOpenDriveModal([drive.circular_id])}
+                                  className="px-2.5 py-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded transition-colors cursor-pointer"
+                                  title="Inspect and clean up this drive"
+                                >
+                                  Inspect
+                                </button>
+                                <button
+                                  onClick={() => toggleDriveRowExpand(drive.circular_id)}
+                                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded cursor-pointer"
+                                  title="Toggle details"
+                                >
+                                  {isExpanded ? (
+                                    <ChevronUp className="w-4 h-4" />
+                                  ) : (
+                                    <ChevronDown className="w-4 h-4" />
+                                  )}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Expanded Drive Details Row */}
+                          {isExpanded && (
+                            <tr className="bg-gray-50/60 dark:bg-gray-800/40">
+                              <td colSpan={7} className="py-4 px-6 space-y-3">
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                  {/* Flagging Signals */}
+                                  <div className="space-y-1.5">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 block">
+                                      Candidate Detection Signals
+                                    </span>
+                                    <ul className="list-disc pl-4 text-xs text-gray-600 dark:text-gray-300 space-y-0.5">
+                                      {drive.candidate_reasons.map((r, idx) => (
+                                        <li key={idx}>{r}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+
+                                  {/* Protection Rules */}
+                                  <div className="space-y-1.5">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 block">
+                                      Safety Verification & Protection Rules
+                                    </span>
+                                    {drive.protection_reasons.length > 0 ? (
+                                      <ul className="list-disc pl-4 text-xs text-amber-700 dark:text-amber-400 space-y-0.5">
+                                        {drive.protection_reasons.map((r, idx) => (
+                                          <li key={idx}>{r}</li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                                        Pure test recruitment drive. No accepted offers or genuine student dependencies.
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Linked Roles Breakdown */}
+                                {(drive.exclusive_job_roles?.length > 0 || drive.shared_job_roles?.length > 0) && (
+                                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700 text-xs space-y-1.5">
+                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 block">
+                                      Linked Roles Analysis
+                                    </span>
+                                    <div className="flex flex-wrap gap-2">
+                                      {drive.exclusive_job_roles?.map((role, idx) => (
+                                        <span key={idx} className="px-2 py-0.5 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 rounded border border-emerald-200 dark:border-emerald-800 text-[11px]" title="Role exclusive to this drive (will be deleted on purge)">
+                                          Exclusive: {role}
+                                        </span>
+                                      ))}
+                                      {drive.shared_job_roles?.map((role, idx) => (
+                                        <span key={idx} className="px-2 py-0.5 bg-blue-50 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 rounded border border-blue-200 dark:border-blue-800 text-[11px]" title="Role shared with other drives (junction only will be unlinked)">
+                                          Shared: {role} (Preserved)
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Files Detail */}
+                                {dep.files_count > 0 && (
+                                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-600 dark:text-gray-300 flex items-center gap-4">
+                                    <span className="flex items-center gap-1">
+                                      <Paperclip className="w-3.5 h-3.5 text-gray-400" />
+                                      {dep.files_count} total file attachment(s)
+                                    </span>
+                                    {dep.shared_files_count > 0 && (
+                                      <span className="text-blue-600 dark:text-blue-400 font-medium">
+                                        🛡️ {dep.shared_files_count} shared file(s) preserved
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Orphaned Test Roles Section */}
+          {orphanedJobs.length > 0 && (
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-indigo-100 dark:bg-indigo-950/80 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                    <Briefcase className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      <span>Orphaned Test Roles</span>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                        {orphanedJobs.length}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Job postings created for testing that are not linked to any recruitment circular.
+                    </p>
+                  </div>
+                </div>
+
+                {selectedOrphanedJobIds.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setActionError(null);
+                      setOrphanConfirmInput('');
+                      setOrphanPurgeConfirmOpen(true);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Purge Selected Roles ({selectedOrphanedJobIds.length})</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300">
+                  <thead className="bg-gray-50 dark:bg-gray-800/70 text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider border-b border-gray-200 dark:border-gray-800">
+                    <tr>
+                      <th className="py-2.5 px-4 w-10">
+                        <input
+                          type="checkbox"
+                          checked={
+                            orphanedJobs.length > 0 &&
+                            orphanedJobs.every((j) => selectedOrphanedJobIds.includes(j.job_id))
+                          }
+                          onChange={() => {
+                            const allIds = orphanedJobs.map((j) => j.job_id);
+                            if (allIds.every((id) => selectedOrphanedJobIds.includes(id))) {
+                              setSelectedOrphanedJobIds([]);
+                            } else {
+                              setSelectedOrphanedJobIds(allIds);
+                            }
+                          }}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </th>
+                      <th className="py-2.5 px-4">Role Title</th>
+                      <th className="py-2.5 px-4">Company</th>
+                      <th className="py-2.5 px-4">Status</th>
+                      <th className="py-2.5 px-4">Applications</th>
+                      <th className="py-2.5 px-4">Safety Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    {orphanedJobs.map((job) => (
+                      <tr key={job.job_id} className="hover:bg-gray-50/70 dark:hover:bg-gray-800/50">
+                        <td className="py-2.5 px-4">
+                          <input
+                            type="checkbox"
+                            checked={selectedOrphanedJobIds.includes(job.job_id)}
+                            onChange={() => handleToggleSelectOrphan(job.job_id)}
+                            className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                          />
+                        </td>
+                        <td className="py-2.5 px-4 font-semibold text-gray-900 dark:text-white">
+                          {job.title}
+                        </td>
+                        <td className="py-2.5 px-4 text-gray-500">
+                          {job.company_name}
+                        </td>
+                        <td className="py-2.5 px-4">
+                          {getStatusBadge(job.status)}
+                        </td>
+                        <td className="py-2.5 px-4">
+                          {job.applications_count}
+                        </td>
+                        <td className="py-2.5 px-4">
+                          {getSafetyBadge(job.safety_classification)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODALS & DIALOGS                                                          */}
+      {/* ========================================================================= */}
 
       {/* Execution Result Modal */}
       {cleanupResult && (
@@ -755,14 +1412,30 @@ const ManageTestData = () => {
                 {cleanupResult.message}
               </p>
               <div className="pt-2 border-t border-gray-200 dark:border-gray-700 grid grid-cols-2 gap-2 text-[11px]">
-                <div>
-                  <span className="text-gray-400">Processed Companies:</span>{' '}
-                  <strong className="text-gray-900 dark:text-white">{cleanupResult.companies_processed}</strong>
-                </div>
-                <div>
-                  <span className="text-gray-400">Company IDs:</span>{' '}
-                  <strong className="text-gray-900 dark:text-white">{cleanupResult.company_ids?.join(', ')}</strong>
-                </div>
+                {cleanupResult.companies_processed !== undefined && (
+                  <div>
+                    <span className="text-gray-400">Companies Processed:</span>{' '}
+                    <strong className="text-gray-900 dark:text-white">{cleanupResult.companies_processed}</strong>
+                  </div>
+                )}
+                {cleanupResult.drives_processed !== undefined && (
+                  <div>
+                    <span className="text-gray-400">Drives Processed:</span>{' '}
+                    <strong className="text-gray-900 dark:text-white">{cleanupResult.drives_processed}</strong>
+                  </div>
+                )}
+                {cleanupResult.company_ids && cleanupResult.company_ids.length > 0 && (
+                  <div className="col-span-2">
+                    <span className="text-gray-400">Company IDs:</span>{' '}
+                    <strong className="text-gray-900 dark:text-white">{cleanupResult.company_ids.join(', ')}</strong>
+                  </div>
+                )}
+                {cleanupResult.circular_ids && cleanupResult.circular_ids.length > 0 && (
+                  <div className="col-span-2">
+                    <span className="text-gray-400">Circular IDs:</span>{' '}
+                    <strong className="text-gray-900 dark:text-white">{cleanupResult.circular_ids.join(', ')}</strong>
+                  </div>
+                )}
                 {cleanupResult.audit_log_id && (
                   <div className="col-span-2">
                     <span className="text-gray-400">Audit Log Recorded:</span>{' '}
@@ -806,7 +1479,7 @@ const ManageTestData = () => {
         </div>
       )}
 
-      {/* Archive Confirmation Modal */}
+      {/* Archive Confirmation Modal (Company Scope) */}
       {archiveModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full p-6 border border-gray-200 dark:border-gray-800 shadow-2xl space-y-4">
@@ -865,8 +1538,8 @@ const ManageTestData = () => {
               <button
                 type="button"
                 onClick={handleConfirmArchive}
-                disabled={isCleanupLoading}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                disabled={isCleanupLoading || selectedIds.length === 0}
+                className="px-5 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
               >
                 {isCleanupLoading ? (
                   <>
@@ -874,7 +1547,7 @@ const ManageTestData = () => {
                     <span>Archiving...</span>
                   </>
                 ) : (
-                  <span>Confirm & Archive</span>
+                  <span>Confirm Archive</span>
                 )}
               </button>
             </div>
@@ -882,20 +1555,20 @@ const ManageTestData = () => {
         </div>
       )}
 
-      {/* Destructive Purge Confirmation Modal */}
+      {/* Purge Confirmation Modal (Company Scope) */}
       {purgeModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full p-6 border border-red-200 dark:border-red-800 shadow-2xl space-y-4">
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full p-6 border border-gray-200 dark:border-gray-800 shadow-2xl space-y-4">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 rounded-xl">
                 <Trash2 className="w-6 h-6" />
               </div>
               <div>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                  Permanently Purge Test Records
+                  Confirm Permanent Purge
                 </h3>
-                <p className="text-xs text-red-600 dark:text-red-400 font-semibold">
-                  DESTRUCTIVE & IRREVERSIBLE OPERATION
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Permanent Removal of Candidate Records
                 </p>
               </div>
             </div>
@@ -975,6 +1648,98 @@ const ManageTestData = () => {
           </div>
         </div>
       )}
+
+      {/* Orphaned Roles Purge Confirmation Modal */}
+      {orphanPurgeConfirmOpen && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full p-6 border border-gray-200 dark:border-gray-800 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-red-100 dark:bg-red-950/80 text-red-600 dark:text-red-400 rounded-xl">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                  Purge Orphaned Test Roles
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Permanently remove {selectedOrphanedJobIds.length} unattached test job postings
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+              <p>
+                These roles have no active circulars attached and are safe to purge.
+              </p>
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-lg text-[11px] text-red-800 dark:text-red-300">
+                <p className="font-semibold">⚠️ Irreversible Deletion:</p>
+                <p>This action will permanently delete the selected job records and any test applications.</p>
+              </div>
+
+              <div className="space-y-1.5 pt-1">
+                <label className="block text-xs font-semibold text-gray-900 dark:text-white">
+                  Type <span className="font-mono bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-300 px-1 py-0.5 rounded">{CONFIRMATION_PHRASE}</span> to confirm:
+                </label>
+                <input
+                  type="text"
+                  value={orphanConfirmInput}
+                  onChange={(e) => setOrphanConfirmInput(e.target.value)}
+                  placeholder={CONFIRMATION_PHRASE}
+                  className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-red-300 dark:border-red-700 rounded-lg text-xs font-mono focus:outline-none focus:ring-2 focus:ring-red-500 dark:text-white"
+                />
+              </div>
+            </div>
+
+            {actionError && (
+              <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 rounded-lg text-xs text-red-700 dark:text-red-300">
+                {actionError}
+              </div>
+            )}
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setOrphanPurgeConfirmOpen(false)}
+                disabled={isCleanupLoading}
+                className="px-4 py-2 text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmOrphanPurge}
+                disabled={
+                  isCleanupLoading ||
+                  orphanConfirmInput.trim() !== CONFIRMATION_PHRASE ||
+                  selectedOrphanedJobIds.length === 0
+                }
+                className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+              >
+                {isCleanupLoading ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Purging...</span>
+                  </>
+                ) : (
+                  <span>Permanently Purge Roles</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Drive Cleanup Modal (Integrated Component) */}
+      <BulkDriveCleanupModal
+        isOpen={driveModalOpen}
+        onClose={() => setDriveModalOpen(false)}
+        selectedCircularIds={driveModalSelection}
+        onSuccess={async () => {
+          setSelectedDriveIds([]);
+          await loadPreview();
+          fetchCirculars();
+        }}
+      />
     </div>
   );
 };

@@ -474,6 +474,69 @@ async def confirm_external_application(
     return resp
 
 
+@router.post("/jobs/{job_id}/confirm-external", response_model=ApplicationResponse)
+async def confirm_external_job_application(
+    job_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Idempotently confirm that the student submitted an external application on the company's website
+    directly by job_id. If no application record exists yet, creates one via the server-authoritative
+    matching and eligibility workflow before recording the external confirmation.
+    """
+    if current_user.role != UserRole.STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only students can confirm external applications"
+        )
+
+    job = placement_service.get_job_posting(db, job_id)
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job posting #{job_id} not found"
+        )
+
+    if job.status != JobStatus.OPEN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job posting is no longer open for applications"
+        )
+
+    if not job.application_url or not job.application_url.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This job posting does not have an external application URL to confirm"
+        )
+
+    # Check if application already exists for this student and job
+    existing_app = db.query(Application).filter(
+        Application.student_id == current_user.id,
+        Application.job_posting_id == job_id
+    ).first()
+
+    if not existing_app:
+        app_create = ApplicationCreate(
+            job_posting_id=job_id,
+            notes="Applied via external company portal"
+        )
+        try:
+            existing_app = placement_service.create_application(db, app_create, current_user)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e)
+            )
+
+    confirmed_app = placement_service.confirm_external_application(db, existing_app, current_user)
+    resp = ApplicationResponse.model_validate(confirmed_app)
+    if confirmed_app.match_snapshot:
+        resp.has_low_match_warning = confirmed_app.match_snapshot.get("has_low_match_warning", False)
+        resp.low_match_warning = confirmed_app.match_snapshot.get("low_match_warning")
+    return resp
+
+
 # ============================================
 # SHORTLIST ENDPOINTS
 # ============================================
@@ -1435,19 +1498,20 @@ async def correct_round_outcome(
 
 
 # =============================================================================
-# SAFE TEST-DATA CLEANUP ENDPOINTS (Phase 3.4.1)
+# SAFE TEST-DATA CLEANUP ENDPOINTS (Phase 3.4.1 & Drive Bulk Management)
 # =============================================================================
 
 @router.get("/cleanup/preview", response_model=CleanupPreviewResponse)
 async def preview_recruitment_cleanup(
     company_ids: Optional[List[int]] = Query(None),
+    circular_ids: Optional[List[int]] = Query(None),
     pattern: Optional[str] = Query(None),
     include_all_candidates: bool = Query(True),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Preview candidates for safe recruitment test-data cleanup.
+    Preview candidates for safe recruitment test-data cleanup (companies or drives).
     Evaluates dependent record counts, safety classifications, and protection reasons.
     Preview operations are strictly read-only and never mutate records or delete storage files.
     Accessible only by Placement Officers and Admins.
@@ -1457,6 +1521,7 @@ async def preview_recruitment_cleanup(
         preview_data = placement_cleanup_service.generate_cleanup_preview(
             db=db,
             company_ids=company_ids,
+            circular_ids=circular_ids,
             pattern=pattern,
             include_all_candidates=include_all_candidates,
         )
@@ -1469,6 +1534,36 @@ async def preview_recruitment_cleanup(
         )
 
 
+@router.get("/cleanup/drives/preview", response_model=CleanupPreviewResponse)
+async def preview_recruitment_drives_cleanup(
+    circular_ids: Optional[List[int]] = Query(None),
+    drive_status: Optional[str] = Query(None, alias="status"),
+    include_all_candidates: bool = Query(True),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Preview recruitment drives for safe bulk test-data cleanup.
+    Evaluates dependent jobs, rounds, applications, batches, offers, and safety classifications.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        preview_data = placement_cleanup_service.generate_drives_cleanup_preview(
+            db=db,
+            circular_ids=circular_ids,
+            status=drive_status,
+            include_all_candidates=include_all_candidates,
+        )
+        return CleanupPreviewResponse(**preview_data)
+    except Exception as e:
+        logger.error(f"Error generating drives cleanup preview: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate drives cleanup preview: {str(e)}"
+        )
+
+
 @router.post("/cleanup/execute", response_model=CleanupExecuteResponse)
 async def execute_recruitment_cleanup(
     payload: CleanupExecuteRequest,
@@ -1477,7 +1572,7 @@ async def execute_recruitment_cleanup(
 ):
     """
     Execute explicit recruitment test-data cleanup ('archive' or 'purge').
-    Requires explicit company selection and strict safety re-validation at execution time.
+    Requires explicit company or drive selection and strict safety re-validation at execution time.
     'purge' mode requires confirmation_phrase='CONFIRM_PURGE_TEST_DATA'.
     Accessible only by Placement Officers and Admins.
     """
@@ -1486,6 +1581,8 @@ async def execute_recruitment_cleanup(
         result = placement_cleanup_service.execute_cleanup(
             db=db,
             company_ids=payload.company_ids,
+            circular_ids=payload.circular_ids,
+            orphaned_job_ids=payload.orphaned_job_ids,
             mode=payload.mode,
             confirmation_phrase=payload.confirmation_phrase,
             current_user=current_user,

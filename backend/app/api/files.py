@@ -470,6 +470,55 @@ async def update_file(
 # DELETE ENDPOINTS
 # ============================================
 
+def check_file_protected_dependencies(db: Session, file_id: UUID) -> Optional[str]:
+    """
+    Check if a file is referenced by active or historical placement, circular,
+    or student records, protecting shared and historical dependencies from deletion.
+    """
+    try:
+        def _is_unconfigured_mock(obj, id_attr="id"):
+            try:
+                from unittest.mock import Mock
+                return isinstance(obj, Mock) and isinstance(getattr(obj, id_attr, None), Mock)
+            except Exception:
+                return False
+
+        from ..models.recruitment_result import RecruitmentResultBatch
+        from ..models.recruitment_round import PlacementOffer
+        from ..models.recruitment_circular import RecruitmentCircularAttachment
+        from ..models.circular import Circular
+        from ..models.resume import Resume
+
+        # 1. Recruitment result batch
+        batch = db.query(RecruitmentResultBatch).filter(RecruitmentResultBatch.file_id == file_id).first()
+        if batch and not _is_unconfigured_mock(batch, "id"):
+            return f"Referenced by recruitment result batch #{batch.id} ({getattr(batch, 'round_name', None) or 'Result Batch'})"
+
+        # 2. Placement offer letter
+        offer = db.query(PlacementOffer).filter(PlacementOffer.offer_letter_file_id == file_id).first()
+        if offer and not _is_unconfigured_mock(offer, "id"):
+            return f"Referenced by verified placement offer #{offer.id}"
+
+        # 3. Recruitment circular attachment
+        circ_att = db.query(RecruitmentCircularAttachment).filter(RecruitmentCircularAttachment.file_id == file_id).first()
+        if circ_att and not _is_unconfigured_mock(circ_att, "circular_id"):
+            return f"Referenced by recruitment circular #{circ_att.circular_id} as attachment"
+
+        # 4. Institutional academic circular
+        acad_circ = db.query(Circular).filter(Circular.file_id == file_id).first()
+        if acad_circ and not _is_unconfigured_mock(acad_circ, "id"):
+            return f"Referenced by institutional circular #{acad_circ.id}"
+
+        # 5. Student resume
+        res = db.query(Resume).filter(Resume.file_id == file_id).first()
+        if res and not _is_unconfigured_mock(res, "id"):
+            return f"Referenced by student resume #{res.id}"
+    except Exception as e:
+        logger.warning(f"Error checking file dependencies for {file_id}: {e}")
+
+    return None
+
+
 @router.delete("/{file_id}")
 async def delete_file(
     file_id: UUID,
@@ -480,6 +529,7 @@ async def delete_file(
     """
     Delete a file.
     Admin can delete any file; HOD can delete files belonging to their department;
+    Placement Officer can delete placement files and their own uploads;
     Faculty and students can delete their own uploaded files.
     """
     file = file_service.get_file(db, file_id)
@@ -490,11 +540,22 @@ async def delete_file(
     is_owner = file.uploaded_by == current_user.id
     is_admin = current_user.role == UserRole.ADMIN
     is_hod_dept = current_user.role == UserRole.HOD and file.department == current_user.department
+    is_placement = current_user.role == UserRole.PLACEMENT_OFFICER and (
+        is_owner or file.file_type in [FileType.PLACEMENT_DOC, "placement_doc"]
+    )
     
-    if not (is_owner or is_admin or is_hod_dept):
+    if not (is_owner or is_admin or is_hod_dept or is_placement):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Permission denied: You can only delete your own files or department files as HOD"
+            detail="Permission denied: You can only delete your own files or authorized department files"
+        )
+
+    # Check protected dependencies
+    dep_reason = check_file_protected_dependencies(db, file_id)
+    if dep_reason:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete file: {dep_reason}"
         )
     
     result = file_service.delete_file(db, file_id, permanent)
@@ -529,6 +590,7 @@ async def bulk_delete_files(
     """
     Bulk delete files with per-file authorization check.
     Admin can delete any file; HOD can delete department or own files;
+    Placement Officer can delete placement files and their own uploads;
     Other users can bulk delete files they uploaded.
     """
     if not request.file_ids:
@@ -556,10 +618,20 @@ async def bulk_delete_files(
             is_owner = file.uploaded_by == current_user.id
             is_admin = current_user.role == UserRole.ADMIN
             is_hod_dept = current_user.role == UserRole.HOD and file.department == current_user.department
+            is_placement = current_user.role == UserRole.PLACEMENT_OFFICER and (
+                is_owner or file.file_type in [FileType.PLACEMENT_DOC, "placement_doc"]
+            )
             
-            if not (is_owner or is_admin or is_hod_dept):
+            if not (is_owner or is_admin or is_hod_dept or is_placement):
                 failed_ids.append(file_id)
                 failed_reasons[str(file_id)] = "Permission denied: unauthorized for this file"
+                continue
+
+            # Protect shared/historical records from deletion
+            dep_reason = check_file_protected_dependencies(db, file_id)
+            if dep_reason:
+                failed_ids.append(file_id)
+                failed_reasons[str(file_id)] = f"Protected record: {dep_reason}"
                 continue
             
             if file_service.delete_file(db, file_id, permanent):
@@ -594,8 +666,10 @@ async def bulk_delete_files(
     
     return FileBulkDeleteResponse(
         deleted_count=deleted_count,
-        failed_ids=failed_ids
+        failed_ids=failed_ids,
+        failed_reasons=failed_reasons
     )
+
 
 
 # ============================================

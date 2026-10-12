@@ -294,6 +294,85 @@ class TestExternalApplicationConfirmation(unittest.TestCase):
         )
         self.assertEqual(po_confirm_res.status_code, 403, f"Expected 403 Forbidden for PO, got {po_confirm_res.status_code}")
 
+    def test_10_student_confirm_external_by_job_id_idempotent(self):
+        """Verify POST /placement/jobs/{job_id}/confirm-external creates application, confirms it, and is idempotent."""
+        # 1. Create a job with external URL
+        job_res = requests.post(
+            f"{BASE_URL}/placement/jobs",
+            headers=self.po_headers,
+            json={
+                "company_id": self.company_id,
+                "title": f"Direct Ext Job Confirm {int(time.time())}",
+                "description": "Apply externally then confirm via job endpoint.",
+                "application_url": "https://careers.google.com/jobs/results/12345",
+                "required_skills": ["Python"],
+                "status": "draft"
+            }
+        )
+        self.assertEqual(job_res.status_code, 200)
+        job_id = job_res.json()["id"]
+
+        pub_res = requests.post(f"{BASE_URL}/placement/jobs/{job_id}/publish", headers=self.po_headers)
+        self.assertEqual(pub_res.status_code, 200)
+
+        # 2. Student confirms directly via job_id
+        confirm_res = requests.post(
+            f"{BASE_URL}/placement/jobs/{job_id}/confirm-external",
+            headers=self.s1_headers
+        )
+        self.assertEqual(confirm_res.status_code, 200, f"Expected 200, got {confirm_res.status_code}: {confirm_res.text}")
+        data = confirm_res.json()
+        self.assertTrue(data.get("is_external_confirmed"))
+        self.assertIsNotNone(data.get("external_applied_at"))
+        first_time = data["external_applied_at"]
+
+        # 3. Call again: idempotent behavior, timestamp preserved
+        confirm_res2 = requests.post(
+            f"{BASE_URL}/placement/jobs/{job_id}/confirm-external",
+            headers=self.s1_headers
+        )
+        self.assertEqual(confirm_res2.status_code, 200)
+        data2 = confirm_res2.json()
+        self.assertEqual(data2["external_applied_at"], first_time)
+
+    def test_11_confirm_by_job_id_no_external_url_rejected(self):
+        """Verify POST /placement/jobs/{job_id}/confirm-external fails with HTTP 400 when job has no external URL."""
+        no_url_job = requests.post(
+            f"{BASE_URL}/placement/jobs",
+            headers=self.po_headers,
+            json={
+                "company_id": self.company_id,
+                "title": f"Internal Only No Url {int(time.time())}",
+                "description": "Internal only job.",
+                "application_url": None,
+                "required_skills": ["Python"],
+                "status": "draft"
+            }
+        )
+        self.assertEqual(no_url_job.status_code, 200)
+        job_id = no_url_job.json()["id"]
+        requests.post(f"{BASE_URL}/placement/jobs/{job_id}/publish", headers=self.po_headers)
+
+        res = requests.post(
+            f"{BASE_URL}/placement/jobs/{job_id}/confirm-external",
+            headers=self.s1_headers
+        )
+        self.assertEqual(res.status_code, 400, f"Expected 400 Bad Request, got {res.status_code}: {res.text}")
+        self.assertIn("external application url", res.text.lower())
+
+    def test_12_confirm_by_job_id_non_student_rejected(self):
+        """Verify POST /placement/jobs/{job_id}/confirm-external fails with HTTP 403 for non-students."""
+        res = requests.post(
+            f"{BASE_URL}/placement/jobs/1/confirm-external",
+            headers=self.po_headers
+        )
+        self.assertEqual(res.status_code, 403, f"Expected 403 Forbidden for PO, got {res.status_code}")
+
+    def test_13_confirm_by_job_id_unauthenticated_rejected(self):
+        """Verify POST /placement/jobs/{job_id}/confirm-external fails with HTTP 401 when unauthenticated."""
+        res = requests.post(f"{BASE_URL}/placement/jobs/1/confirm-external")
+        self.assertEqual(res.status_code, 401, f"Expected 401 Unauthorized, got {res.status_code}")
+
 
 if __name__ == "__main__":
     unittest.main()

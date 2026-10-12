@@ -114,6 +114,11 @@ export const confirmExternalApplication = async (id) => {
   return response.data;
 };
 
+export const confirmExternalJobApplication = async (jobId) => {
+  const response = await api.post(`/placement/jobs/${jobId}/confirm-external`);
+  return response.data;
+};
+
 // ============================================
 // SHORTLIST ENDPOINTS
 // ============================================
@@ -370,6 +375,11 @@ export const getCircularDriveReport = async (circularId) => {
 
 export const getCleanupPreview = async (params = {}) => {
   const response = await api.get('/placement/cleanup/preview', { params });
+  return response.data;
+};
+
+export const getDrivesCleanupPreview = async (params = {}) => {
+  const response = await api.get('/placement/cleanup/drives/preview', { params });
   return response.data;
 };
 

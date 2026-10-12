@@ -179,6 +179,7 @@ function App() {
               <Route path="/placement/shortlist" element={<Shortlist />} />
               <Route path="/placement/reports" element={<Reports />} />
               <Route path="/placement/manage-test-data" element={<ManageTestData />} />
+              <Route path="/placement/files" element={<Navigate to="/files" replace />} />
             </Route>
 
             {/* Resume Analyzer Route (students, placement officers, admins) */}

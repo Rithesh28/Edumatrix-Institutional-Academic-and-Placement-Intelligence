@@ -14,6 +14,7 @@ import {
   getApplications,
   updateApplication,
   confirmExternalApplication,
+  confirmExternalJobApplication,
   createShortlist,
   getShortlists,
   removeFromShortlist,
@@ -56,6 +57,7 @@ import {
   respondToOffer,
   getCircularDriveReport,
   getCleanupPreview,
+  getDrivesCleanupPreview,
   executeCleanup,
 } from '../services/placementService';
 import { useAuthStore } from './authStore';
@@ -116,6 +118,7 @@ const usePlacementStore = create((set, get) => ({
 
   // Safe Placement Test-Data Cleanup State (Stage 3.4.1 / 3.4.5)
   cleanupPreview: null,
+  drivesCleanupPreview: null,
   isCleanupLoading: false,
   cleanupError: null,
   cleanupResult: null,
@@ -475,6 +478,30 @@ const usePlacementStore = create((set, get) => ({
         myApplications: state.myApplications.map((a) => (a.id === id ? { ...a, ...application } : a)),
         isLoading: false,
       }));
+      return application;
+    } catch (error) {
+      const errMsg = formatErrorMessage(error);
+      set({ isLoading: false, error: errMsg });
+      throw error;
+    }
+  },
+
+  confirmExternalJobApplication: async (jobId) => {
+    set({ isLoading: true, error: null });
+    try {
+      const application = await confirmExternalJobApplication(jobId);
+      set((state) => {
+        const exists = state.myApplications.some((a) => a.id === application.id || a.job_posting_id === jobId);
+        const updatedMyApps = exists
+          ? state.myApplications.map((a) => (a.id === application.id || a.job_posting_id === jobId ? { ...a, ...application } : a))
+          : [application, ...state.myApplications];
+
+        return {
+          applications: state.applications.map((a) => (a.id === application.id ? { ...a, ...application } : a)),
+          myApplications: updatedMyApps,
+          isLoading: false,
+        };
+      });
       return application;
     } catch (error) {
       const errMsg = formatErrorMessage(error);
@@ -1142,6 +1169,21 @@ const usePlacementStore = create((set, get) => ({
       throw error;
     }
   },
+
+  fetchDrivesCleanupPreview: async (params = {}) => {
+    set({ isCleanupLoading: true, cleanupError: null });
+    try {
+      const data = await getDrivesCleanupPreview(params);
+      set({ drivesCleanupPreview: data, isCleanupLoading: false });
+      return data;
+    } catch (error) {
+      const err = formatErrorMessage(error);
+      set({ cleanupError: err, isCleanupLoading: false });
+      throw error;
+    }
+  },
+
+  clearDrivesCleanupPreview: () => set({ drivesCleanupPreview: null }),
 
   runCleanup: async (payload) => {
     set({ isCleanupLoading: true, cleanupError: null, cleanupResult: null });

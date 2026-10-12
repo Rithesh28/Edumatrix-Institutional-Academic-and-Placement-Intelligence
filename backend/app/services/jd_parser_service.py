@@ -169,23 +169,40 @@ class JdParserService:
         ext = os.path.splitext(target_name)[1].lower()
 
         # Allowed extensions
-        if ext not in [".pdf", ".docx", ".doc", ".txt"]:
+        allowed_extensions = [".pdf", ".docx", ".doc", ".txt", ".png", ".jpg", ".jpeg", ".xlsx", ".xls", ".csv"]
+        if ext not in allowed_extensions:
             raise ValueError(
-                f"Unsupported file format '{ext}'. Please upload a PDF (.pdf), Word document (.docx), or plain text (.txt)."
+                f"Unsupported file format '{ext}'. Please upload a PDF (.pdf), Word document (.docx), plain text (.txt), "
+                f"recruitment image (.png, .jpg, .jpeg), or spreadsheet (.xlsx, .csv)."
             )
 
         extracted_text = ""
 
-        # 1. Primary extraction using text_extractor
-        try:
-            target_path = file_path or target_name
-            extracted = text_extractor.extract_text(target_path, content=content)
-            if extracted and extracted.get("success") and extracted.get("text"):
-                extracted_text = extracted.get("text", "").strip()
-        except Exception as e:
-            logger.warning(f"Primary text_extractor failed for {target_name}: {e}")
+        # 1. Image OCR handling
+        if ext in [".png", ".jpg", ".jpeg"]:
+            try:
+                if content:
+                    ocr_text = self.ocr_service.extract_text_from_image_bytes(content)
+                    if ocr_text and "Error:" not in ocr_text and "OCR Error:" not in ocr_text:
+                        extracted_text = ocr_text.strip()
+                elif file_path and os.path.exists(file_path):
+                    ocr_text = self.ocr_service.extract_text_from_image(file_path)
+                    if ocr_text and "Error:" not in ocr_text and "OCR Error:" not in ocr_text:
+                        extracted_text = ocr_text.strip()
+            except Exception as img_err:
+                logger.warning(f"Image OCR extraction failed for {target_name}: {img_err}")
 
-        # 2. PDF direct fallback if needed
+        # 2. Primary extraction using text_extractor (for docs, pdfs, sheets, text)
+        if not extracted_text:
+            try:
+                target_path = file_path or target_name
+                extracted = text_extractor.extract_text(target_path, content=content)
+                if extracted and extracted.get("success") and extracted.get("text"):
+                    extracted_text = extracted.get("text", "").strip()
+            except Exception as e:
+                logger.warning(f"Primary text_extractor failed for {target_name}: {e}")
+
+        # 3. PDF direct fallback if needed
         if not extracted_text and ext == ".pdf" and content:
             try:
                 import pdfplumber
@@ -201,7 +218,7 @@ class JdParserService:
             except Exception as e:
                 logger.warning(f"Direct pdfplumber fallback failed: {e}")
 
-        # 3. DOCX direct fallback if needed
+        # 4. DOCX direct fallback if needed
         if not extracted_text and ext in [".docx", ".doc"] and content:
             try:
                 import docx
@@ -217,7 +234,25 @@ class JdParserService:
             except Exception as e:
                 logger.warning(f"Direct docx fallback failed: {e}")
 
-        # 4. PDF scanned document detection and OCR fallback
+        # 5. Spreadsheet direct fallback if needed
+        if not extracted_text and ext in [".xlsx", ".xls", ".csv"] and content:
+            try:
+                from io import BytesIO
+                if ext == ".csv":
+                    import pandas as pd
+                    df = pd.read_csv(BytesIO(content))
+                    extracted_text = df.to_string(index=False)
+                elif ext in [".xlsx", ".xls"]:
+                    import pandas as pd
+                    dfs = pd.read_excel(BytesIO(content), sheet_name=None)
+                    sheet_texts = []
+                    for sheet_name, df in dfs.items():
+                        sheet_texts.append(f"Sheet: {sheet_name}\n" + df.to_string(index=False))
+                    extracted_text = "\n\n".join(sheet_texts)
+            except Exception as xl_err:
+                logger.warning(f"Spreadsheet fallback failed: {xl_err}")
+
+        # 6. PDF scanned document detection and OCR fallback
         if ext == ".pdf" and (not extracted_text or len(extracted_text.strip()) < 20):
             logger.info("PDF has insufficient selectable text; attempting OCR extraction...")
             try:
@@ -239,7 +274,7 @@ class JdParserService:
             except Exception as ocr_err:
                 logger.warning(f"OCR fallback attempt encountered an error: {ocr_err}")
 
-        # 5. Fallback for raw text bytes (plain text files only)
+        # 7. Fallback for raw text bytes (plain text files only)
         if not extracted_text and ext == ".txt" and content:
             try:
                 extracted_text = content.decode("utf-8", errors="ignore").strip()
@@ -249,8 +284,8 @@ class JdParserService:
         if not extracted_text or len(extracted_text.strip()) < 10:
             raise ValueError(
                 "Failed to extract readable text from the document. "
-                "The file may be a scanned image without OCR support or contains unreadable content. "
-                "Please upload a searchable text document or paste the text directly."
+                "The file may be a scanned image without readable text or contains unreadable content. "
+                "Please upload a searchable text document, recruitment document, or paste the text directly."
             )
 
         return extracted_text
@@ -352,6 +387,11 @@ class JdParserService:
         # 12. Description summary
         description = self._extract_description(norm_text, evidence)
 
+        # 13. External Application URL & Instructions
+        application_url, application_instructions = self._extract_application_url_and_instructions(
+            norm_text, evidence
+        )
+
         return JdParseResult({
             # Standard legacy & DB-compatible fields
             "title": title,
@@ -380,7 +420,8 @@ class JdParserService:
             "work_mode": work_mode,
             "bond_details": bond_details,
             "selection_rounds": selection_rounds,
-            "application_instructions": None,
+            "application_instructions": application_instructions,
+            "application_url": application_url,
 
             # Traceability & Verification
             "review_flags": review_flags,
@@ -1290,6 +1331,60 @@ class JdParserService:
         }
         return special_casing.get(skill.lower(), skill.title())
 
+    def _extract_application_url_and_instructions(
+        self,
+        text: str,
+        evidence: Dict[str, str]
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Extract external company application URL (http/https) and application instructions.
+        Looks for explicit links in context of application, registration, careers, portal, etc.
+        """
+        app_url: Optional[str] = None
+        instructions: Optional[str] = None
+
+        # 1. URL extraction
+        url_matches = list(re.finditer(r'https?://[^\s<>"\'\`,;)]+', text, re.IGNORECASE))
+        candidate_urls = []
+        for m in url_matches:
+            raw_url = m.group(0).rstrip('.,;:)]>')
+            if raw_url.startswith(('http://', 'https://')):
+                candidate_urls.append(raw_url)
+
+        if candidate_urls:
+            def score_url(u: str) -> int:
+                score = 0
+                u_lower = u.lower()
+                if any(k in u_lower for k in ["apply", "career", "job", "portal", "recruit", "form", "forms.gle"]):
+                    score += 10
+                u_idx = text.find(u)
+                if u_idx != -1:
+                    window = text[max(0, u_idx - 100):min(len(text), u_idx + len(u) + 100)].lower()
+                    if any(k in window for k in ["apply", "application", "register", "registration", "portal", "submit", "link", "url"]):
+                        score += 5
+                return score
+
+            best_url = max(candidate_urls, key=score_url)
+            app_url = best_url
+            evidence["application_url"] = app_url
+
+        # 2. Application instructions extraction
+        instruction_patterns = [
+            r'(?:how\s*to\s*apply|application\s*(?:process|procedure|instructions?|steps?|method)|mode\s*of\s*application)[\s:\-–—|]+([^\n\r]+(?:\n[^\n\r]+){0,2})',
+            r'(?:apply\s*(?:online|at|via|through)[\s:\-–—]+[^\n\r]+)',
+            r'(?:(?:interested\s*)?candidates?\s*(?:must|should|may|can|are\s*required\s*to)\s*apply[^\n\r]+)'
+        ]
+        for ip in instruction_patterns:
+            im = re.search(ip, text, re.IGNORECASE)
+            if im:
+                snippet = im.group(0).strip()
+                if len(snippet) > 10:
+                    instructions = snippet[:300].strip()
+                    evidence["application_instructions"] = instructions
+                    break
+
+        return app_url, instructions
+
     def _extract_description(self, text: str, evidence: Dict[str, str]) -> str:
         """Extract a readable summary excerpt of the job description."""
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
@@ -1338,6 +1433,7 @@ class JdParserService:
             "bond_details": None,
             "selection_rounds": [],
             "application_instructions": None,
+            "application_url": None,
             "review_flags": ["No text provided for analysis."],
             "field_evidence": {}
         })

@@ -476,6 +476,7 @@ class JdParseResponse(BaseModel):
     bond_details: Optional[str] = Field(None, description="Service agreement or bond duration/terms")
     selection_rounds: List[str] = Field(default=[], description="Selection / interview rounds")
     application_instructions: Optional[str] = Field(None, description="Instructions or portal link for applying")
+    application_url: Optional[str] = Field(None, description="Extracted external application URL (http/https)")
     
     # Verification, Auditability & Quality Assurance
     review_flags: List[str] = Field(

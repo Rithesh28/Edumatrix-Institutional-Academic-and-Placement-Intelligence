@@ -18,10 +18,15 @@ import {
   Sparkles,
   Database,
   Filter,
+  ListChecks,
+  Trash2,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
+import BulkDriveCleanupModal from './BulkDriveCleanupModal';
 
 const Circulars = () => {
   const navigate = useNavigate();
@@ -38,6 +43,11 @@ const Circulars = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [companyFilter, setCompanyFilter] = useState('all');
+
+  // Bulk drive management state
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedDriveIds, setSelectedDriveIds] = useState([]);
+  const [bulkCleanupModalOpen, setBulkCleanupModalOpen] = useState(false);
 
   const isPrivileged =
     user?.role === 'placement_officer' ||
@@ -152,6 +162,33 @@ const Circulars = () => {
     }
   };
 
+  const handleToggleSelectDrive = (id) => {
+    setSelectedDriveIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllFiltered = () => {
+    const visibleIds = filteredCirculars.map((c) => c.id);
+    const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedDriveIds.includes(id));
+    if (allSelected) {
+      setSelectedDriveIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedDriveIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleSelectByStatus = (status) => {
+    const statusIds = filteredCirculars
+      .filter((c) => c.status?.toLowerCase() === status.toLowerCase())
+      .map((c) => c.id);
+    setSelectedDriveIds((prev) => Array.from(new Set([...prev, ...statusIds])));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedDriveIds([]);
+  };
+
   const getStatusBadge = (status) => {
     switch (status?.toLowerCase()) {
       case 'published':
@@ -198,12 +235,41 @@ const Circulars = () => {
         <div className="flex items-center gap-3">
           {isPrivileged && (
             <button
+              onClick={() => {
+                setIsBulkMode(!isBulkMode);
+                if (isBulkMode) setSelectedDriveIds([]);
+              }}
+              className={`inline-flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer border ${
+                isBulkMode
+                  ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500'
+                  : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'
+              }`}
+              title="Bulk manage recruitment drives"
+            >
+              <ListChecks className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
+              <span>Bulk Manage Drives</span>
+            </button>
+          )}
+
+          {isPrivileged && (
+            <button
               onClick={() => navigate('/placement/manage-test-data')}
               className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer"
               title="Inspect candidates for safe recruitment test data cleanup"
             >
               <Database className="w-4 h-4 text-amber-500" />
               <span>Manage Test Data</span>
+            </button>
+          )}
+
+          {isPrivileged && (
+            <button
+              onClick={() => navigate('/files')}
+              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer"
+              title="Access institutional placement files and circular attachments"
+            >
+              <Paperclip className="w-4 h-4 text-indigo-500" />
+              <span>File Repository</span>
             </button>
           )}
 
@@ -307,6 +373,78 @@ const Circulars = () => {
         </div>
       </div>
 
+      {/* Bulk Management Toolbar */}
+      {isBulkMode && (
+        <div className="bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 p-4 rounded-xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-600 text-white flex items-center gap-1.5 shadow-sm">
+              <ListChecks className="w-3.5 h-3.5" />
+              {selectedDriveIds.length} drive(s) selected
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              of {filteredCirculars.length} filtered
+            </span>
+
+            <div className="flex flex-wrap items-center gap-1.5 ml-2">
+              <button
+                onClick={handleSelectAllFiltered}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 cursor-pointer shadow-xs"
+              >
+                {filteredCirculars.every((c) => selectedDriveIds.includes(c.id)) && filteredCirculars.length > 0
+                  ? 'Deselect All Filtered'
+                  : 'Select All Filtered'}
+              </button>
+              <button
+                onClick={() => handleSelectByStatus('draft')}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg bg-amber-100/70 dark:bg-amber-950/60 hover:bg-amber-200 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 cursor-pointer"
+              >
+                + Drafts ({filteredCirculars.filter((c) => c.status === 'draft').length})
+              </button>
+              <button
+                onClick={() => handleSelectByStatus('published')}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg bg-emerald-100/70 dark:bg-emerald-950/60 hover:bg-emerald-200 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 cursor-pointer"
+              >
+                + Published ({filteredCirculars.filter((c) => c.status === 'published').length})
+              </button>
+              <button
+                onClick={() => handleSelectByStatus('archived')}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 cursor-pointer"
+              >
+                + Archived ({filteredCirculars.filter((c) => c.status === 'archived').length})
+              </button>
+              {selectedDriveIds.length > 0 && (
+                <button
+                  onClick={handleClearSelection}
+                  className="px-2 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline cursor-pointer ml-1"
+                >
+                  Clear Selection
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setBulkCleanupModalOpen(true)}
+              disabled={selectedDriveIds.length === 0}
+              className="px-4 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Preview Cleanup ({selectedDriveIds.length})</span>
+            </button>
+            <button
+              onClick={() => {
+                setIsBulkMode(false);
+                setSelectedDriveIds([]);
+              }}
+              className="px-3 py-2 text-xs font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg cursor-pointer"
+            >
+              Exit
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Circulars List */}
       {isCircularsLoading && circulars.length === 0 ? (
         <div className="p-12 text-center text-gray-500 dark:text-gray-400">
@@ -339,113 +477,139 @@ const Circulars = () => {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4">
-          {filteredCirculars.map((circ) => (
-            <div
-              key={circ.id}
-              className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm hover:border-indigo-300 dark:hover:border-indigo-700 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4"
-            >
-              <div className="space-y-2 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3
-                    onClick={() => navigate(`/placement/circulars/${circ.id}`)}
-                    className="text-lg font-bold text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer"
-                  >
-                    {circ.title}
-                  </h3>
-                  {getStatusBadge(circ.status)}
-                </div>
-
-                <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-xs text-gray-500 dark:text-gray-400">
-                  <span className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-300">
-                    <Building2 className="w-3.5 h-3.5 text-indigo-500" />
-                    {circ.company_name || 'Company'}
-                  </span>
-
-                  {circ.drive_date && (
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                      Drive: {new Date(circ.drive_date).toLocaleDateString()}
-                    </span>
+          {filteredCirculars.map((circ) => {
+            const isSelected = selectedDriveIds.includes(circ.id);
+            return (
+              <div
+                key={circ.id}
+                className={`bg-white dark:bg-gray-900 rounded-xl border p-5 shadow-sm transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                  isBulkMode && isSelected
+                    ? 'border-indigo-500 bg-indigo-50/15 dark:bg-indigo-950/20 ring-1 ring-indigo-500'
+                    : 'border-gray-200 dark:border-gray-800 hover:border-indigo-300 dark:hover:border-indigo-700'
+                }`}
+              >
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  {isBulkMode && (
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleSelectDrive(circ.id);
+                      }}
+                      className="cursor-pointer pt-1 flex items-center flex-shrink-0"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => handleToggleSelectDrive(circ.id)}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-gray-300 dark:border-gray-700 cursor-pointer"
+                      />
+                    </div>
                   )}
 
-                  {circ.application_deadline && (
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-gray-400" />
-                      Deadline: {new Date(circ.application_deadline).toLocaleDateString()}
-                    </span>
-                  )}
-
-                  <span className="flex items-center gap-1">
-                    <Briefcase className="w-3.5 h-3.5 text-gray-400" />
-                    {circ.linked_jobs_count || circ.linked_jobs?.length || 0} linked role(s)
-                  </span>
-
-                  <span className="flex items-center gap-1">
-                    <Paperclip className="w-3.5 h-3.5 text-gray-400" />
-                    {circ.attachments_count || circ.attachments?.length || 0} attachment(s)
-                  </span>
-                </div>
-
-                {circ.summary && (
-                  <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
-                    {circ.summary}
-                  </p>
-                )}
-
-                {circ.branch_eligibility && circ.branch_eligibility.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1 pt-1">
-                    <span className="text-[11px] text-gray-400 flex items-center gap-0.5 mr-1">
-                      <GraduationCap className="w-3 h-3" /> Branches:
-                    </span>
-                    {circ.branch_eligibility.map((branch, idx) => (
-                      <span
-                        key={idx}
-                        className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded text-[11px]"
+                  <div className="space-y-2 flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3
+                        onClick={() => navigate(`/placement/circulars/${circ.id}`)}
+                        className="text-lg font-bold text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer"
                       >
-                        {branch}
+                        {circ.title}
+                      </h3>
+                      {getStatusBadge(circ.status)}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-xs text-gray-500 dark:text-gray-400">
+                      <span className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-300">
+                        <Building2 className="w-3.5 h-3.5 text-indigo-500" />
+                        {circ.company_name || 'Company'}
                       </span>
-                    ))}
+
+                      {circ.drive_date && (
+                        <span className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                          Drive: {new Date(circ.drive_date).toLocaleDateString()}
+                        </span>
+                      )}
+
+                      {circ.application_deadline && (
+                        <span className="flex items-center gap-1">
+                          <Clock className="w-3.5 h-3.5 text-gray-400" />
+                          Deadline: {new Date(circ.application_deadline).toLocaleDateString()}
+                        </span>
+                      )}
+
+                      <span className="flex items-center gap-1">
+                        <Briefcase className="w-3.5 h-3.5 text-gray-400" />
+                        {circ.linked_jobs_count || circ.linked_jobs?.length || 0} linked role(s)
+                      </span>
+
+                      <span className="flex items-center gap-1">
+                        <Paperclip className="w-3.5 h-3.5 text-gray-400" />
+                        {circ.attachments_count || circ.attachments?.length || 0} attachment(s)
+                      </span>
+                    </div>
+
+                    {circ.summary && (
+                      <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-2">
+                        {circ.summary}
+                      </p>
+                    )}
+
+                    {circ.branch_eligibility && circ.branch_eligibility.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1 pt-1">
+                        <span className="text-[11px] text-gray-400 flex items-center gap-0.5 mr-1">
+                          <GraduationCap className="w-3 h-3" /> Branches:
+                        </span>
+                        {circ.branch_eligibility.map((branch, idx) => (
+                          <span
+                            key={idx}
+                            className="px-2 py-0.5 bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded text-[11px]"
+                          >
+                            {branch}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </div>
 
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-gray-100 dark:border-gray-800 flex-shrink-0">
-                <button
-                  onClick={() => navigate(`/placement/circulars/${circ.id}`)}
-                  className="px-3 py-1.5 text-xs font-semibold bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
-                >
-                  <Eye className="w-3.5 h-3.5" /> View
-                </button>
-
-                {circ.status === 'draft' && (
-                  <>
-                    <button
-                      onClick={() => navigate(`/placement/circulars/${circ.id}/edit`)}
-                      className="px-3 py-1.5 text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" /> Edit
-                    </button>
-                    <button
-                      onClick={() => handleOpenPublish(circ)}
-                      className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" /> Publish
-                    </button>
-                  </>
-                )}
-
-                {circ.status === 'published' && (
+                {/* Action Buttons */}
+                <div className="flex items-center gap-2 pt-2 md:pt-0 border-t md:border-t-0 border-gray-100 dark:border-gray-800 flex-shrink-0">
                   <button
-                    onClick={() => handleArchive(circ.id, circ.title)}
-                    className="px-3 py-1.5 text-xs font-semibold bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                    onClick={() => navigate(`/placement/circulars/${circ.id}`)}
+                    className="px-3 py-1.5 text-xs font-semibold bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
                   >
-                    <Archive className="w-3.5 h-3.5" /> Archive
+                    <Eye className="w-3.5 h-3.5" /> View
                   </button>
-                )}
+
+                  {circ.status === 'draft' && (
+                    <>
+                      <button
+                        onClick={() => navigate(`/placement/circulars/${circ.id}/edit`)}
+                        className="px-3 py-1.5 text-xs font-semibold bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" /> Edit
+                      </button>
+                      <button
+                        onClick={() => handleOpenPublish(circ)}
+                        className="px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center gap-1 cursor-pointer transition-colors shadow-sm"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" /> Publish
+                      </button>
+                    </>
+                  )}
+
+                  {circ.status === 'published' && (
+                    <button
+                      onClick={() => handleArchive(circ.id, circ.title)}
+                      className="px-3 py-1.5 text-xs font-semibold bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                    >
+                      <Archive className="w-3.5 h-3.5" /> Archive
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -556,6 +720,18 @@ const Circulars = () => {
           </div>
         </div>
       )}
+
+      {/* Bulk Drive Cleanup Modal */}
+      <BulkDriveCleanupModal
+        isOpen={bulkCleanupModalOpen}
+        onClose={() => setBulkCleanupModalOpen(false)}
+        selectedCircularIds={selectedDriveIds}
+        onSuccess={() => {
+          setSelectedDriveIds([]);
+          setIsBulkMode(false);
+          fetchCirculars();
+        }}
+      />
     </div>
   );
 };

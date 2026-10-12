@@ -9,6 +9,7 @@ import {
   TrendingUp,
   FileText,
   Clock,
+  Paperclip,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import StatsCard from '../../components/placement/StatsCard';
@@ -176,7 +177,7 @@ const Dashboard = () => {
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
         <button
           onClick={() => navigate('/placement/resume-analyzer')}
           className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950/40 dark:to-indigo-950/40 p-4 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800/60 hover:shadow-md hover:border-purple-400 dark:hover:border-purple-600 transition-all text-left group cursor-pointer"
@@ -185,7 +186,7 @@ const Dashboard = () => {
             <FileText className="w-5 h-5" />
           </div>
           <h3 className="font-semibold text-gray-900 dark:text-white">AI Resume Analyzer</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Upload & score resumes with ATS insights</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Upload & score resumes</p>
         </button>
         <button
           onClick={() => navigate('/placement/companies')}
@@ -218,6 +219,14 @@ const Dashboard = () => {
           <UserCheck className="w-6 h-6 text-orange-600 mb-2" />
           <h3 className="font-medium text-gray-900 dark:text-white">Shortlists</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">View shortlisted students</p>
+        </button>
+        <button
+          onClick={() => navigate('/files')}
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all text-left cursor-pointer"
+        >
+          <Paperclip className="w-6 h-6 text-indigo-600 mb-2" />
+          <h3 className="font-medium text-gray-900 dark:text-white">Institutional Files</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Manage placement files</p>
         </button>
       </div>
 

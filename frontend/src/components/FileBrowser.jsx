@@ -88,10 +88,20 @@ const FileBrowser = () => {
     setIsDeleting(true);
     try {
       const result = await bulkDeleteSelected(permanentDelete);
-      if (result.failed_ids && result.failed_ids.length > 0) {
-        toast.error(`Deleted ${result.deleted_count} files, but ${result.failed_ids.length} files failed.`);
+      if (result.deleted_count > 0 && (!result.failed_ids || result.failed_ids.length === 0)) {
+        toast.success(`Successfully deleted ${result.deleted_count} file(s).`);
+      } else if (result.deleted_count > 0 && result.failed_ids && result.failed_ids.length > 0) {
+        toast.error(
+          `Partial Success: Deleted ${result.deleted_count} file(s), but ${result.failed_ids.length} file(s) failed (unauthorized or protected records).`,
+          { duration: 6000 }
+        );
+      } else if (result.deleted_count === 0 && result.failed_ids && result.failed_ids.length > 0) {
+        toast.error(
+          `Deletion Failed: None of the ${result.failed_ids.length} selected files could be deleted (unauthorized or protected dependencies).`,
+          { duration: 6000 }
+        );
       } else {
-        toast.success(`Successfully deleted ${result.deleted_count} files.`);
+        toast.info('No files were deleted.');
       }
       setShowBulkDeleteModal(false);
     } catch (err) {
@@ -100,6 +110,7 @@ const FileBrowser = () => {
       setIsDeleting(false);
     }
   };
+
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-4">

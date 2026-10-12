@@ -249,6 +249,20 @@ function StudentJobs() {
   // Helper for application status label formatting
   const getApplicationStatusBadge = (app) => {
     if (!app) return null;
+    const isExtConfirmed = Boolean(app.external_applied_at || app.is_external_confirmed);
+
+    if (isExtConfirmed && app.status === 'applied') {
+      return (
+        <span
+          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold border bg-emerald-100 dark:bg-emerald-950/70 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+          title={`External Application Confirmed (Student-Reported): ${app.external_applied_at ? new Date(app.external_applied_at).toLocaleString() : 'Recorded'}`}
+        >
+          <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+          <span>CONFIRMED (EXTERNAL)</span>
+        </span>
+      );
+    }
+
     const statusText = app.status ? app.status.replace(/_/g, ' ').toUpperCase() : 'APPLIED';
 
     let colorClasses = 'bg-blue-100 dark:bg-blue-950/70 text-blue-800 dark:text-blue-300 border-blue-200 dark:border-blue-800';
@@ -761,6 +775,11 @@ function StudentJobs() {
 
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       {isApplied && getApplicationStatusBadge(application)}
+                      {job.application_url && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          External Portal
+                        </span>
+                      )}
                       <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                         ● Open
                       </span>
