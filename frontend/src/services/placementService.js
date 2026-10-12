@@ -374,12 +374,28 @@ export const getCircularDriveReport = async (circularId) => {
 // ============================================
 
 export const getCleanupPreview = async (params = {}) => {
-  const response = await api.get('/placement/cleanup/preview', { params });
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((v) => searchParams.append(key, v));
+    } else if (value !== undefined && value !== null) {
+      searchParams.append(key, value);
+    }
+  });
+  const response = await api.get('/placement/cleanup/preview', { params: searchParams });
   return response.data;
 };
 
 export const getDrivesCleanupPreview = async (params = {}) => {
-  const response = await api.get('/placement/cleanup/drives/preview', { params });
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((v) => searchParams.append(key, v));
+    } else if (value !== undefined && value !== null) {
+      searchParams.append(key, value);
+    }
+  });
+  const response = await api.get('/placement/cleanup/drives/preview', { params: searchParams });
   return response.data;
 };
 

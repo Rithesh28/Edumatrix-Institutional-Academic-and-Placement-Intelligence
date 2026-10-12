@@ -754,6 +754,114 @@ class TestBulkDriveCleanup(unittest.TestCase):
         # Verify job is deleted
         self.assertIsNone(self.db.query(JobPosting).filter(JobPosting.id == orphan_job.id).first())
 
+    # =========================================================================
+    # 10. SAFE ARCHIVE SHARED JOB PRESERVATION & EXACT COUNTS
+    # =========================================================================
+
+    def test_10_safe_archive_shared_job_preservation(self):
+        """Safe Archive of recruitment drives closes exclusive jobs and preserves jobs shared with other active drives."""
+        sub_ts = int(time.time() * 1000)
+
+        comp = Company(name=f"Drive Shared Corp {sub_ts}", is_active=True)
+        self.db.add(comp)
+        self.db.commit()
+        self.db.refresh(comp)
+        self.created_company_ids.append(comp.id)
+
+        # Drive 1 (Target of archive)
+        circ_1 = RecruitmentCircular(
+            company_id=comp.id,
+            title=f"Archive Drive 1 {sub_ts}",
+            status=RecruitmentCircularStatus.PUBLISHED,
+            created_by=self.officer.id,
+        )
+        # Drive 2 (Target of archive)
+        circ_2 = RecruitmentCircular(
+            company_id=comp.id,
+            title=f"Archive Drive 2 {sub_ts}",
+            status=RecruitmentCircularStatus.PUBLISHED,
+            created_by=self.officer.id,
+        )
+        # Drive 3 (External active drive NOT in cleanup)
+        circ_3 = RecruitmentCircular(
+            company_id=comp.id,
+            title=f"Active Drive 3 {sub_ts}",
+            status=RecruitmentCircularStatus.PUBLISHED,
+            created_by=self.officer.id,
+        )
+        self.db.add_all([circ_1, circ_2, circ_3])
+        self.db.commit()
+        self.created_circular_ids.extend([circ_1.id, circ_2.id, circ_3.id])
+
+        # Job 1: Exclusive to Drive 1
+        job_exclusive = JobPosting(company_id=comp.id, title=f"Exclusive Job {sub_ts}", status=JobStatus.OPEN)
+        # Job 2: Shared between Drive 2 and Drive 3 (active)
+        job_shared = JobPosting(company_id=comp.id, title=f"Shared Job {sub_ts}", status=JobStatus.OPEN)
+        self.db.add_all([job_exclusive, job_shared])
+        self.db.commit()
+        self.created_job_ids.extend([job_exclusive.id, job_shared.id])
+
+        link1 = RecruitmentCircularJob(circular_id=circ_1.id, job_posting_id=job_exclusive.id)
+        link2 = RecruitmentCircularJob(circular_id=circ_2.id, job_posting_id=job_shared.id)
+        link3 = RecruitmentCircularJob(circular_id=circ_3.id, job_posting_id=job_shared.id)
+        self.db.add_all([link1, link2, link3])
+        self.db.commit()
+
+        # Execute Safe Archive on Drive 1 and Drive 2
+        res = self.client.post(
+            "/placement/cleanup/execute",
+            json={"circular_ids": [circ_1.id, circ_2.id], "mode": "archive"},
+            headers=self.officer_headers,
+        )
+        self.assertEqual(res.status_code, 200, res.text)
+        data = res.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["drives_processed"], 2)
+        self.assertEqual(data["records_affected"]["drives_archived"], 2)
+        self.assertEqual(data["records_affected"]["jobs_closed"], 1)
+        self.assertEqual(data["records_affected"]["shared_jobs_preserved"], 1)
+
+        self.db.expire_all()
+        # Verify Drive 1 and Drive 2 are ARCHIVED
+        ref_circ1 = self.db.query(RecruitmentCircular).filter(RecruitmentCircular.id == circ_1.id).first()
+        self.assertEqual(ref_circ1.status, RecruitmentCircularStatus.ARCHIVED)
+        ref_circ2 = self.db.query(RecruitmentCircular).filter(RecruitmentCircular.id == circ_2.id).first()
+        self.assertEqual(ref_circ2.status, RecruitmentCircularStatus.ARCHIVED)
+
+        # Drive 3 remains PUBLISHED
+        ref_circ3 = self.db.query(RecruitmentCircular).filter(RecruitmentCircular.id == circ_3.id).first()
+        self.assertEqual(ref_circ3.status, RecruitmentCircularStatus.PUBLISHED)
+
+        # Job 1 (exclusive) is CLOSED
+        ref_job1 = self.db.query(JobPosting).filter(JobPosting.id == job_exclusive.id).first()
+        self.assertEqual(ref_job1.status, JobStatus.CLOSED)
+
+        # Job 2 (shared with Drive 3) remains OPEN
+        ref_job2 = self.db.query(JobPosting).filter(JobPosting.id == job_shared.id).first()
+        self.assertEqual(ref_job2.status, JobStatus.OPEN, "Shared job must remain OPEN while Drive 3 is active!")
+
+    # =========================================================================
+    # 11. DRIVE PAGINATION AND STATUS FILTERING
+    # =========================================================================
+
+    def test_11_drive_pagination_and_status_filtering(self):
+        """Recruitment circulars endpoint supports limit up to 1000 and status filtering."""
+        res_pub = self.client.get(
+            "/placement/circulars?status=published&limit=500",
+            headers=self.officer_headers,
+        )
+        self.assertEqual(res_pub.status_code, 200)
+        pub_drives = res_pub.json()
+        self.assertTrue(all(d["status"] == "published" for d in pub_drives))
+
+        res_arch = self.client.get(
+            "/placement/circulars?status=archived&limit=500",
+            headers=self.officer_headers,
+        )
+        self.assertEqual(res_arch.status_code, 200)
+        arch_drives = res_arch.json()
+        self.assertTrue(all(d["status"] == "archived" for d in arch_drives))
+
 
 if __name__ == "__main__":
     unittest.main()

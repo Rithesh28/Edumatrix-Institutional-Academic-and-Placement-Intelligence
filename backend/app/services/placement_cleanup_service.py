@@ -302,11 +302,13 @@ class PlacementCleanupService:
         jobs = db.query(JobPosting).filter(JobPosting.company_id == comp.id).all()
         job_ids = [j.id for j in jobs]
         jobs_count = len(jobs)
+        linked_job_titles = [j.title for j in jobs]
 
         # 2. Circulars & Links
         circulars = db.query(RecruitmentCircular).filter(RecruitmentCircular.company_id == comp.id).all()
         circular_ids = [c.id for c in circulars]
         circulars_count = len(circulars)
+        linked_circular_titles = [c.title for c in circulars]
 
         circular_job_links_count = 0
         if circular_ids or job_ids:
@@ -455,13 +457,30 @@ class PlacementCleanupService:
                 f"References {shared_files_count} file(s) shared with other system records (protected from deletion)"
             )
 
+        # Check if any job of this company is referenced by a drive belonging to another company
+        external_circular_links = []
+        if job_ids:
+            external_circular_links = db.query(RecruitmentCircularJob, RecruitmentCircular).join(
+                RecruitmentCircular, RecruitmentCircularJob.circular_id == RecruitmentCircular.id
+            ).filter(
+                RecruitmentCircularJob.job_posting_id.in_(job_ids),
+                RecruitmentCircular.company_id != comp.id,
+            ).all()
+        if external_circular_links:
+            ext_drive_titles = [c.title for _, c in external_circular_links]
+            protection_reasons.append(
+                f"Contains job(s) referenced by other company drive(s): {', '.join(ext_drive_titles[:2])}"
+            )
+
         if not self.is_candidate_test_name(comp.name):
             protection_reasons.append(
                 "Company name lacks test/timestamp patterns and appears genuine"
             )
 
         # Classification decision
-        if accepted_offers_count > 0 or has_genuine_student_impact:
+        if external_circular_links:
+            safety_classification = "REQUIRES_ARCHIVE"
+        elif accepted_offers_count > 0 or has_genuine_student_impact:
             if not self.is_candidate_test_name(comp.name):
                 safety_classification = "PROTECTED_GENUINE"
             else:
@@ -470,6 +489,24 @@ class PlacementCleanupService:
             safety_classification = "REQUIRES_ARCHIVE"
         else:
             safety_classification = "SAFE_TO_PURGE"
+
+        records_breakdown = {
+            "companies_to_delete": 1,
+            "jobs_to_delete": jobs_count,
+            "circulars_to_delete": circulars_count,
+            "applications_to_delete": applications_count,
+            "rounds_to_delete": rounds_count,
+            "outcomes_to_delete": outcomes_count,
+            "batches_to_delete": result_batches_count,
+            "result_items_to_delete": result_items_count,
+            "offers_to_delete": offers_count,
+            "files_to_delete": max(0, files_count - shared_files_count),
+            "shared_files_preserved": shared_files_count,
+            "companies_to_archive": 1,
+            "jobs_to_close": jobs_count,
+            "circulars_to_archive": circulars_count,
+            "batches_to_archive": result_batches_count,
+        }
 
         return {
             "company_id": comp.id,
@@ -497,6 +534,10 @@ class PlacementCleanupService:
             "safety_classification": safety_classification,
             "protection_reasons": protection_reasons,
             "affected_student_count": len(student_ids_set),
+            "can_purge": safety_classification == "SAFE_TO_PURGE",
+            "linked_job_titles": linked_job_titles,
+            "linked_circular_titles": linked_circular_titles,
+            "records_breakdown": records_breakdown,
         }
 
     def _is_file_shared_outside_context(
@@ -1007,25 +1048,38 @@ class PlacementCleanupService:
             RecruitmentCircular.id.in_(circ_ids)
         ).update({"status": RecruitmentCircularStatus.ARCHIVED}, synchronize_session=False)
 
-        # 2. Find exclusive jobs and close them
+        # 2. Find eligible jobs linked to the archived drives and close them
+        # For a job shared by multiple drives, close it only if doing so is safe for every linked drive.
+        # Do not alter another drive's active recruitment process without an explicit, safe policy.
         links = db.query(RecruitmentCircularJob).filter(
             RecruitmentCircularJob.circular_id.in_(circ_ids)
         ).all() if circ_ids else []
         linked_job_ids = list(set([l.job_posting_id for l in links]))
 
-        exclusive_job_ids = []
+        jobs_to_close_ids = []
+        shared_jobs_preserved = 0
         for jid in linked_job_ids:
-            other_count = db.query(RecruitmentCircularJob).filter(
+            job = db.query(JobPosting).filter(JobPosting.id == jid).first()
+            if not job or job.status == JobStatus.CLOSED:
+                continue
+
+            active_ext_drive_count = db.query(RecruitmentCircularJob).join(
+                RecruitmentCircular, RecruitmentCircularJob.circular_id == RecruitmentCircular.id
+            ).filter(
                 RecruitmentCircularJob.job_posting_id == jid,
                 ~RecruitmentCircularJob.circular_id.in_(circ_ids),
+                RecruitmentCircular.status != RecruitmentCircularStatus.ARCHIVED,
             ).count()
-            if other_count == 0:
-                exclusive_job_ids.append(jid)
+
+            if active_ext_drive_count > 0:
+                shared_jobs_preserved += 1
+            else:
+                jobs_to_close_ids.append(jid)
 
         jobs_affected = 0
-        if exclusive_job_ids:
+        if jobs_to_close_ids:
             jobs_affected = db.query(JobPosting).filter(
-                JobPosting.id.in_(exclusive_job_ids)
+                JobPosting.id.in_(jobs_to_close_ids)
             ).update({"status": JobStatus.CLOSED}, synchronize_session=False)
 
         db.flush()
@@ -1041,6 +1095,7 @@ class PlacementCleanupService:
                 "circular_ids": circ_ids,
                 "drives_archived": drives_affected,
                 "jobs_closed": jobs_affected,
+                "shared_jobs_preserved": shared_jobs_preserved,
             },
         )
 
@@ -1054,6 +1109,7 @@ class PlacementCleanupService:
             "records_affected": {
                 "drives_archived": drives_affected,
                 "jobs_closed": jobs_affected,
+                "shared_jobs_preserved": shared_jobs_preserved,
             },
             "audit_log_id": audit_entry.id if audit_entry else None,
             "message": f"Successfully archived {drives_affected} recruitment drive(s) and closed {jobs_affected} exclusive job(s).",
@@ -1377,10 +1433,35 @@ class PlacementCleanupService:
             {"is_active": False}, synchronize_session=False
         )
 
-        # 2. Close Job Postings
-        jobs_affected = db.query(JobPosting).filter(JobPosting.company_id.in_(comp_ids)).update(
-            {"status": JobStatus.CLOSED}, synchronize_session=False
-        )
+        # 2. Close eligible Job Postings
+        # For a job shared by multiple drives, close it only if doing so is safe for every linked drive.
+        # Do not alter another drive's active recruitment process.
+        candidate_jobs = db.query(JobPosting).filter(
+            JobPosting.company_id.in_(comp_ids),
+            JobPosting.status != JobStatus.CLOSED,
+        ).all()
+
+        jobs_to_close_ids = []
+        shared_jobs_preserved = 0
+        for job in candidate_jobs:
+            active_ext_drive_count = db.query(RecruitmentCircularJob).join(
+                RecruitmentCircular, RecruitmentCircularJob.circular_id == RecruitmentCircular.id
+            ).filter(
+                RecruitmentCircularJob.job_posting_id == job.id,
+                ~RecruitmentCircular.company_id.in_(comp_ids),
+                RecruitmentCircular.status != RecruitmentCircularStatus.ARCHIVED,
+            ).count()
+
+            if active_ext_drive_count > 0:
+                shared_jobs_preserved += 1
+            else:
+                jobs_to_close_ids.append(job.id)
+
+        jobs_affected = 0
+        if jobs_to_close_ids:
+            jobs_affected = db.query(JobPosting).filter(
+                JobPosting.id.in_(jobs_to_close_ids)
+            ).update({"status": JobStatus.CLOSED}, synchronize_session=False)
 
         # 3. Archive Recruitment Circulars
         circulars_affected = db.query(RecruitmentCircular).filter(
@@ -1406,6 +1487,7 @@ class PlacementCleanupService:
                 "company_ids": comp_ids,
                 "companies_count": len(comp_ids),
                 "jobs_closed": jobs_affected,
+                "shared_jobs_preserved": shared_jobs_preserved,
                 "circulars_archived": circulars_affected,
                 "result_batches_archived": batches_affected,
             },
@@ -1421,11 +1503,12 @@ class PlacementCleanupService:
             "records_affected": {
                 "companies_deactivated": len(comp_ids),
                 "jobs_closed": jobs_affected,
+                "shared_jobs_preserved": shared_jobs_preserved,
                 "circulars_archived": circulars_affected,
                 "result_batches_archived": batches_affected,
             },
             "audit_log_id": audit_entry.id if audit_entry else None,
-            "message": f"Successfully archived {len(comp_ids)} companies, {jobs_affected} jobs, and {circulars_affected} circulars.",
+            "message": f"Successfully archived {len(comp_ids)} company(ies), closed {jobs_affected} job(s), and archived {circulars_affected} recruitment drive(s).",
         }
 
     def _execute_purge(

@@ -12,7 +12,7 @@ Provides REST API for placement operations:
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, File, UploadFile
 from sqlalchemy.orm import Session, joinedload, subqueryload
-from typing import List, Optional
+from typing import List, Optional, Any
 import io
 import csv
 from datetime import datetime
@@ -96,7 +96,7 @@ async def create_company(
 async def get_companies(
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=200),
+    limit: int = Query(200, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1501,10 +1501,25 @@ async def correct_round_outcome(
 # SAFE TEST-DATA CLEANUP ENDPOINTS (Phase 3.4.1 & Drive Bulk Management)
 # =============================================================================
 
+def _normalize_id_list(raw_ids: Optional[List[Any]]) -> Optional[List[int]]:
+    if not raw_ids:
+        return None
+    res = []
+    for item in raw_ids:
+        if isinstance(item, int):
+            res.append(item)
+        elif isinstance(item, str):
+            for part in item.split(","):
+                part_clean = part.strip()
+                if part_clean.isdigit():
+                    res.append(int(part_clean))
+    return res or None
+
+
 @router.get("/cleanup/preview", response_model=CleanupPreviewResponse)
 async def preview_recruitment_cleanup(
-    company_ids: Optional[List[int]] = Query(None),
-    circular_ids: Optional[List[int]] = Query(None),
+    company_ids: Optional[List[str]] = Query(None),
+    circular_ids: Optional[List[str]] = Query(None),
     pattern: Optional[str] = Query(None),
     include_all_candidates: bool = Query(True),
     current_user: User = Depends(get_current_user),
@@ -1518,10 +1533,12 @@ async def preview_recruitment_cleanup(
     """
     check_placement_officer_or_admin(current_user)
     try:
+        norm_company_ids = _normalize_id_list(company_ids)
+        norm_circular_ids = _normalize_id_list(circular_ids)
         preview_data = placement_cleanup_service.generate_cleanup_preview(
             db=db,
-            company_ids=company_ids,
-            circular_ids=circular_ids,
+            company_ids=norm_company_ids,
+            circular_ids=norm_circular_ids,
             pattern=pattern,
             include_all_candidates=include_all_candidates,
         )
@@ -1536,7 +1553,7 @@ async def preview_recruitment_cleanup(
 
 @router.get("/cleanup/drives/preview", response_model=CleanupPreviewResponse)
 async def preview_recruitment_drives_cleanup(
-    circular_ids: Optional[List[int]] = Query(None),
+    circular_ids: Optional[List[str]] = Query(None),
     drive_status: Optional[str] = Query(None, alias="status"),
     include_all_candidates: bool = Query(True),
     current_user: User = Depends(get_current_user),
@@ -1549,9 +1566,10 @@ async def preview_recruitment_drives_cleanup(
     """
     check_placement_officer_or_admin(current_user)
     try:
+        norm_circular_ids = _normalize_id_list(circular_ids)
         preview_data = placement_cleanup_service.generate_drives_cleanup_preview(
             db=db,
-            circular_ids=circular_ids,
+            circular_ids=norm_circular_ids,
             status=drive_status,
             include_all_candidates=include_all_candidates,
         )

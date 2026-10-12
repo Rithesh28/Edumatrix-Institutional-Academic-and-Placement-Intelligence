@@ -41,7 +41,7 @@ const Circulars = () => {
   } = usePlacementStore();
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('active'); // 'active' | 'published' | 'draft' | 'archived' | 'all'
   const [companyFilter, setCompanyFilter] = useState('all');
 
   // Bulk drive management state
@@ -81,7 +81,11 @@ const Circulars = () => {
         circ.summary?.toLowerCase().includes(searchTerm.toLowerCase());
 
       const matchesStatus =
-        statusFilter === 'all' || circ.status?.toLowerCase() === statusFilter.toLowerCase();
+        statusFilter === 'all'
+          ? true
+          : statusFilter === 'active'
+          ? circ.status?.toLowerCase() !== 'archived'
+          : circ.status?.toLowerCase() === statusFilter.toLowerCase();
 
       const matchesCompany =
         companyFilter === 'all' || circ.company_name === companyFilter;
@@ -92,6 +96,7 @@ const Circulars = () => {
 
   const stats = useMemo(() => {
     const total = circulars.length;
+    const active = circulars.filter((c) => c.status !== 'archived').length;
     const published = circulars.filter((c) => c.status === 'published').length;
     const drafts = circulars.filter((c) => c.status === 'draft').length;
     const archived = circulars.filter((c) => c.status === 'archived').length;
@@ -100,7 +105,7 @@ const Circulars = () => {
       0
     );
     const companies = new Set(circulars.map((c) => c.company_name).filter(Boolean)).size;
-    return { total, published, drafts, archived, linkedRoles, companies };
+    return { total, active, published, drafts, archived, linkedRoles, companies };
   }, [circulars]);
 
   const handleOpenPublish = (circular) => {
@@ -285,42 +290,79 @@ const Circulars = () => {
 
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+        <button
+          onClick={() => setStatusFilter('all')}
+          className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-sm ${
+            statusFilter === 'all'
+              ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-700 ring-2 ring-indigo-500/30'
+              : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300'
+          }`}
+        >
           <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             Total Drives
           </span>
           <p className="text-2xl font-bold text-gray-900 dark:text-white mt-1">{stats.total}</p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('active')}
+          className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-sm ${
+            statusFilter === 'active'
+              ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-700 ring-2 ring-indigo-500/30'
+              : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300'
+          }`}
+        >
+          <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+            Active Drives
+          </span>
+          <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">{stats.active}</p>
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('published')}
+          className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-sm ${
+            statusFilter === 'published'
+              ? 'bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 ring-2 ring-emerald-500/30'
+              : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300'
+          }`}
+        >
           <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
             Published
           </span>
           <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
             {stats.published}
           </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('draft')}
+          className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-sm ${
+            statusFilter === 'draft'
+              ? 'bg-amber-50/70 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 ring-2 ring-amber-500/30'
+              : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300'
+          }`}
+        >
           <span className="text-xs font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wider">
             Drafts
           </span>
           <p className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
             {stats.drafts}
           </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm">
-          <span className="text-xs font-medium text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
-            Linked Roles
-          </span>
-          <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400 mt-1">
-            {stats.linkedRoles}
-          </p>
-        </div>
-        <div className="bg-white dark:bg-gray-900 p-4 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm col-span-2 sm:col-span-1">
+        </button>
+
+        <button
+          onClick={() => setStatusFilter('archived')}
+          className={`p-4 rounded-xl border text-left transition-all cursor-pointer shadow-sm col-span-2 sm:col-span-1 ${
+            statusFilter === 'archived'
+              ? 'bg-gray-100 dark:bg-gray-800 border-gray-400 dark:border-gray-600 ring-2 ring-gray-400/30'
+              : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300'
+          }`}
+        >
           <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-            Companies
+            Archived
           </span>
-          <p className="text-2xl font-bold text-gray-600 dark:text-gray-400 mt-1">{stats.companies}</p>
-        </div>
+          <p className="text-2xl font-bold text-gray-600 dark:text-gray-400 mt-1">{stats.archived}</p>
+        </button>
       </div>
 
       {/* Filters and Search */}
@@ -356,17 +398,23 @@ const Circulars = () => {
           )}
 
           <div className="flex items-center gap-1 overflow-x-auto">
-            {['all', 'draft', 'published', 'archived'].map((status) => (
+            {[
+              { id: 'active', label: `Active (${stats.active})` },
+              { id: 'published', label: `Published (${stats.published})` },
+              { id: 'draft', label: `Draft (${stats.drafts})` },
+              { id: 'archived', label: `Archived (${stats.archived})` },
+              { id: 'all', label: `All (${stats.total})` },
+            ].map((tab) => (
               <button
-                key={status}
-                onClick={() => setStatusFilter(status)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-lg capitalize transition-colors cursor-pointer ${
-                  statusFilter === status
+                key={tab.id}
+                onClick={() => setStatusFilter(tab.id)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg capitalize transition-colors cursor-pointer ${
+                  statusFilter === tab.id
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
                 }`}
               >
-                {status}
+                {tab.label}
               </button>
             ))}
           </div>
@@ -726,9 +774,13 @@ const Circulars = () => {
         isOpen={bulkCleanupModalOpen}
         onClose={() => setBulkCleanupModalOpen(false)}
         selectedCircularIds={selectedDriveIds}
-        onSuccess={() => {
-          setSelectedDriveIds([]);
-          setIsBulkMode(false);
+        onSuccess={(result) => {
+          const processedIds = result?.circular_ids || [];
+          if (processedIds.length > 0) {
+            setSelectedDriveIds((prev) => prev.filter((id) => !processedIds.includes(id)));
+          } else {
+            setSelectedDriveIds([]);
+          }
           fetchCirculars();
         }}
       />

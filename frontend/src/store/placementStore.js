@@ -169,7 +169,7 @@ const usePlacementStore = create((set, get) => ({
   fetchCompanies: async (params = {}) => {
     set({ isLoading: true, error: null });
     try {
-      const companies = await getCompanies(params);
+      const companies = await getCompanies({ limit: 500, ...params });
       set({ companies, isLoading: false });
       return companies;
     } catch (error) {
@@ -686,7 +686,7 @@ const usePlacementStore = create((set, get) => ({
   fetchCirculars: async (params = {}) => {
     set({ isCircularsLoading: true, circularsError: null });
     try {
-      const circulars = await getRecruitmentCirculars(params);
+      const circulars = await getRecruitmentCirculars({ limit: 500, ...params });
       set({ circulars, isCircularsLoading: false });
       return circulars;
     } catch (error) {
@@ -1184,6 +1184,7 @@ const usePlacementStore = create((set, get) => ({
   },
 
   clearDrivesCleanupPreview: () => set({ drivesCleanupPreview: null }),
+  clearCleanupPreview: () => set({ cleanupPreview: null }),
 
   runCleanup: async (payload) => {
     set({ isCleanupLoading: true, cleanupError: null, cleanupResult: null });
