@@ -202,14 +202,24 @@ class QdrantClient:
             if filter_conditions:
                 qdrant_filter = self._build_filter(filter_conditions)
             
-            # Perform search
-            results = self.client.search(
-                collection_name=self.collection_name,
-                query_vector=query_vector,
-                limit=limit,
-                score_threshold=score_threshold,
-                query_filter=qdrant_filter
-            )
+            # Perform search (support modern QdrantClient query_points and legacy search)
+            if hasattr(self.client, "query_points"):
+                response = self.client.query_points(
+                    collection_name=self.collection_name,
+                    query=query_vector,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    query_filter=qdrant_filter
+                )
+                results = response.points
+            else:
+                results = self.client.search(
+                    collection_name=self.collection_name,
+                    query_vector=query_vector,
+                    limit=limit,
+                    score_threshold=score_threshold,
+                    query_filter=qdrant_filter
+                )
             
             # Format results
             formatted_results = []

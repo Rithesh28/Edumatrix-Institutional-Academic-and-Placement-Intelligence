@@ -13,6 +13,7 @@ from .placement import router as placement_router
 from .recruitment_circulars import router as recruitment_circulars_router
 from .recruitment_results import router as recruitment_results_router
 from .admin import router as admin_router
+from .study_buddy import router as study_buddy_router
 
 
 __all__ = [
@@ -30,5 +31,6 @@ __all__ = [
     'placement_router',
     "recruitment_circulars_router",
     "recruitment_results_router",
-    "admin_router"
+    "admin_router",
+    "study_buddy_router"
 ]

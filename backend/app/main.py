@@ -15,7 +15,8 @@ from .api import (
     placement_router,
     recruitment_circulars_router,
     recruitment_results_router,
-    admin_router
+    admin_router,
+    study_buddy_router
 )
 from contextlib import asynccontextmanager
 import logging
@@ -111,6 +112,7 @@ app.include_router(placement_router)
 app.include_router(recruitment_circulars_router)
 app.include_router(recruitment_results_router)
 app.include_router(admin_router)
+app.include_router(study_buddy_router)
 
 # Root endpoint
 @app.get("/")

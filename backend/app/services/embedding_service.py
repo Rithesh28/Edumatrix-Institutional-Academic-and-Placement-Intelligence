@@ -102,6 +102,9 @@ class EmbeddingService:
             logger.error(f"❌ Failed to embed texts: {str(e)}")
             return None
     
+    # Alias for compatibility with batch embedding callers
+    embed_batch = embed_texts
+    
     def embed_file_content(self, content: str, max_length: int = 512) -> Optional[List[float]]:
         """
         Embed file content with truncation.

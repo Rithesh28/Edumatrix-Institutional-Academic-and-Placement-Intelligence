@@ -36,6 +36,14 @@ from .recruitment_round import (
     OfferAcceptanceStatus,
 )
 from .audit_log import AuditLog
+from .study_buddy import (
+    Subject,
+    SyllabusDocument,
+    SyllabusUnit,
+    SyllabusTopic,
+    SyllabusProcessingStatus,
+    SyllabusReviewStatus,
+)
 
 __all__ = [
     "User",
@@ -68,7 +76,7 @@ __all__ = [
     "FileType",
     "FileStatus",
     "FileVersion",
-     'Company',
+    'Company',
     'JobPosting',
     'JobStatus',
     'Application',
@@ -89,5 +97,11 @@ __all__ = [
     'RoundOutcome',
     'PlacementOffer',
     'OfferAcceptanceStatus',
-    'AuditLog'
+    'AuditLog',
+    'Subject',
+    'SyllabusDocument',
+    'SyllabusUnit',
+    'SyllabusTopic',
+    'SyllabusProcessingStatus',
+    'SyllabusReviewStatus'
 ]
