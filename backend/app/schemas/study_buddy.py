@@ -145,3 +145,42 @@ class SyllabusReviewRequest(BaseModel):
 
 class SyllabusPublishRequest(BaseModel):
     is_published: bool = Field(..., description="True to publish to students, False to unpublish")
+
+
+# ============================================
+# STUDY BUDDY RAG CHAT SCHEMAS
+# ============================================
+
+class StudyBuddyQuestionRequest(BaseModel):
+    question: str = Field(..., min_length=2, max_length=1000, description="Student academic query")
+    subject_id: Optional[int] = Field(None, description="Optional subject ID to focus the query")
+
+
+class StudyBuddyCitation(BaseModel):
+    document_id: int
+    version: int
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    department: str
+    unit_number: Optional[int] = None
+    unit_title: Optional[str] = None
+    topic_title: Optional[str] = None
+    source_page: Optional[int] = None
+    source_evidence: Optional[str] = None
+    chunk_order: Optional[int] = None
+    relevance_score: float
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudyBuddyAnswerResponse(BaseModel):
+    answer: str
+    has_sufficient_evidence: bool
+    citations: List[StudyBuddyCitation] = []
+    subject_id: Optional[int] = None
+    model_used: str
+    latency_ms: Optional[float] = None
+
+    model_config = ConfigDict(from_attributes=True)
+

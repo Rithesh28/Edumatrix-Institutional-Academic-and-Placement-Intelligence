@@ -35,10 +35,13 @@ from ..schemas.study_buddy import (
     SyllabusUnitResponse,
     SyllabusTopicResponse,
     SyllabusReviewRequest,
-    SyllabusPublishRequest
+    SyllabusPublishRequest,
+    StudyBuddyQuestionRequest,
+    StudyBuddyAnswerResponse
 )
 from ..services.syllabus_ingestion_service import syllabus_ingestion_service
 from ..services.syllabus_indexing_service import syllabus_indexing_service
+from ..services.study_buddy_chat_service import study_buddy_chat_service
 
 logger = logging.getLogger(__name__)
 
@@ -695,4 +698,28 @@ async def search_syllabus_content(
         current_user=current_user,
         subject_id=subject_id,
         limit=limit
+    )
+
+
+@router.post("/chat", response_model=StudyBuddyAnswerResponse)
+@router.post("/ask", response_model=StudyBuddyAnswerResponse)
+async def ask_study_buddy(
+    request: StudyBuddyQuestionRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    RAG-powered academic Study Buddy QA endpoint.
+    - Scoped strictly to student's authorized department and approved, published syllabi.
+    - Retrieves relevant chunks from dedicated Qdrant collection.
+    - Passes bounded context to shared Qwen Instruct singleton.
+    - Provides verified source citations with document, unit, topic, and page provenance.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_chat_service.ask_question(
+        db=db,
+        current_user=current_user,
+        question=request.question,
+        subject_id=request.subject_id
     )

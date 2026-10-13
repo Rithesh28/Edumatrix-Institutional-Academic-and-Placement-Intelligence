@@ -55,6 +55,15 @@ export const chatAPI = {
 }
 
 // ============================================
+// STUDY BUDDY RAG API
+// ============================================
+export const studyBuddyAPI = {
+  getSubjects: () => api.get('/study-buddy/subjects'),
+  askQuestion: (question, subjectId = null) => api.post('/study-buddy/chat', { question, subject_id: subjectId }),
+  searchSyllabus: (query, subjectId = null) => api.get('/study-buddy/search', { params: { query, subject_id: subjectId } })
+}
+
+// ============================================
 // CIRCULARS API
 // ============================================
 export const circularAPI = {

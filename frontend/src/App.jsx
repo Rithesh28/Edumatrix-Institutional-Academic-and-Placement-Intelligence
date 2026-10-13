@@ -12,6 +12,7 @@ import AdminDashboard from './pages/admin/Dashboard'
 import AdminUsers from './pages/admin/Users'
 import AdminAuditLogs from './pages/admin/AuditLogs'
 import StudentChat from './pages/student/Chat'
+import StudentStudyBuddy from './pages/student/StudyBuddy'
 import LecturerChat from './pages/lecturer/Chat'
 import StudentCirculars from './pages/student/Circulars'
 import LecturerCirculars from './pages/lecturer/Circulars'
@@ -110,6 +111,7 @@ function App() {
               <Route path="/student/applications" element={<StudentApplications />} />
               <Route path="/student/circulars" element={<StudentCirculars />} />
               <Route path="/student/profile" element={<StudentProfile />} />
+              <Route path="/student/study-buddy" element={<StudentStudyBuddy />} />
               <Route path="/student/reminders" element={<ReminderList />} />
             </Route>
 

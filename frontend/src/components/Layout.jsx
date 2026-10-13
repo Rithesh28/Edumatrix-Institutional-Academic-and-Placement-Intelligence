@@ -37,6 +37,7 @@ function Layout() {
     if (role === 'student') {
       return [
         { name: 'Dashboard', path: '/student/dashboard', icon: '📊' },
+        { name: 'Study Buddy', path: '/student/study-buddy', icon: '📚' },
         { name: 'Campus Jobs', path: '/student/jobs', icon: '💼' },
         { name: 'My Applications', path: '/student/applications', icon: '📋' },
         { name: 'Chat', path: '/student/chat', icon: '💬' },

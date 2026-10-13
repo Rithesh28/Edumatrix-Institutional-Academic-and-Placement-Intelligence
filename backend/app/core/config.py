@@ -32,6 +32,11 @@ class Settings:
     AI_MAX_NEW_TOKENS: int = int(os.getenv("AI_MAX_NEW_TOKENS", "256"))
     AI_TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.2"))
     AI_ASSISTANT_NAME: str = os.getenv("AI_ASSISTANT_NAME", "EduMatrix AI Assistant")
+
+    # Study Buddy Configuration
+    STUDY_BUDDY_MIN_RELEVANCE_SCORE: float = float(os.getenv("STUDY_BUDDY_MIN_RELEVANCE_SCORE", "0.35"))
+    STUDY_BUDDY_TOP_K: int = int(os.getenv("STUDY_BUDDY_TOP_K", "4"))
+    STUDY_BUDDY_MAX_CONTEXT_CHARS: int = int(os.getenv("STUDY_BUDDY_MAX_CONTEXT_CHARS", "2000"))
     
     # Firebase
     FIREBASE_CREDENTIALS: str = os.getenv("FIREBASE_CREDENTIALS", "")
