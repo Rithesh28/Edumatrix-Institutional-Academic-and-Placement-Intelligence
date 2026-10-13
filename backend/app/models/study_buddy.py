@@ -10,6 +10,7 @@ import enum
 from sqlalchemy import (
     Column,
     Integer,
+    Float,
     String,
     Text,
     Boolean,
@@ -225,3 +226,60 @@ class SyllabusTopic(Base):
 
     def __repr__(self):
         return f"<SyllabusTopic id={self.id} unit={self.unit_id} order={self.order} title={self.title}>"
+
+
+class QuizStatus(str, enum.Enum):
+    """Lifecycle status for a syllabus-grounded quiz attempt."""
+    GENERATED = "GENERATED"
+    COMPLETED = "COMPLETED"
+    EXPIRED = "EXPIRED"
+
+
+class StudyBuddyQuizAttempt(Base):
+    """
+    Persisted quiz attempt and result tracking for students.
+    Stores question snapshots with hidden answer keys, student answers,
+    scoring metrics, syllabus provenance, and submission timestamps.
+    """
+    __tablename__ = "study_buddy_quiz_attempts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False, index=True)
+    syllabus_document_id = Column(Integer, ForeignKey("syllabus_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    syllabus_version = Column(Integer, nullable=False)
+    unit_id = Column(Integer, ForeignKey("syllabus_units.id", ondelete="SET NULL"), nullable=True, index=True)
+    topic_id = Column(Integer, ForeignKey("syllabus_topics.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    title = Column(String(255), nullable=False)
+    difficulty = Column(String(50), nullable=False, default="medium")
+    total_questions = Column(Integer, nullable=False)
+    questions_data = Column(JSONB, nullable=False)
+
+    status = Column(Enum(QuizStatus, name="study_buddy_quiz_status"), default=QuizStatus.GENERATED, nullable=False, index=True)
+
+    # Submission & grading results
+    score = Column(Float, nullable=True)
+    max_score = Column(Integer, nullable=True)
+    percentage = Column(Float, nullable=True)
+    student_answers = Column(JSONB, nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    student = relationship("User")
+    subject = relationship("Subject")
+    syllabus_document = relationship("SyllabusDocument")
+    unit = relationship("SyllabusUnit")
+    topic = relationship("SyllabusTopic")
+
+    __table_args__ = (
+        Index("ix_quiz_attempts_student_subject", "student_id", "subject_id"),
+        Index("ix_quiz_attempts_student_status", "student_id", "status"),
+    )
+
+    def __repr__(self):
+        return f"<StudyBuddyQuizAttempt id={self.id} student={self.student_id} subject={self.subject_id} status={self.status}>"
+

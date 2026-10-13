@@ -310,8 +310,20 @@ async def update_subject(
         subject.curriculum_version = payload.curriculum_version
     if payload.description is not None:
         subject.description = payload.description
-    if payload.is_active is not None:
+    if payload.is_active is not None and payload.is_active != subject.is_active:
         subject.is_active = payload.is_active
+        if not payload.is_active:
+            # Subject deactivated: delete chunks for all its syllabus documents from Qdrant
+            for sdoc in subject.syllabus_documents:
+                syllabus_indexing_service.delete_document_chunks(sdoc.id)
+        else:
+            # Subject reactivated: re-index any approved published syllabus document
+            for sdoc in subject.syllabus_documents:
+                if sdoc.is_published and sdoc.review_status == SyllabusReviewStatus.APPROVED:
+                    try:
+                        syllabus_indexing_service.index_syllabus_document(db, sdoc.id)
+                    except Exception as reindex_err:
+                        logger.warning(f"Re-indexing failed on subject reactivation for doc {sdoc.id}: {reindex_err}")
 
     db.commit()
     db.refresh(subject)

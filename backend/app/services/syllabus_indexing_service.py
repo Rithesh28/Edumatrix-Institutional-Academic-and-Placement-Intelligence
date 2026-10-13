@@ -533,12 +533,18 @@ class SyllabusIndexingService:
         formatted = []
         for r in results:
             doc_id = r.payload.get("document_id")
-            # Verify that document is still active, approved and published in PostgreSQL
-            doc = db.query(SyllabusDocument).filter(
+            # Verify that document is still active, approved, published, and belongs to an active subject in PostgreSQL
+            doc_query = db.query(SyllabusDocument).join(Subject).filter(
                 SyllabusDocument.id == doc_id,
                 SyllabusDocument.is_published == True,
-                SyllabusDocument.review_status == SyllabusReviewStatus.APPROVED
-            ).first()
+                SyllabusDocument.review_status == SyllabusReviewStatus.APPROVED,
+                Subject.is_active == True
+            )
+
+            if current_user.role != UserRole.ADMIN and user_dept:
+                doc_query = doc_query.filter(Subject.department.ilike(user_dept))
+
+            doc = doc_query.first()
 
             if doc:
                 formatted.append({
@@ -554,6 +560,7 @@ class SyllabusIndexingService:
                     "topic_title": r.payload.get("topic_title"),
                     "source_page": r.payload.get("source_page"),
                     "source_evidence": r.payload.get("source_evidence"),
+                    "chunk_order": r.payload.get("chunk_order"),
                     "text": r.payload.get("text")
                 })
 

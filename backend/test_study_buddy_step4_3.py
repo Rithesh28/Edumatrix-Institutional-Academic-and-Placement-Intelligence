@@ -430,6 +430,213 @@ class TestStudyBuddyStep43(unittest.TestCase):
         self.assertEqual(not_found_res.status_code, 404)
         self.assertIn("not found or inactive", not_found_res.json()["detail"])
 
+    def test_10_superseded_syllabus_versions_cannot_be_retrieved_or_cited(self):
+        """
+        Case 1: Verify that when a newer version (v2) of a syllabus is published,
+        older versions (v1) are automatically unpublished and cannot be retrieved or cited.
+        """
+        sub_id = self._create_test_subject("SUP", "Graph Algorithms and Optimization", "AIML")
+
+        # Ingest and publish Version 1
+        v1_content = (
+            "Unit 1: Classical Graph Theory\n"
+            "Topic: Euler Tours and Fleury Algorithm\n"
+            "Euler tour visits every edge of a graph exactly once using Fleury algorithm.\n"
+        )
+        v1_up = self.client.post(
+            f"/study-buddy/subjects/{sub_id}/syllabus",
+            headers=self.hod_headers,
+            files={"file": ("v1.txt", v1_content.encode("utf-8"), "text/plain")}
+        )
+        self.assertEqual(v1_up.status_code, 201)
+        v1_doc_id = v1_up.json()["id"]
+        self.client.post(f"/study-buddy/syllabi/{v1_doc_id}/review", headers=self.hod_headers, json={"review_status": "APPROVED"})
+        v1_pub = self.client.post(f"/study-buddy/syllabi/{v1_doc_id}/publish", headers=self.hod_headers, json={"is_published": True})
+        self.assertEqual(v1_pub.status_code, 200)
+
+        # Ingest and publish Version 2 (superseding Version 1)
+        v2_content = (
+            "Unit 1: Modern Spectral Graph Theory\n"
+            "Topic: Graph Laplacians and Cheeger Inequality\n"
+            "Graph Laplacians define diffusion dynamics on discrete Riemannian manifolds.\n"
+        )
+        v2_up = self.client.post(
+            f"/study-buddy/subjects/{sub_id}/syllabus",
+            headers=self.hod_headers,
+            files={"file": ("v2.txt", v2_content.encode("utf-8"), "text/plain")}
+        )
+        self.assertEqual(v2_up.status_code, 201)
+        v2_doc_id = v2_up.json()["id"]
+        self.client.post(f"/study-buddy/syllabi/{v2_doc_id}/review", headers=self.hod_headers, json={"review_status": "APPROVED"})
+        v2_pub = self.client.post(f"/study-buddy/syllabi/{v2_doc_id}/publish", headers=self.hod_headers, json={"is_published": True})
+        self.assertEqual(v2_pub.status_code, 200)
+
+        # Verify PostgreSQL state: v1 is now un-published, v2 is published
+        self.db.expire_all()
+        v1_doc = self.db.query(SyllabusDocument).filter(SyllabusDocument.id == v1_doc_id).first()
+        v2_doc = self.db.query(SyllabusDocument).filter(SyllabusDocument.id == v2_doc_id).first()
+        self.assertFalse(v1_doc.is_published)
+        self.assertTrue(v2_doc.is_published)
+
+        # Query exclusive v1 concept: must NOT be cited or retrieved
+        chat_v1 = self.client.post(
+            "/study-buddy/chat",
+            headers=self.student_aiml_headers,
+            json={"question": "What is Fleury algorithm for Euler tours?", "subject_id": sub_id}
+        )
+        self.assertEqual(chat_v1.status_code, 200)
+        # Cannot retrieve v1
+        self.assertFalse(chat_v1.json()["has_sufficient_evidence"])
+        self.assertEqual(len(chat_v1.json()["citations"]), 0)
+
+        # Query exclusive v2 concept: succeeds and cites v2
+        chat_v2 = self.client.post(
+            "/study-buddy/chat",
+            headers=self.student_aiml_headers,
+            json={"question": "What are Graph Laplacians and Cheeger inequality?", "subject_id": sub_id}
+        )
+        self.assertEqual(chat_v2.status_code, 200)
+        self.assertTrue(chat_v2.json()["has_sufficient_evidence"])
+        self.assertGreater(len(chat_v2.json()["citations"]), 0)
+        for cit in chat_v2.json()["citations"]:
+            self.assertEqual(cit["document_id"], v2_doc_id)
+            self.assertEqual(cit["version"], 2)
+
+    def test_11_inactive_subjects_cannot_contribute_chunks_to_student_answers(self):
+        """
+        Case 2: Verify that deactivated subjects cannot contribute syllabus chunks
+        to student answers, either with explicit subject_id or general department queries.
+        """
+        sub_id = self._create_test_subject("INA", "Heuristic Optimization Systems", "AIML")
+        content = (
+            "Unit 1: Metaheuristic Search\n"
+            "Topic: Simulated Annealing Cooling Protocols\n"
+            "Simulated annealing cooling protocols systematically lower temperature parameters to escape sub-optimal local traps.\n"
+        )
+        up_res = self.client.post(
+            f"/study-buddy/subjects/{sub_id}/syllabus",
+            headers=self.hod_headers,
+            files={"file": ("anneal.txt", content.encode("utf-8"), "text/plain")}
+        )
+        doc_id = up_res.json()["id"]
+        self.client.post(f"/study-buddy/syllabi/{doc_id}/review", headers=self.hod_headers, json={"review_status": "APPROVED"})
+        self.client.post(f"/study-buddy/syllabi/{doc_id}/publish", headers=self.hod_headers, json={"is_published": True})
+
+        # When active: general student query retrieves chunks
+        chat_active = self.client.post(
+            "/study-buddy/chat",
+            headers=self.student_aiml_headers,
+            json={"question": "Explain simulated annealing cooling protocols and local traps."}
+        )
+        self.assertEqual(chat_active.status_code, 200)
+        self.assertTrue(chat_active.json()["has_sufficient_evidence"])
+
+        # Deactivate subject
+        deact_res = self.client.put(
+            f"/study-buddy/subjects/{sub_id}",
+            headers=self.hod_headers,
+            json={"is_active": False}
+        )
+        self.assertEqual(deact_res.status_code, 200)
+        self.assertFalse(deact_res.json()["is_active"])
+
+        # 1. Direct query with deactivated subject_id -> 404
+        direct_res = self.client.post(
+            "/study-buddy/chat",
+            headers=self.student_aiml_headers,
+            json={"question": "Explain simulated annealing cooling protocols.", "subject_id": sub_id}
+        )
+        self.assertEqual(direct_res.status_code, 404)
+        self.assertIn("not found or inactive", direct_res.json()["detail"])
+
+        # 2. General department query without subject_id -> must NOT retrieve inactive subject chunks
+        gen_res = self.client.post(
+            "/study-buddy/chat",
+            headers=self.student_aiml_headers,
+            json={"question": "Explain simulated annealing cooling protocols and local traps."}
+        )
+        self.assertEqual(gen_res.status_code, 200)
+        self.assertFalse(gen_res.json()["has_sufficient_evidence"])
+        self.assertEqual(len(gen_res.json()["citations"]), 0)
+
+        # Reactivate subject
+        react_res = self.client.put(
+            f"/study-buddy/subjects/{sub_id}",
+            headers=self.hod_headers,
+            json={"is_active": True}
+        )
+        self.assertEqual(react_res.status_code, 200)
+        self.assertTrue(react_res.json()["is_active"])
+
+        # Chunks re-indexed on reactivation, student query succeeds again
+        chat_react = self.client.post(
+            "/study-buddy/chat",
+            headers=self.student_aiml_headers,
+            json={"question": "Explain simulated annealing cooling protocols.", "subject_id": sub_id}
+        )
+        self.assertEqual(chat_react.status_code, 200)
+        self.assertTrue(chat_react.json()["has_sufficient_evidence"])
+
+    def test_12_role_based_access_rules_lecturer_hod_admin(self):
+        """
+        Case 4: Verify role-based authorization rules for Lecturer, HOD, and Admin.
+        - Admin has institutional access and can query any department subject.
+        - HOD is scoped to their department and blocked from other departments.
+        - Lecturer is scoped to their department or assigned subjects.
+        """
+        # Create ECE subject
+        ece_sub_id = self._create_test_subject("MIC", "Microcontroller System Design", "ECE")
+        content = (
+            "Unit 1: Computer Architecture\n"
+            "Topic: Harvard vs Von Neumann Architectures\n"
+            "Harvard architecture provides physically separate storage and signal buses for instructions and data.\n"
+        )
+        up_res = self.client.post(
+            f"/study-buddy/subjects/{ece_sub_id}/syllabus",
+            headers=self.admin_headers,
+            files={"file": ("micro.txt", content.encode("utf-8"), "text/plain")}
+        )
+        doc_id = up_res.json()["id"]
+        self.client.post(f"/study-buddy/syllabi/{doc_id}/review", headers=self.admin_headers, json={"review_status": "APPROVED"})
+        self.client.post(f"/study-buddy/syllabi/{doc_id}/publish", headers=self.admin_headers, json={"is_published": True})
+
+        # 1. Admin can query ECE subject without restriction
+        admin_res = self.client.post(
+            "/study-buddy/chat",
+            headers=self.admin_headers,
+            json={"question": "What is Harvard architecture with separate storage?", "subject_id": ece_sub_id}
+        )
+        self.assertEqual(admin_res.status_code, 200)
+        self.assertTrue(admin_res.json()["has_sufficient_evidence"])
+        self.assertEqual(admin_res.json()["citations"][0]["department"], "ECE")
+
+        # 2. AIML HOD cannot query ECE subject -> 403 Forbidden
+        hod_res = self.client.post(
+            "/study-buddy/chat",
+            headers=self.hod_headers,
+            json={"question": "What is Harvard architecture?", "subject_id": ece_sub_id}
+        )
+        self.assertEqual(hod_res.status_code, 403)
+        self.assertIn("Access denied", hod_res.json()["detail"])
+
+        # 3. AIML Lecturer cannot query unassigned ECE subject -> 403 Forbidden
+        lec_res = self.client.post(
+            "/study-buddy/chat",
+            headers=self.lecturer_headers,
+            json={"question": "What is Harvard architecture?", "subject_id": ece_sub_id}
+        )
+        self.assertEqual(lec_res.status_code, 403)
+        self.assertIn("Access denied", lec_res.json()["detail"])
+
+        # 4. Lecturer cannot publish syllabus -> 403 Forbidden
+        lec_pub = self.client.post(
+            f"/study-buddy/syllabi/{doc_id}/publish",
+            headers=self.lecturer_headers,
+            json={"is_published": True}
+        )
+        self.assertEqual(lec_pub.status_code, 403)
+
 
 if __name__ == "__main__":
     unittest.main()
+

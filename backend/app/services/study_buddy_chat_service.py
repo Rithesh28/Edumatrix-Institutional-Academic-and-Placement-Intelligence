@@ -98,7 +98,17 @@ class StudyBuddyChatService:
                 )
 
             # Department match check for non-admin
-            if current_user.role != UserRole.ADMIN:
+            if current_user.role == UserRole.LECTURER:
+                if _normalize_dept(user_dept) != _normalize_dept(target_subject.department):
+                    assigned_subjects = []
+                    if current_user.lecturer_profile and current_user.lecturer_profile.subjects:
+                        assigned_subjects = [str(s).strip().upper() for s in current_user.lecturer_profile.subjects]
+                    if target_subject.code.strip().upper() not in assigned_subjects:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail=f"Access denied: Subject belongs to department '{target_subject.department}'."
+                        )
+            elif current_user.role != UserRole.ADMIN:
                 if _normalize_dept(user_dept) != _normalize_dept(target_subject.department):
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,

@@ -43,6 +43,8 @@ from .study_buddy import (
     SyllabusTopic,
     SyllabusProcessingStatus,
     SyllabusReviewStatus,
+    QuizStatus,
+    StudyBuddyQuizAttempt,
 )
 
 __all__ = [
@@ -103,5 +105,7 @@ __all__ = [
     'SyllabusUnit',
     'SyllabusTopic',
     'SyllabusProcessingStatus',
-    'SyllabusReviewStatus'
+    'SyllabusReviewStatus',
+    'QuizStatus',
+    'StudyBuddyQuizAttempt'
 ]
