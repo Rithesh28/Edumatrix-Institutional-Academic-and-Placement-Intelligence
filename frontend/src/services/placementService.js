@@ -399,6 +399,19 @@ export const getDrivesCleanupPreview = async (params = {}) => {
   return response.data;
 };
 
+export const getJobsCleanupPreview = async (params = {}) => {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((v) => searchParams.append(key, v));
+    } else if (value !== undefined && value !== null) {
+      searchParams.append(key, value);
+    }
+  });
+  const response = await api.get('/placement/cleanup/jobs/preview', { params: searchParams });
+  return response.data;
+};
+
 export const executeCleanup = async (data) => {
   const response = await api.post('/placement/cleanup/execute', data);
   return response.data;

@@ -86,6 +86,17 @@ class PlacementCleanupService:
         return False
 
     @staticmethod
+    def is_candidate_test_job(job: JobPosting) -> bool:
+        """Evaluate whether a job posting contains automated test signals."""
+        if not job:
+            return False
+        if job.title and any(pattern.search(job.title) for pattern in TEST_PATTERNS):
+            return True
+        if job.company and any(pattern.search(job.company.name) for pattern in TEST_PATTERNS):
+            return True
+        return False
+
+    @staticmethod
     def is_test_student_email(email: str) -> bool:
         """Evaluate whether a student email indicates a synthetic test account."""
         if not email:
@@ -97,13 +108,22 @@ class PlacementCleanupService:
         db: Session,
         company_ids: Optional[List[int]] = None,
         circular_ids: Optional[List[int]] = None,
+        job_ids: Optional[List[int]] = None,
         pattern: Optional[str] = None,
         include_all_candidates: bool = True,
     ) -> Dict[str, Any]:
         """
-        Preview candidate companies or recruitment drives for cleanup without modifying any data.
+        Preview candidate companies, recruitment drives, or job postings for cleanup without modifying any data.
         Returns detailed dependent-record counts, safety classifications, and protection reasons.
         """
+        if job_ids and len(job_ids) > 0:
+            return self.generate_jobs_cleanup_preview(
+                db=db,
+                job_ids=job_ids,
+                pattern=pattern,
+                include_all_candidates=include_all_candidates,
+            )
+
         if circular_ids and len(circular_ids) > 0:
             return self.generate_drives_cleanup_preview(
                 db=db,
@@ -214,6 +234,10 @@ class PlacementCleanupService:
             "total_drives_requires_archive": total_drives_requires_archive,
             "total_drives_protected_genuine": total_drives_protected_genuine,
             "total_orphaned_jobs": len(orphaned_jobs),
+            "total_jobs_flagged": 0,
+            "total_jobs_safe_to_purge": 0,
+            "total_jobs_requires_archive": 0,
+            "total_jobs_protected_genuine": 0,
         }
 
         return {
@@ -221,6 +245,108 @@ class PlacementCleanupService:
             "drives": drives,
             "orphaned_jobs": orphaned_jobs,
             "candidates": [],
+            "jobs": [],
+        }
+
+    def generate_jobs_cleanup_preview(
+        self,
+        db: Session,
+        job_ids: Optional[List[int]] = None,
+        company_id: Optional[int] = None,
+        status: Optional[str] = None,
+        pattern: Optional[str] = None,
+        include_all_candidates: bool = True,
+    ) -> Dict[str, Any]:
+        """Preview job postings for cleanup without mutating any records."""
+        query = db.query(JobPosting)
+        if job_ids and len(job_ids) > 0:
+            query = query.filter(JobPosting.id.in_(job_ids))
+        else:
+            if company_id:
+                query = query.filter(JobPosting.company_id == company_id)
+            if status and status.lower() != "all":
+                query = query.filter(JobPosting.status == status.lower())
+            if pattern and pattern.strip():
+                query = query.filter(JobPosting.title.ilike(f"%{pattern.strip()}%"))
+            if include_all_candidates and not (company_id or pattern):
+                all_jobs = query.order_by(JobPosting.id.desc()).all()
+                candidate_jobs = [j for j in all_jobs if self.is_candidate_test_job(j)]
+                return self._build_jobs_preview_response(db, candidate_jobs)
+
+        target_jobs = query.order_by(JobPosting.id.desc()).all()
+        return self._build_jobs_preview_response(db, target_jobs)
+
+    def _build_jobs_preview_response(
+        self, db: Session, jobs: List[JobPosting]
+    ) -> Dict[str, Any]:
+        """Analyze dependencies and build the preview payload for a set of job postings."""
+        candidates: List[Dict[str, Any]] = []
+
+        total_safe_to_purge = 0
+        total_requires_archive = 0
+        total_protected_genuine = 0
+
+        total_dependent_circulars = 0
+        total_dependent_applications = 0
+        total_dependent_result_batches = 0
+        total_dependent_offers = 0
+        total_dependent_accepted_offers = 0
+        total_files_identified = 0
+        total_shared_files_preserved = 0
+
+        selected_job_ids = {j.id for j in jobs}
+
+        for job in jobs:
+            job_analysis = self._analyze_job_dependencies(db, job, selected_job_ids=selected_job_ids)
+            candidates.append(job_analysis)
+
+            counts = job_analysis["dependent_counts"]
+            total_dependent_circulars += counts["circulars_count"]
+            total_dependent_applications += counts["applications_count"]
+            total_dependent_result_batches += counts["result_batches_count"]
+            total_dependent_offers += counts["offers_count"]
+            total_dependent_accepted_offers += counts["accepted_offers_count"]
+            total_files_identified += counts["files_count"]
+            total_shared_files_preserved += counts["shared_files_count"]
+
+            classification = job_analysis["safety_classification"]
+            if classification == "SAFE_TO_PURGE":
+                total_safe_to_purge += 1
+            elif classification == "REQUIRES_ARCHIVE":
+                total_requires_archive += 1
+            else:
+                total_protected_genuine += 1
+
+        summary = {
+            "total_candidates_flagged": len(candidates),
+            "total_safe_to_purge": total_safe_to_purge,
+            "total_requires_archive": total_requires_archive,
+            "total_protected_genuine": total_protected_genuine,
+            "total_dependent_jobs": len(candidates),
+            "total_dependent_circulars": total_dependent_circulars,
+            "total_dependent_applications": total_dependent_applications,
+            "total_dependent_result_batches": total_dependent_result_batches,
+            "total_dependent_offers": total_dependent_offers,
+            "total_dependent_accepted_offers": total_dependent_accepted_offers,
+            "total_files_identified": total_files_identified,
+            "total_shared_files_preserved": total_shared_files_preserved,
+            "total_drives_flagged": 0,
+            "total_drives_safe_to_purge": 0,
+            "total_drives_requires_archive": 0,
+            "total_drives_protected_genuine": 0,
+            "total_orphaned_jobs": 0,
+            "total_jobs_flagged": len(candidates),
+            "total_jobs_safe_to_purge": total_safe_to_purge,
+            "total_jobs_requires_archive": total_requires_archive,
+            "total_jobs_protected_genuine": total_protected_genuine,
+        }
+
+        return {
+            "summary": summary,
+            "candidates": [],
+            "drives": [],
+            "orphaned_jobs": [],
+            "jobs": candidates,
         }
 
     def _build_preview_response(
@@ -283,6 +409,9 @@ class PlacementCleanupService:
         return {
             "summary": summary,
             "candidates": candidates,
+            "drives": [],
+            "orphaned_jobs": [],
+            "jobs": [],
         }
 
     def _analyze_company_dependencies(
@@ -880,22 +1009,231 @@ class PlacementCleanupService:
 
         return orphaned_candidates
 
+    def _analyze_job_dependencies(
+        self, db: Session, job: JobPosting, selected_job_ids: Optional[Set[int]] = None
+    ) -> Dict[str, Any]:
+        """Perform comprehensive dependency and safety analysis on a single job posting."""
+        flag_reasons = []
+        if self.is_candidate_test_job(job):
+            if re.search(r"\b\d{6,}\b", job.title):
+                flag_reasons.append("Contains automated test timestamp suffix")
+            if re.search(r"\b(test|mock|temp|dummy|sample)\b", job.title, re.IGNORECASE):
+                flag_reasons.append("Contains test/mock/sample keyword")
+            if job.company and self.is_candidate_test_name(job.company.name):
+                flag_reasons.append(f"Belongs to candidate test company '{job.company.name}'")
+        else:
+            flag_reasons.append("Identified via explicit search or query selection")
+
+        # 1. Circulars & Drive links
+        circular_links = db.query(RecruitmentCircularJob, RecruitmentCircular).join(
+            RecruitmentCircular, RecruitmentCircularJob.circular_id == RecruitmentCircular.id
+        ).filter(RecruitmentCircularJob.job_posting_id == job.id).all()
+
+        linked_circular_ids = [c.id for _, c in circular_links]
+        linked_circular_titles = [c.title for _, c in circular_links]
+        active_circulars = [c for _, c in circular_links if c.status != RecruitmentCircularStatus.ARCHIVED]
+        has_active_circulars = len(active_circulars) > 0
+        circulars_count = len(circular_links)
+        circular_job_links_count = len(circular_links)
+
+        # 2. Applications & Shortlists
+        apps = db.query(Application).filter(Application.job_posting_id == job.id).all()
+        applications_count = len(apps)
+        student_ids_set: Set[int] = {a.student_id for a in apps}
+
+        shortlists_count = db.query(Shortlist).filter(Shortlist.job_posting_id == job.id).count()
+
+        # 3. Recruitment Rounds & Outcomes
+        rounds = db.query(RecruitmentRound).filter(RecruitmentRound.job_posting_id == job.id).all()
+        rounds_count = len(rounds)
+        round_ids = [r.id for r in rounds]
+
+        outcomes_count = 0
+        confirmed_outcomes_count = 0
+        if round_ids:
+            outcomes = db.query(StudentRoundOutcome).filter(StudentRoundOutcome.round_id.in_(round_ids)).all()
+            outcomes_count = len(outcomes)
+            confirmed_outcomes_count = sum(1 for o in outcomes if o.outcome != RoundOutcome.REJECTED)
+            for o in outcomes:
+                student_ids_set.add(o.student_id)
+
+        # 4. Result Batches & Items
+        batches = db.query(RecruitmentResultBatch).filter(RecruitmentResultBatch.job_posting_id == job.id).all()
+        result_batches_count = len(batches)
+        batch_ids = [b.id for b in batches]
+
+        result_items_count = 0
+        confirmed_result_items_count = 0
+        if batch_ids:
+            items = db.query(RecruitmentResultItem).filter(RecruitmentResultItem.batch_id.in_(batch_ids)).all()
+            result_items_count = len(items)
+            confirmed_result_items_count = sum(
+                1 for i in items if i.review_status == RecruitmentResultReviewState.CONFIRMED
+            )
+            for i in items:
+                if i.matched_student_id:
+                    student_ids_set.add(i.matched_student_id)
+
+        # 5. Placement Offers
+        offers = db.query(PlacementOffer).filter(PlacementOffer.job_posting_id == job.id).all()
+        offers_count = len(offers)
+        accepted_offers_count = sum(
+            1 for o in offers if o.acceptance_status == OfferAcceptanceStatus.ACCEPTED
+        )
+        active_offers_count = sum(
+            1 for o in offers if o.acceptance_status in [
+                OfferAcceptanceStatus.OFFERED,
+                OfferAcceptanceStatus.ACCEPTED
+            ]
+        )
+        for o in offers:
+            student_ids_set.add(o.student_id)
+
+        # 6. File References & Shared Checks
+        candidate_file_ids: Set[UUID] = set()
+        for b in batches:
+            if b.file_id:
+                candidate_file_ids.add(b.file_id)
+        for o in offers:
+            if o.offer_letter_file_id:
+                candidate_file_ids.add(o.offer_letter_file_id)
+
+        files_count = len(candidate_file_ids)
+        shared_files_count = 0
+        for fid in candidate_file_ids:
+            if self._is_file_shared_outside_context(
+                db, fid, excluded_company_ids=[job.company_id], excluded_circular_ids=linked_circular_ids, excluded_job_ids=[job.id]
+            ):
+                shared_files_count += 1
+
+        # 7. Student Genuine Account Check
+        has_genuine_student_impact = False
+        genuine_student_emails = []
+        if student_ids_set:
+            students = db.query(User).filter(User.id.in_(list(student_ids_set))).all()
+            for s in students:
+                if not self.is_test_student_email(s.email):
+                    has_genuine_student_impact = True
+                    genuine_student_emails.append(s.email)
+
+        # 8. Protection Reasons & Safety Classification
+        protection_reasons = []
+
+        if has_active_circulars:
+            active_titles = [c.title for c in active_circulars]
+            protection_reasons.append(
+                f"Job is linked to {len(active_circulars)} active recruitment drive(s): {', '.join(active_titles[:2])}"
+            )
+
+        if accepted_offers_count > 0:
+            protection_reasons.append(
+                f"Contains {accepted_offers_count} student-accepted placement offer(s) (institutional placement record)"
+            )
+
+        if active_offers_count > 0 and accepted_offers_count == 0:
+            protection_reasons.append(
+                f"Contains {active_offers_count} active pending offer(s) awaiting student response"
+            )
+
+        if has_genuine_student_impact:
+            protection_reasons.append(
+                f"Tied to {len(genuine_student_emails)} genuine student account(s) ({', '.join(genuine_student_emails[:3])})"
+            )
+
+        if shared_files_count > 0:
+            protection_reasons.append(
+                f"References {shared_files_count} file(s) shared outside this job (protected from deletion)"
+            )
+
+        if not self.is_candidate_test_job(job):
+            protection_reasons.append("Job title lacks test/timestamp patterns and appears genuine")
+
+        # Safety Classification Decision
+        if has_active_circulars:
+            safety_classification = "REQUIRES_ARCHIVE"
+        elif accepted_offers_count > 0 or has_genuine_student_impact:
+            if not self.is_candidate_test_job(job):
+                safety_classification = "PROTECTED_GENUINE"
+            else:
+                safety_classification = "REQUIRES_ARCHIVE"
+        elif active_offers_count > 0 or confirmed_outcomes_count > 0 or not self.is_candidate_test_job(job):
+            safety_classification = "REQUIRES_ARCHIVE"
+        else:
+            safety_classification = "SAFE_TO_PURGE"
+
+        dependent_counts = {
+            "jobs_count": 1,
+            "circulars_count": circulars_count,
+            "circular_job_links_count": circular_job_links_count,
+            "applications_count": applications_count,
+            "shortlists_count": shortlists_count,
+            "rounds_count": rounds_count,
+            "outcomes_count": outcomes_count,
+            "confirmed_outcomes_count": confirmed_outcomes_count,
+            "result_batches_count": result_batches_count,
+            "result_items_count": result_items_count,
+            "confirmed_result_items_count": confirmed_result_items_count,
+            "offers_count": offers_count,
+            "accepted_offers_count": accepted_offers_count,
+            "active_offers_count": active_offers_count,
+            "files_count": files_count,
+            "shared_files_count": shared_files_count,
+        }
+
+        return {
+            "job_id": job.id,
+            "title": job.title,
+            "company_id": job.company_id,
+            "company_name": job.company.name if job.company else "Unknown Company",
+            "status": job.status.value if hasattr(job.status, "value") else str(job.status),
+            "experience_level": job.experience_level,
+            "location": job.location,
+            "flag_reasons": flag_reasons,
+            "dependent_counts": dependent_counts,
+            "safety_classification": safety_classification,
+            "protection_reasons": protection_reasons,
+            "affected_student_count": len(student_ids_set),
+            "can_purge": (safety_classification == "SAFE_TO_PURGE"),
+            "linked_circular_ids": linked_circular_ids,
+            "linked_circular_titles": linked_circular_titles,
+            "has_active_circulars": has_active_circulars,
+            "records_breakdown": {
+                "applications": applications_count,
+                "rounds": rounds_count,
+                "outcomes": outcomes_count,
+                "result_batches": result_batches_count,
+                "offers": offers_count,
+                "files": files_count,
+            }
+        }
+
     def execute_cleanup(
         self,
         db: Session,
         company_ids: Optional[List[int]] = None,
         circular_ids: Optional[List[int]] = None,
         orphaned_job_ids: Optional[List[int]] = None,
+        job_ids: Optional[List[int]] = None,
         mode: str = "archive",
         confirmation_phrase: Optional[str] = None,
         current_user: Optional[User] = None,
     ) -> Dict[str, Any]:
         """
         Execute explicit cleanup (archive or purge) against explicitly selected targets.
-        Dispatches to drive cleanup if circular_ids or orphaned_job_ids are provided,
+        Dispatches to job cleanup if job_ids are provided,
+        drive cleanup if circular_ids or orphaned_job_ids are provided,
         or company cleanup if company_ids are provided.
         Re-validates every safety invariant in real-time within an atomic transaction.
         """
+        if job_ids and len(job_ids) > 0:
+            return self._execute_jobs_cleanup_workflow(
+                db=db,
+                job_ids=job_ids,
+                mode=mode,
+                confirmation_phrase=confirmation_phrase,
+                current_user=current_user,
+            )
+
         if circular_ids or orphaned_job_ids:
             return self._execute_drives_cleanup_workflow(
                 db=db,
@@ -907,7 +1245,7 @@ class PlacementCleanupService:
             )
 
         if not company_ids:
-            raise ValueError("No targets (company_ids, circular_ids, or orphaned_job_ids) selected for cleanup. Explicit selection is required.")
+            raise ValueError("No targets (company_ids, circular_ids, orphaned_job_ids, or job_ids) selected for cleanup. Explicit selection is required.")
 
         # Deduplicate preserving order
         unique_company_ids = list(dict.fromkeys(company_ids))
@@ -958,6 +1296,293 @@ class PlacementCleanupService:
             return self._execute_archive(db, companies, current_user)
         else:
             return self._execute_purge(db, companies, current_user)
+
+    def _execute_jobs_cleanup_workflow(
+        self,
+        db: Session,
+        job_ids: List[int],
+        mode: str,
+        confirmation_phrase: Optional[str] = None,
+        current_user: Optional[User] = None,
+    ) -> Dict[str, Any]:
+        """Validate and dispatch bulk job posting cleanup."""
+        unique_job_ids = list(dict.fromkeys(job_ids))
+        if not unique_job_ids:
+            raise ValueError("No job IDs provided for cleanup.")
+
+        mode_clean = mode.strip().lower()
+        if mode_clean not in ["archive", "purge"]:
+            raise ValueError(f"Invalid cleanup mode '{mode}'. Supported modes are 'archive' or 'purge'.")
+
+        if mode_clean == "purge":
+            expected_phrase = "CONFIRM_PURGE_TEST_DATA"
+            if not confirmation_phrase or confirmation_phrase.strip() != expected_phrase:
+                raise ValueError(
+                    f"Destructive purge requires explicit confirmation phrase '{expected_phrase}'."
+                )
+
+        jobs = db.query(JobPosting).filter(JobPosting.id.in_(unique_job_ids)).all()
+        found_ids = {j.id for j in jobs}
+        missing_ids = [jid for jid in unique_job_ids if jid not in found_ids]
+        if missing_ids:
+            raise ValueError(f"One or more job IDs not found: {missing_ids}")
+
+        # Real-time safety validation (never trust previous preview)
+        for job in jobs:
+            analysis = self._analyze_job_dependencies(db, job)
+            counts = analysis["dependent_counts"]
+
+            if mode_clean == "purge":
+                if counts["accepted_offers_count"] > 0:
+                    raise ValueError(
+                        f"Job '{job.title}' (ID: {job.id}) cannot be purged because it has "
+                        f"{counts['accepted_offers_count']} accepted placement offer(s). "
+                        "Accepted offers are permanent institutional records. Use 'archive' mode instead."
+                    )
+                if counts["active_offers_count"] > 0:
+                    raise ValueError(
+                        f"Job '{job.title}' (ID: {job.id}) has active pending offers. "
+                        "Rescind offers or use 'archive' mode."
+                    )
+                if analysis["has_active_circulars"]:
+                    raise ValueError(
+                        f"Job '{job.title}' (ID: {job.id}) cannot be purged because it is linked to active recruitment drive(s): "
+                        f"{', '.join(analysis['linked_circular_titles'][:2])}. "
+                        "Archive the linked drive(s) first, or use 'archive' mode."
+                    )
+                if analysis["safety_classification"] in ["REQUIRES_ARCHIVE", "PROTECTED_GENUINE"]:
+                    raise ValueError(
+                        f"Job '{job.title}' (ID: {job.id}) cannot be purged because it is classified as "
+                        f"{analysis['safety_classification']}. "
+                        f"Reasons: {'; '.join(analysis['protection_reasons'])}. Use 'archive' mode instead."
+                    )
+
+        if mode_clean == "archive":
+            return self._execute_archive_jobs(db, jobs, current_user)
+        else:
+            return self._execute_purge_jobs(db, jobs, current_user)
+
+    def _execute_archive_jobs(
+        self,
+        db: Session,
+        jobs: List[JobPosting],
+        current_user: Optional[User] = None,
+    ) -> Dict[str, Any]:
+        """Safe non-destructive archive of selected jobs."""
+        job_ids = [j.id for j in jobs]
+        jobs_closed = 0
+        shared_jobs_preserved = 0
+
+        for j in jobs:
+            # Check if linked to another active recruitment drive outside the selection
+            active_links_count = db.query(RecruitmentCircularJob).join(
+                RecruitmentCircular, RecruitmentCircularJob.circular_id == RecruitmentCircular.id
+            ).filter(
+                RecruitmentCircularJob.job_posting_id == j.id,
+                RecruitmentCircular.status != RecruitmentCircularStatus.ARCHIVED,
+            ).count()
+
+            if active_links_count > 0:
+                shared_jobs_preserved += 1
+            else:
+                j.status = JobStatus.CLOSED
+                j.updated_at = datetime.utcnow()
+                jobs_closed += 1
+
+        db.flush()
+
+        # Audit log
+        audit_entry = audit_service.log_action(
+            db=db,
+            action="RECRUITMENT_JOB_TEST_DATA_ARCHIVED",
+            actor=current_user,
+            target_type="job_bulk",
+            target_id=",".join(str(jid) for jid in job_ids[:10]),
+            details={
+                "mode": "archive",
+                "job_ids": job_ids,
+                "jobs_closed": jobs_closed,
+                "shared_jobs_preserved": shared_jobs_preserved,
+            },
+        )
+        db.commit()
+
+        return {
+            "success": True,
+            "mode": "archive",
+            "jobs_processed": len(jobs),
+            "job_ids": job_ids,
+            "records_affected": {
+                "jobs_closed": jobs_closed,
+                "shared_jobs_preserved": shared_jobs_preserved,
+            },
+            "audit_log_id": audit_entry.id if audit_entry else None,
+            "message": f"Successfully archived {jobs_closed} job posting(s)." + (
+                f" ({shared_jobs_preserved} shared jobs preserved open)" if shared_jobs_preserved > 0 else ""
+            ),
+        }
+
+    def _execute_purge_jobs(
+        self,
+        db: Session,
+        jobs: List[JobPosting],
+        current_user: Optional[User] = None,
+    ) -> Dict[str, Any]:
+        """Perform transactional batched permanent purge of safe-to-purge job postings."""
+        job_ids = [j.id for j in jobs]
+
+        # 1. Collect candidate files before deleting DB records
+        candidate_file_ids: Set[UUID] = set()
+        batches = db.query(RecruitmentResultBatch).filter(RecruitmentResultBatch.job_posting_id.in_(job_ids)).all()
+        for b in batches:
+            if b.file_id:
+                candidate_file_ids.add(b.file_id)
+
+        offers = db.query(PlacementOffer).filter(PlacementOffer.job_posting_id.in_(job_ids)).all()
+        for o in offers:
+            if o.offer_letter_file_id:
+                candidate_file_ids.add(o.offer_letter_file_id)
+
+        # Filter out shared files
+        unshared_file_ids = []
+        for fid in candidate_file_ids:
+            if not self._is_file_shared_outside_context(db, fid, excluded_company_ids=[], excluded_circular_ids=[], excluded_job_ids=job_ids):
+                unshared_file_ids.append(fid)
+
+        # Collect storage file paths for MinIO post-commit deletion
+        files_to_delete_storage = []
+        if unshared_file_ids:
+            file_records = db.query(File).filter(File.id.in_(unshared_file_ids)).all()
+            for fr in file_records:
+                if fr.bucket in ["placement-docs", "placement-documents"]:
+                    files_to_delete_storage.append((fr.bucket, fr.object_key))
+
+        records_affected = {
+            "circular_job_links_removed": 0,
+            "shortlists_removed": 0,
+            "student_round_outcomes_removed": 0,
+            "result_items_removed": 0,
+            "result_batches_removed": 0,
+            "applications_removed": 0,
+            "rounds_removed": 0,
+            "offers_removed": 0,
+            "notifications_removed": 0,
+            "jobs_purged": len(jobs),
+            "files_removed": 0,
+        }
+
+        # 2. Transactional set-based batched SQL deletion
+        # Step A: Junction links
+        records_affected["circular_job_links_removed"] = db.execute(
+            sa.text("DELETE FROM recruitment_circular_jobs WHERE job_posting_id IN :jids"),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        # Step B: Shortlists
+        records_affected["shortlists_removed"] = db.execute(
+            sa.text("DELETE FROM shortlists WHERE job_posting_id IN :jids"),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        # Step C: Outcomes tied to rounds or applications of these jobs
+        records_affected["student_round_outcomes_removed"] = db.execute(
+            sa.text("""
+                DELETE FROM student_round_outcomes 
+                WHERE application_id IN (SELECT id FROM applications WHERE job_posting_id IN :jids)
+                   OR round_id IN (SELECT id FROM recruitment_rounds WHERE job_posting_id IN :jids)
+            """),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        # Step D: Result items & batches exclusively tied to these jobs
+        records_affected["result_items_removed"] = db.execute(
+            sa.text("""
+                DELETE FROM recruitment_result_items 
+                WHERE batch_id IN (SELECT id FROM recruitment_result_batches WHERE job_posting_id IN :jids)
+            """),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        records_affected["result_batches_removed"] = db.execute(
+            sa.text("DELETE FROM recruitment_result_batches WHERE job_posting_id IN :jids"),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        # Step E: Applications
+        records_affected["applications_removed"] = db.execute(
+            sa.text("DELETE FROM applications WHERE job_posting_id IN :jids"),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        # Step F: Recruitment Rounds
+        records_affected["rounds_removed"] = db.execute(
+            sa.text("DELETE FROM recruitment_rounds WHERE job_posting_id IN :jids"),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        # Step G: Placement Offers
+        records_affected["offers_removed"] = db.execute(
+            sa.text("DELETE FROM placement_offers WHERE job_posting_id IN :jids"),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        # Step H: Notifications
+        records_affected["notifications_removed"] = db.execute(
+            sa.text("""
+                DELETE FROM notifications 
+                WHERE type IN ('placement_job', 'job_posting') AND reference_id IN :jids
+            """),
+            {"jids": tuple(job_ids)},
+        ).rowcount
+
+        # Step I: Jobs
+        db.execute(
+            sa.text("DELETE FROM job_postings WHERE id IN :jids"),
+            {"jids": tuple(job_ids)},
+        )
+
+        # Step J: Unshared placement file metadata
+        if unshared_file_ids:
+            records_affected["files_removed"] = db.execute(
+                sa.text("DELETE FROM files WHERE id IN :fids"),
+                {"fids": tuple(unshared_file_ids)},
+            ).rowcount
+
+        # Step K: Audit log
+        audit_entry = audit_service.log_action(
+            db=db,
+            action="RECRUITMENT_JOB_TEST_DATA_PURGED",
+            actor=current_user,
+            target_type="job_bulk",
+            target_id=",".join(str(jid) for jid in job_ids[:10]),
+            details={
+                "job_ids": job_ids,
+                "records_affected": records_affected,
+            },
+        )
+
+        # Commit DB transaction
+        db.commit()
+
+        # Step L: Post-commit MinIO storage cleanup
+        failed_files = []
+        for bucket, obj_key in files_to_delete_storage:
+            try:
+                minio_client.client.remove_object(bucket, obj_key)
+            except Exception as e:
+                logger.warning(f"Failed to remove MinIO object {bucket}/{obj_key}: {e}")
+                failed_files.append({"bucket": bucket, "object_key": obj_key, "error": str(e)})
+
+        return {
+            "success": True,
+            "mode": "purge",
+            "jobs_processed": len(jobs),
+            "job_ids": job_ids,
+            "records_affected": records_affected,
+            "skipped_records": failed_files,
+            "audit_log_id": audit_entry.id if audit_entry else None,
+            "message": f"Successfully permanently purged {len(jobs)} job posting(s) and dependent test records.",
+        }
 
     def _execute_drives_cleanup_workflow(
         self,

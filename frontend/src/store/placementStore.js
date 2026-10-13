@@ -242,7 +242,7 @@ const usePlacementStore = create((set, get) => ({
   fetchJobPostings: async (params = {}) => {
     set({ isLoading: true, error: null });
     try {
-      const jobs = await getJobPostings(params);
+      const jobs = await getJobPostings({ limit: 500, ...params });
       set({ jobs, isLoading: false });
       return jobs;
     } catch (error) {

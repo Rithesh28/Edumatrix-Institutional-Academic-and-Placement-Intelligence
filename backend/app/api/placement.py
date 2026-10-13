@@ -168,7 +168,7 @@ async def get_job_postings(
     company_id: Optional[int] = Query(None, description="Filter by company ID"),
     status: Optional[str] = Query(None, description="Filter by status"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=200),
+    limit: int = Query(200, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1520,13 +1520,14 @@ def _normalize_id_list(raw_ids: Optional[List[Any]]) -> Optional[List[int]]:
 async def preview_recruitment_cleanup(
     company_ids: Optional[List[str]] = Query(None),
     circular_ids: Optional[List[str]] = Query(None),
+    job_ids: Optional[List[str]] = Query(None),
     pattern: Optional[str] = Query(None),
     include_all_candidates: bool = Query(True),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Preview candidates for safe recruitment test-data cleanup (companies or drives).
+    Preview candidates for safe recruitment test-data cleanup (companies, drives, or jobs).
     Evaluates dependent record counts, safety classifications, and protection reasons.
     Preview operations are strictly read-only and never mutate records or delete storage files.
     Accessible only by Placement Officers and Admins.
@@ -1535,10 +1536,12 @@ async def preview_recruitment_cleanup(
     try:
         norm_company_ids = _normalize_id_list(company_ids)
         norm_circular_ids = _normalize_id_list(circular_ids)
+        norm_job_ids = _normalize_id_list(job_ids)
         preview_data = placement_cleanup_service.generate_cleanup_preview(
             db=db,
             company_ids=norm_company_ids,
             circular_ids=norm_circular_ids,
+            job_ids=norm_job_ids,
             pattern=pattern,
             include_all_candidates=include_all_candidates,
         )
@@ -1582,6 +1585,41 @@ async def preview_recruitment_drives_cleanup(
         )
 
 
+@router.get("/cleanup/jobs/preview", response_model=CleanupPreviewResponse)
+async def preview_job_postings_cleanup(
+    job_ids: Optional[List[str]] = Query(None),
+    company_id: Optional[int] = Query(None),
+    status: Optional[str] = Query(None),
+    pattern: Optional[str] = Query(None),
+    include_all_candidates: bool = Query(True),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Preview job postings for safe bulk test-data cleanup.
+    Evaluates dependent applications, rounds, outcomes, batches, offers, and safety classifications.
+    Accessible only by Placement Officers and Admins.
+    """
+    check_placement_officer_or_admin(current_user)
+    try:
+        norm_job_ids = _normalize_id_list(job_ids)
+        preview_data = placement_cleanup_service.generate_jobs_cleanup_preview(
+            db=db,
+            job_ids=norm_job_ids,
+            company_id=company_id,
+            status=status,
+            pattern=pattern,
+            include_all_candidates=include_all_candidates,
+        )
+        return CleanupPreviewResponse(**preview_data)
+    except Exception as e:
+        logger.error(f"Error generating jobs cleanup preview: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate jobs cleanup preview: {str(e)}"
+        )
+
+
 @router.post("/cleanup/execute", response_model=CleanupExecuteResponse)
 async def execute_recruitment_cleanup(
     payload: CleanupExecuteRequest,
@@ -1590,7 +1628,7 @@ async def execute_recruitment_cleanup(
 ):
     """
     Execute explicit recruitment test-data cleanup ('archive' or 'purge').
-    Requires explicit company or drive selection and strict safety re-validation at execution time.
+    Requires explicit company, drive, or job selection and strict safety re-validation at execution time.
     'purge' mode requires confirmation_phrase='CONFIRM_PURGE_TEST_DATA'.
     Accessible only by Placement Officers and Admins.
     """
@@ -1601,6 +1639,7 @@ async def execute_recruitment_cleanup(
             company_ids=payload.company_ids,
             circular_ids=payload.circular_ids,
             orphaned_job_ids=payload.orphaned_job_ids,
+            job_ids=payload.job_ids,
             mode=payload.mode,
             confirmation_phrase=payload.confirmation_phrase,
             current_user=current_user,

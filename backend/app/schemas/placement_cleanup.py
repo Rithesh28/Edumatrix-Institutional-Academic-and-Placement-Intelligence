@@ -101,6 +101,36 @@ class OrphanedJobCleanupCandidate(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+
+class JobCleanupCandidate(BaseModel):
+    """Detailed preview of an explicitly identified job posting cleanup candidate."""
+    job_id: int
+    title: str
+    company_id: int
+    company_name: str
+    status: str
+    experience_level: Optional[str] = None
+    location: Optional[str] = None
+    flag_reasons: List[str] = Field(default_factory=list, description="Signals that flagged this job")
+    dependent_counts: CleanupDependentCounts
+    safety_classification: str = Field(
+        ...,
+        description="'SAFE_TO_PURGE', 'REQUIRES_ARCHIVE', or 'PROTECTED_GENUINE'"
+    )
+    protection_reasons: List[str] = Field(
+        default_factory=list,
+        description="Reasons why purge is blocked if protected or requiring archive"
+    )
+    affected_student_count: int = Field(0, description="Number of unique students tied to this job")
+    can_purge: bool = Field(False, description="True only if safety_classification == 'SAFE_TO_PURGE'")
+    linked_circular_ids: List[int] = Field(default_factory=list, description="IDs of linked recruitment drives")
+    linked_circular_titles: List[str] = Field(default_factory=list, description="Titles of linked recruitment drives")
+    has_active_circulars: bool = Field(False, description="True if linked to any non-archived recruitment drive")
+    records_breakdown: Optional[Dict[str, int]] = Field(default=None, description="Exact counts of records to be deleted, archived, or preserved")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class CleanupPreviewSummary(BaseModel):
     """Aggregate totals across all preview candidates."""
     total_candidates_flagged: int = 0
@@ -121,14 +151,20 @@ class CleanupPreviewSummary(BaseModel):
     total_drives_requires_archive: int = 0
     total_drives_protected_genuine: int = 0
     total_orphaned_jobs: int = 0
+    # Additional job-specific breakdown metrics
+    total_jobs_flagged: int = 0
+    total_jobs_safe_to_purge: int = 0
+    total_jobs_requires_archive: int = 0
+    total_jobs_protected_genuine: int = 0
 
 
 class CleanupPreviewResponse(BaseModel):
-    """Response model for GET /placement/cleanup/preview and /placement/cleanup/drives/preview."""
+    """Response model for GET /placement/cleanup/preview, /placement/cleanup/drives/preview, and /placement/cleanup/jobs/preview."""
     summary: CleanupPreviewSummary
     candidates: List[CompanyCleanupCandidate] = Field(default_factory=list)
     drives: List[DriveCleanupCandidate] = Field(default_factory=list)
     orphaned_jobs: List[OrphanedJobCleanupCandidate] = Field(default_factory=list)
+    jobs: List[JobCleanupCandidate] = Field(default_factory=list)
 
 
 class CleanupExecuteRequest(BaseModel):
@@ -136,6 +172,7 @@ class CleanupExecuteRequest(BaseModel):
     company_ids: Optional[List[int]] = Field(None, description="Explicit list of company IDs to clean up")
     circular_ids: Optional[List[int]] = Field(None, description="Explicit list of recruitment drive IDs to clean up")
     orphaned_job_ids: Optional[List[int]] = Field(None, description="Optional list of orphaned job IDs to clean up")
+    job_ids: Optional[List[int]] = Field(None, description="Explicit list of job posting IDs to clean up")
     mode: str = Field(..., pattern="^(archive|purge)$", description="Execution mode: 'archive' or 'purge'")
     confirmation_phrase: Optional[str] = Field(
         None,
@@ -147,8 +184,9 @@ class CleanupExecuteRequest(BaseModel):
         c_ids = self.company_ids or []
         circ_ids = self.circular_ids or []
         orph_ids = self.orphaned_job_ids or []
-        if not c_ids and not circ_ids and not orph_ids:
-            raise ValueError("At least one target (company_ids, circular_ids, or orphaned_job_ids) must have items to clean up.")
+        j_ids = self.job_ids or []
+        if not c_ids and not circ_ids and not orph_ids and not j_ids:
+            raise ValueError("At least one target (company_ids, circular_ids, orphaned_job_ids, or job_ids) must have items to clean up.")
         return self
 
 
@@ -158,9 +196,12 @@ class CleanupExecuteResponse(BaseModel):
     mode: str
     companies_processed: int = 0
     drives_processed: int = 0
+    jobs_processed: int = 0
     company_ids: List[int] = Field(default_factory=list)
     circular_ids: List[int] = Field(default_factory=list)
+    job_ids: List[int] = Field(default_factory=list)
     records_affected: Dict[str, int] = Field(default_factory=dict)
     skipped_records: List[Dict[str, Any]] = Field(default_factory=list)
     audit_log_id: Optional[int] = None
     message: str
+
