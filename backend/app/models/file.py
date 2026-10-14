@@ -103,7 +103,7 @@ class File(Base):
     # Table Indexes
     __table_args__ = (
         Index("ix_files_department_type", "department", "file_type"),
-        Index("ix_files_uploaded_by", "uploaded_by", "created_at"),
+        Index("ix_files_uploaded_by_created_at", "uploaded_by", "created_at"),
         Index("ix_files_status_type", "status", "file_type"),
     )
     

@@ -786,6 +786,13 @@ class StudyBuddyContentService:
                 detail="Access denied: You cannot view results for another student's quiz attempt."
             )
 
+        # Result availability check: ensure answer keys are never leaked before submission
+        if attempt.status != QuizStatus.COMPLETED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Quiz attempt has not been submitted yet. Results and answer keys are only accessible after completion."
+            )
+
         questions = attempt.questions_data or []
         student_answers = attempt.student_answers or {}
         questions_results = []
