@@ -37,11 +37,19 @@ from ..schemas.study_buddy import (
     SyllabusReviewRequest,
     SyllabusPublishRequest,
     StudyBuddyQuestionRequest,
-    StudyBuddyAnswerResponse
+    StudyBuddyAnswerResponse,
+    StudyBuddySummaryRequest,
+    StudyBuddySummaryResponse,
+    StudyBuddyQuizCreateRequest,
+    StudyBuddyQuizPublicResponse,
+    StudyBuddyQuizSubmitRequest,
+    StudyBuddyQuizResultResponse,
+    StudyBuddyQuizAttemptSummaryResponse
 )
 from ..services.syllabus_ingestion_service import syllabus_ingestion_service
 from ..services.syllabus_indexing_service import syllabus_indexing_service
 from ..services.study_buddy_chat_service import study_buddy_chat_service
+from ..services.study_buddy_content_service import study_buddy_content_service
 
 logger = logging.getLogger(__name__)
 
@@ -735,3 +743,119 @@ async def ask_study_buddy(
         question=request.question,
         subject_id=request.subject_id
     )
+
+
+# ============================================
+# STUDY SUMMARIES ENDPOINTS
+# ============================================
+
+@router.post("/summaries/generate", response_model=StudyBuddySummaryResponse)
+async def generate_study_summary(
+    request: StudyBuddySummaryRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate syllabus-grounded academic study summaries.
+    - Scoped strictly to student's authorized department and approved, published syllabi.
+    - Supports concise revision notes or detailed breakdowns.
+    - Returns verified source citations with provenance.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_content_service.generate_summary(
+        db=db,
+        current_user=current_user,
+        subject_id=request.subject_id,
+        unit_id=request.unit_id,
+        topic_id=request.topic_id,
+        format_type=request.format_type
+    )
+
+
+# ============================================
+# QUIZ GENERATION, ATTEMPTS & EVALUATION
+# ============================================
+
+@router.post("/quizzes/generate", response_model=StudyBuddyQuizPublicResponse)
+async def generate_quiz(
+    request: StudyBuddyQuizCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate and persist a syllabus-grounded multiple-choice quiz.
+    - Answer keys and explanations are held securely server-side and omitted from this public response.
+    - Strict validation rejects malformed, duplicate, or unsupported questions.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_content_service.generate_quiz(
+        db=db,
+        current_user=current_user,
+        subject_id=request.subject_id,
+        unit_id=request.unit_id,
+        topic_id=request.topic_id,
+        num_questions=request.num_questions,
+        difficulty=request.difficulty
+    )
+
+
+@router.post("/quizzes/attempts/{attempt_id}/submit", response_model=StudyBuddyQuizResultResponse)
+async def submit_quiz(
+    attempt_id: int,
+    request: StudyBuddyQuizSubmitRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Submit answers for a generated quiz attempt.
+    - Strictly graded server-side; prevents client score tampering.
+    - Returns full question results, correct options, explanations, and verified citations.
+    - Strict ownership check: only the student who created the attempt can submit.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_content_service.submit_quiz(
+        db=db,
+        current_user=current_user,
+        attempt_id=attempt_id,
+        student_answers=request.answers
+    )
+
+
+@router.get("/quizzes/attempts", response_model=List[StudyBuddyQuizAttemptSummaryResponse])
+async def list_quiz_attempts(
+    subject_id: Optional[int] = Query(None, description="Optional subject ID filter"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    List past quiz attempts and scores for the authenticated student.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_content_service.list_student_attempts(
+        db=db,
+        current_user=current_user,
+        subject_id=subject_id
+    )
+
+
+@router.get("/quizzes/attempts/{attempt_id}", response_model=StudyBuddyQuizResultResponse)
+async def get_quiz_attempt_result(
+    attempt_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve quiz results for an attempt.
+    - Strict ownership check: students cannot view other students' results.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_content_service.get_quiz_result(
+        db=db,
+        current_user=current_user,
+        attempt_id=attempt_id
+    )
+

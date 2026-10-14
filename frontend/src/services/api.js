@@ -59,8 +59,14 @@ export const chatAPI = {
 // ============================================
 export const studyBuddyAPI = {
   getSubjects: () => api.get('/study-buddy/subjects'),
+  getSyllabusDetail: (documentId) => api.get(`/study-buddy/syllabi/${documentId}`),
   askQuestion: (question, subjectId = null) => api.post('/study-buddy/chat', { question, subject_id: subjectId }),
-  searchSyllabus: (query, subjectId = null) => api.get('/study-buddy/search', { params: { query, subject_id: subjectId } })
+  searchSyllabus: (query, subjectId = null) => api.get('/study-buddy/search', { params: { query, subject_id: subjectId } }),
+  generateSummary: (payload) => api.post('/study-buddy/summaries/generate', payload),
+  generateQuiz: (payload) => api.post('/study-buddy/quizzes/generate', payload),
+  submitQuiz: (attemptId, answers) => api.post(`/study-buddy/quizzes/attempts/${attemptId}/submit`, { answers }),
+  getQuizAttempts: (subjectId = null) => api.get('/study-buddy/quizzes/attempts', { params: subjectId ? { subject_id: subjectId } : {} }),
+  getQuizResult: (attemptId) => api.get(`/study-buddy/quizzes/attempts/${attemptId}`),
 }
 
 // ============================================

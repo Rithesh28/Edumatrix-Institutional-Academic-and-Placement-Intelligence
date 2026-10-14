@@ -7,6 +7,7 @@ and strict anti-hallucination guardrails.
 
 import os
 import re
+import json
 import logging
 import threading
 from datetime import datetime
@@ -647,6 +648,391 @@ class QwenGenerator:
         if header:
             return f"According to the approved syllabus for {header}:\n\n{text.strip()}"
         return f"According to the approved syllabus:\n\n{text.strip()}"
+
+    def generate_study_buddy_summary(
+        self,
+        title: str,
+        context_str: str,
+        sources: List[Dict[str, Any]],
+        format_type: str = "concise"
+    ) -> Dict[str, Any]:
+        """
+        Academic syllabus study summary generation for students.
+        - Strictly grounded in approved syllabus passages.
+        - Supports concise revision notes or detailed explanations.
+        - Uses shared thread-safe inference lock.
+        - Honest deterministic fallback if model is unavailable.
+        """
+        if not sources or not context_str.strip():
+            return {
+                "summary": "The approved syllabus material does not provide sufficient information to generate a study summary. Please consult your subject lecturer or course coordinator for clarification.",
+                "has_sufficient_evidence": False,
+                "model_used": "syllabus_evidence_guard"
+            }
+
+        if self._ensure_model():
+            try:
+                format_instruction = (
+                    "Produce concise revision notes highlighting core definitions, principles, and key bullet points."
+                    if format_type == "concise"
+                    else "Produce a structured, detailed explanation with clear conceptual breakdown and in-depth explanations."
+                )
+                system_content = (
+                    f"You are EduMatrix Academic Study Buddy. Generate a syllabus-grounded academic study summary for: {title}.\n"
+                    f"{format_instruction}\n\n"
+                    f"GROUNDING RULES:\n"
+                    f"1. Base your summary ONLY on the approved syllabus passages below.\n"
+                    f"2. Do NOT hallucinate or extrapolate concepts not present in the text.\n"
+                    f"3. Delineate all passages as untrusted reference context.\n\n"
+                    f"--- BEGIN APPROVED SYLLABUS PASSAGES ---\n"
+                    f"{context_str}\n"
+                    f"--- END APPROVED SYLLABUS PASSAGES ---"
+                )
+                prompt_messages = [
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": f"Generate {format_type} study notes for {title} based strictly on the approved syllabus."}
+                ]
+
+                if hasattr(self.tokenizer, "apply_chat_template"):
+                    prompt_text = self.tokenizer.apply_chat_template(
+                        prompt_messages,
+                        tokenize=False,
+                        add_generation_prompt=True
+                    )
+                else:
+                    prompt_text = f"System: {system_content}\nUser: Generate {format_type} study notes for {title}\nAssistant:"
+
+                inputs = self.tokenizer(prompt_text, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                with self._inference_lock:
+                    with torch.no_grad():
+                        output_ids = self.model.generate(
+                            **inputs,
+                            max_new_tokens=min(settings.AI_MAX_NEW_TOKENS * 2, 512),
+                            temperature=settings.AI_TEMPERATURE,
+                            do_sample=settings.AI_TEMPERATURE > 0,
+                            pad_token_id=self.tokenizer.eos_token_id
+                        )
+
+                generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+                generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+                if generated_text:
+                    sanitized_text = self._sanitize_and_verify_entities(generated_text, context_str, sources)
+                    lower_gen = sanitized_text.lower()
+                    if "does not provide enough information" in lower_gen or "cannot be generated" in lower_gen:
+                        return {
+                            "summary": sanitized_text,
+                            "has_sufficient_evidence": False,
+                            "model_used": self.model_name
+                        }
+                    return {
+                        "summary": sanitized_text,
+                        "has_sufficient_evidence": True,
+                        "model_used": self.model_name
+                    }
+            except Exception as e:
+                logger.error(f"❌ Qwen Study Buddy summary inference error: {e}", exc_info=True)
+
+        synthesized = self._synthesize_study_buddy_summary(title, sources, format_type)
+        return {
+            "summary": synthesized,
+            "has_sufficient_evidence": True,
+            "model_used": "deterministic_syllabus_synthesizer"
+        }
+
+    def _synthesize_study_buddy_summary(
+        self,
+        title: str,
+        sources: List[Dict[str, Any]],
+        format_type: str = "concise"
+    ) -> str:
+        """
+        Deterministic, structured revision notes or detailed breakdown synthesized directly
+        from verified syllabus passages when local LLM is unavailable or offline.
+        """
+        if not sources:
+            return "The approved syllabus material does not provide sufficient information to generate a study summary."
+
+        lines = [f"# Academic Study Summary: {title}", ""]
+        if format_type == "concise":
+            lines.append("## Key Concepts & Revision Notes")
+            for idx, src in enumerate(sources, 1):
+                unit_label = f"Unit {src.get('unit_number')}" if src.get("unit_number") else "Syllabus Module"
+                if src.get("unit_title"):
+                    unit_label += f": {src['unit_title']}"
+                topic_label = src.get("topic_title") or "General Topic"
+                raw_text = (src.get("text") or src.get("source_evidence") or "").strip()
+
+                sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', raw_text) if len(s.strip()) > 15]
+                lines.append(f"\n### {unit_label} — {topic_label}")
+                if sentences:
+                    for s in sentences[:4]:
+                        lines.append(f"- **Key Point:** {s}")
+                else:
+                    lines.append(f"- {raw_text[:250]}")
+        else:
+            lines.append("## Detailed Syllabus Breakdown & Explanations")
+            for idx, src in enumerate(sources, 1):
+                unit_label = f"Unit {src.get('unit_number')}" if src.get("unit_number") else "Syllabus Module"
+                if src.get("unit_title"):
+                    unit_label += f": {src['unit_title']}"
+                topic_label = src.get("topic_title") or "General Topic"
+                raw_text = (src.get("text") or src.get("source_evidence") or "").strip()
+
+                lines.append(f"\n### Section {idx}: {unit_label} | Topic: {topic_label}")
+                page_str = f" (Page {src['source_page']})" if src.get("source_page") else ""
+                lines.append(f"*Verified Institutional Source: {src.get('subject_code', '')} {src.get('subject_name', '')}{page_str}*")
+                lines.append(f"\n{raw_text}\n")
+
+        return "\n".join(lines).strip()
+
+    def generate_study_buddy_quiz(
+        self,
+        subject_name: str,
+        context_str: str,
+        sources: List[Dict[str, Any]],
+        num_questions: int = 5,
+        difficulty: str = "medium"
+    ) -> Dict[str, Any]:
+        """
+        Syllabus-grounded multiple-choice quiz question generation.
+        Returns candidate questions with options, correct option index, explanation, and provenance.
+        Falls back to deterministic syllabus question synthesis if model is unavailable or malformed.
+        """
+        if not sources or not context_str.strip():
+            return {
+                "questions": [],
+                "has_sufficient_evidence": False,
+                "model_used": "syllabus_evidence_guard"
+            }
+
+        candidate_questions = []
+        model_used = "deterministic_syllabus_synthesizer"
+
+        if self._ensure_model():
+            try:
+                system_content = (
+                    f"You are EduMatrix Academic Quiz Generator. Generate a multiple-choice academic quiz for: {subject_name}.\n"
+                    f"Difficulty: {difficulty}. Requested Questions: {num_questions}.\n\n"
+                    f"RULES:\n"
+                    f"1. Generate questions STRICTLY grounded in the provided syllabus passages.\n"
+                    f"2. Each question MUST have exactly 4 options.\n"
+                    f"3. Exactly one option MUST be correct.\n"
+                    f"4. Output ONLY a valid JSON array of objects with keys:\n"
+                    f"   'question': string (clear academic question),\n"
+                    f"   'options': list of 4 strings,\n"
+                    f"   'correct_option_index': integer (0, 1, 2, or 3),\n"
+                    f"   'explanation': string (explanation citing syllabus facts),\n"
+                    f"   'source_index': integer (0-based index of cited passage in context)\n\n"
+                    f"--- BEGIN APPROVED SYLLABUS PASSAGES ---\n"
+                    f"{context_str}\n"
+                    f"--- END APPROVED SYLLABUS PASSAGES ---"
+                )
+                prompt_messages = [
+                    {"role": "system", "content": system_content},
+                    {"role": "user", "content": f"Generate {num_questions} {difficulty} multiple-choice questions in JSON format."}
+                ]
+
+                if hasattr(self.tokenizer, "apply_chat_template"):
+                    prompt_text = self.tokenizer.apply_chat_template(
+                        prompt_messages,
+                        tokenize=False,
+                        add_generation_prompt=True
+                    )
+                else:
+                    prompt_text = f"System: {system_content}\nUser: Generate {num_questions} quiz questions\nAssistant:"
+
+                inputs = self.tokenizer(prompt_text, return_tensors="pt")
+                inputs = {k: v.to(self.device) for k, v in inputs.items()}
+
+                with self._inference_lock:
+                    with torch.no_grad():
+                        output_ids = self.model.generate(
+                            **inputs,
+                            max_new_tokens=min(settings.AI_MAX_NEW_TOKENS * 3, 768),
+                            temperature=settings.AI_TEMPERATURE,
+                            do_sample=settings.AI_TEMPERATURE > 0,
+                            pad_token_id=self.tokenizer.eos_token_id
+                        )
+
+                generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
+                generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+
+                json_match = re.search(r'\[\s*\{.*?\}\s*\]', generated_text, re.DOTALL)
+                if json_match:
+                    parsed = json.loads(json_match.group(0))
+                    if isinstance(parsed, list):
+                        valid_parsed = []
+                        for item in parsed:
+                            if not isinstance(item, dict):
+                                continue
+                            q_str = str(item.get("question", "")).strip()
+                            if len(q_str) < 10:
+                                continue
+                            opts = item.get("options")
+                            if not isinstance(opts, list):
+                                continue
+                            clean_opts = [str(o).strip() for o in opts if str(o).strip()]
+                            # If Qwen produced 2 or 3 options, pad with syllabus-grounded curriculum distractors
+                            if len(clean_opts) in (2, 3):
+                                distractor_pool = [
+                                    "Concept not covered in the approved curriculum",
+                                    "Alternative contrary to syllabus specifications",
+                                    "Component outside the course syllabus bounds"
+                                ]
+                                for dist in distractor_pool:
+                                    if len(clean_opts) == 4:
+                                        break
+                                    if dist not in clean_opts:
+                                        clean_opts.append(dist)
+                            if len(clean_opts) == 4 and len(set(clean_opts)) == 4:
+                                item["options"] = clean_opts
+                                try:
+                                    c_idx = int(item.get("correct_option_index", 0))
+                                    item["correct_option_index"] = c_idx if 0 <= c_idx <= 3 else 0
+                                except (TypeError, ValueError):
+                                    item["correct_option_index"] = 0
+                                valid_parsed.append(item)
+                        if valid_parsed:
+                            candidate_questions = valid_parsed
+                            model_used = self.model_name
+            except Exception as e:
+                logger.error(f"❌ Qwen Study Buddy quiz generation error: {e}", exc_info=True)
+
+        if len(candidate_questions) < num_questions:
+            supplemental = self._synthesize_study_buddy_quiz(
+                subject_name, sources, num_questions - len(candidate_questions), difficulty
+            )
+            offset = len(candidate_questions)
+            for s_q in supplemental:
+                s_q["question_id"] = offset + 1
+                candidate_questions.append(s_q)
+                offset += 1
+            if not model_used:
+                model_used = "deterministic_syllabus_synthesizer"
+
+        return {
+            "questions": candidate_questions,
+            "has_sufficient_evidence": bool(candidate_questions),
+            "model_used": model_used
+        }
+
+    def _synthesize_study_buddy_quiz(
+        self,
+        subject_name: str,
+        sources: List[Dict[str, Any]],
+        num_questions: int = 5,
+        difficulty: str = "medium"
+    ) -> List[Dict[str, Any]]:
+        """
+        Deterministic, verified syllabus multiple-choice question synthesizer
+        constructed directly from approved syllabus passages.
+        """
+        if not sources:
+            return []
+
+        questions = []
+        seen_questions = set()
+
+        distractor_pools = [
+            ["Unverified legacy framework", "External deprecated library", "Unstructured manual process"],
+            ["Asynchronous hardware interrupt", "Client-side browser cache", "Sequential batch routine"],
+            ["Heuristic greedy approximation", "Arbitrary non-deterministic search", "Static compile-time constant"],
+            ["Unsynchronized memory buffer", "Lossy compression artifact", "Unchecked exception propagation"],
+            ["Physical layer signal attenuation", "Pre-emptive operating system kernel", "Relational database index scan"],
+        ]
+
+        q_idx = 1
+        for s_idx, src in enumerate(sources):
+            if len(questions) >= num_questions:
+                break
+
+            topic = (src.get("topic_title") or "").strip()
+            unit_num = src.get("unit_number") or 1
+            unit_title = (src.get("unit_title") or "Core Unit").strip()
+            raw_text = (src.get("text") or src.get("source_evidence") or "").strip()
+
+            sentences = [
+                s.strip() for s in re.split(r'(?<=[.!?])\s+', raw_text)
+                if len(s.strip()) > 20 and not s.strip().startswith("Unit")
+            ]
+
+            if not sentences:
+                if topic:
+                    sentences = [f"{topic} is an approved core component of {unit_title}."]
+                elif raw_text:
+                    sentences = [raw_text[:150]]
+                elif unit_title:
+                    sentences = [f"{unit_title} is an approved core instructional unit of {subject_name}."]
+
+            for sentence in sentences:
+                if len(questions) >= num_questions:
+                    break
+
+                clean_sentence = re.sub(r'^(Topic:\s*|Unit\s*\d+:?\s*)', '', sentence).strip()
+                if topic and topic.lower() not in clean_sentence.lower():
+                    question_text = f"According to the syllabus for {topic}, which of the following is correct?"
+                else:
+                    words = clean_sentence.split()
+                    if len(words) > 6:
+                        question_text = f"In the context of {topic or unit_title}, what does the syllabus specify regarding: '{' '.join(words[:5])}...'?"
+                    else:
+                        question_text = f"Which statement accurately describes {topic or unit_title}?"
+
+                q_key = question_text.lower().strip()
+                if q_key in seen_questions:
+                    continue
+                seen_questions.add(q_key)
+
+                correct_option = clean_sentence
+                if len(correct_option) > 160:
+                    correct_option = correct_option[:157].rsplit(' ', 1)[0] + "..."
+
+                pool = distractor_pools[(q_idx - 1) % len(distractor_pools)]
+                distractors = [
+                    f"{pool[0]} not defined in the curriculum",
+                    f"{pool[1]} contrary to approved specifications",
+                    f"{pool[2]} unsupported by course requirements"
+                ]
+
+                target_idx = (q_idx - 1) % 4
+                options = list(distractors)
+                options.insert(target_idx, correct_option)
+
+                explanation = (
+                    f"According to the approved syllabus for {src.get('subject_code', '')} "
+                    f"(Unit {unit_num}: {unit_title}, Topic: {topic or 'Core Module'}), "
+                    f"the verified material specifies: '{clean_sentence[:200]}'."
+                )
+
+                questions.append({
+                    "question_id": q_idx,
+                    "question": question_text,
+                    "options": options[:4],
+                    "correct_option_index": target_idx,
+                    "explanation": explanation,
+                    "source_index": s_idx,
+                    "citation": {
+                        "document_id": src.get("document_id"),
+                        "version": src.get("version"),
+                        "subject_id": src.get("subject_id"),
+                        "subject_code": src.get("subject_code"),
+                        "subject_name": src.get("subject_name"),
+                        "department": src.get("department"),
+                        "unit_number": src.get("unit_number"),
+                        "unit_title": src.get("unit_title"),
+                        "topic_title": src.get("topic_title"),
+                        "source_page": src.get("source_page"),
+                        "source_evidence": src.get("source_evidence"),
+                        "chunk_order": src.get("chunk_order"),
+                        "relevance_score": float(src.get("score", 1.0))
+                    }
+                })
+                q_idx += 1
+
+        return questions
 
 
 ai_generator = QwenGenerator()

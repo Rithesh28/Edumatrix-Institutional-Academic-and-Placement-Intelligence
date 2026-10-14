@@ -184,3 +184,125 @@ class StudyBuddyAnswerResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+# ============================================
+# STUDY BUDDY SUMMARY SCHEMAS
+# ============================================
+
+class StudyBuddySummaryRequest(BaseModel):
+    subject_id: int = Field(..., description="Target academic subject ID")
+    unit_id: Optional[int] = Field(None, description="Optional unit ID to scope summary")
+    topic_id: Optional[int] = Field(None, description="Optional topic ID to scope summary")
+    format_type: str = Field("concise", pattern="^(concise|detailed)$", description="Format: concise revision notes or detailed explanation")
+
+
+class StudyBuddySummaryResponse(BaseModel):
+    title: str
+    summary: str
+    format_type: str
+    has_sufficient_evidence: bool
+    citations: List[StudyBuddyCitation] = []
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    unit_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    model_used: str
+    latency_ms: Optional[float] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================
+# STUDY BUDDY QUIZ SCHEMAS
+# ============================================
+
+class StudyBuddyQuizCreateRequest(BaseModel):
+    subject_id: int = Field(..., description="Target academic subject ID")
+    unit_id: Optional[int] = Field(None, description="Optional unit ID to scope quiz")
+    topic_id: Optional[int] = Field(None, description="Optional topic ID to scope quiz")
+    num_questions: int = Field(5, ge=3, le=10, description="Requested number of questions (3-10)")
+    difficulty: str = Field("medium", pattern="^(easy|medium|hard)$", description="Quiz difficulty level")
+
+
+class QuizQuestionPublicResponse(BaseModel):
+    question_id: int
+    question: str
+    options: List[str]
+
+
+class StudyBuddyQuizPublicResponse(BaseModel):
+    id: int
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    syllabus_version: int
+    unit_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    title: str
+    difficulty: str
+    total_questions: int
+    questions: List[QuizQuestionPublicResponse]
+    status: str
+    created_at: datetime
+    model_used: str
+    shortfall_note: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudyBuddyQuizSubmitRequest(BaseModel):
+    answers: Dict[str, int] = Field(..., description="Mapping of question_id (as str) to selected option index (0-3)")
+
+
+class QuizQuestionResultResponse(BaseModel):
+    question_id: int
+    question: str
+    options: List[str]
+    selected_option_index: Optional[int] = None
+    correct_option_index: int
+    is_correct: bool
+    explanation: str
+    citation: Optional[StudyBuddyCitation] = None
+
+
+class StudyBuddyQuizResultResponse(BaseModel):
+    id: int
+    student_id: int
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    syllabus_version: int
+    unit_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    title: str
+    difficulty: str
+    status: str
+    score: float
+    max_score: int
+    percentage: float
+    submitted_at: Optional[datetime] = None
+    questions_results: List[QuizQuestionResultResponse] = []
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudyBuddyQuizAttemptSummaryResponse(BaseModel):
+    id: int
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    syllabus_version: int
+    title: str
+    difficulty: str
+    status: str
+    score: Optional[float] = None
+    max_score: Optional[int] = None
+    percentage: Optional[float] = None
+    total_questions: int
+    created_at: datetime
+    submitted_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+

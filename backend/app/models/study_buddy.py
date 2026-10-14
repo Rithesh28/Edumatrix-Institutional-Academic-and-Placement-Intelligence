@@ -14,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Enum,
@@ -282,4 +283,95 @@ class StudyBuddyQuizAttempt(Base):
 
     def __repr__(self):
         return f"<StudyBuddyQuizAttempt id={self.id} student={self.student_id} subject={self.subject_id} status={self.status}>"
+
+
+class PlanStatus(str, enum.Enum):
+    """Lifecycle status for a study plan."""
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    ARCHIVED = "ARCHIVED"
+
+
+class StudyBuddyPlan(Base):
+    """
+    Persistent adaptive study plan for a student covering a subject
+    and grounded in an approved syllabus document version.
+    """
+    __tablename__ = "study_buddy_plans"
+
+    id = Column(Integer, primary_key=True, index=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False, index=True)
+    syllabus_document_id = Column(Integer, ForeignKey("syllabus_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    syllabus_version = Column(Integer, nullable=False)
+
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    target_date = Column(Date, nullable=True)
+    daily_budget_minutes = Column(Integer, nullable=False, default=60)
+    status = Column(Enum(PlanStatus, name="study_buddy_plan_status"), default=PlanStatus.ACTIVE, nullable=False, index=True)
+
+    total_tasks = Column(Integer, default=0, nullable=False)
+    completed_tasks = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    student = relationship("User")
+    subject = relationship("Subject")
+    syllabus_document = relationship("SyllabusDocument")
+    tasks = relationship("StudyBuddyPlanTask", back_populates="plan", cascade="all, delete-orphan", order_by="StudyBuddyPlanTask.order")
+
+    __table_args__ = (
+        Index("ix_study_buddy_plans_student_status", "student_id", "status"),
+        Index("ix_study_buddy_plans_student_subject", "student_id", "subject_id"),
+    )
+
+    def __repr__(self):
+        return f"<StudyBuddyPlan id={self.id} student={self.student_id} subject={self.subject_id} status={self.status}>"
+
+
+class StudyBuddyPlanTask(Base):
+    """
+    Individual syllabus-grounded learning task within an adaptive study plan.
+    Maintains provenance to syllabus document, version, unit, and topic.
+    """
+    __tablename__ = "study_buddy_plan_tasks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    plan_id = Column(Integer, ForeignKey("study_buddy_plans.id", ondelete="CASCADE"), nullable=False, index=True)
+    order = Column(Integer, nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+
+    unit_id = Column(Integer, ForeignKey("syllabus_units.id", ondelete="SET NULL"), nullable=True, index=True)
+    topic_id = Column(Integer, ForeignKey("syllabus_topics.id", ondelete="SET NULL"), nullable=True, index=True)
+    syllabus_document_id = Column(Integer, ForeignKey("syllabus_documents.id", ondelete="CASCADE"), nullable=False)
+    syllabus_version = Column(Integer, nullable=False)
+
+    estimated_duration_minutes = Column(Integer, nullable=False, default=30)
+    scheduled_date = Column(Date, nullable=True)
+    priority = Column(String(50), nullable=False, default="medium")
+    recommendation_reason = Column(String(500), nullable=True)
+    task_type = Column(String(50), nullable=False, default="concept_study")
+
+    is_completed = Column(Boolean, default=False, nullable=False, index=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    plan = relationship("StudyBuddyPlan", back_populates="tasks")
+    unit = relationship("SyllabusUnit")
+    topic = relationship("SyllabusTopic")
+
+    __table_args__ = (
+        Index("ix_study_buddy_plan_tasks_plan_order", "plan_id", "order"),
+    )
+
+    def __repr__(self):
+        return f"<StudyBuddyPlanTask id={self.id} plan={self.plan_id} order={self.order} completed={self.is_completed}>"
+
 
