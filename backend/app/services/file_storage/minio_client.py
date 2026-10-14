@@ -121,7 +121,7 @@ class MinIOClient:
         metadata: Optional[dict] = None
     ) -> str:
         """
-        Upload a file from local path to MinIO.
+        Upload a file from local path to MinIO using streaming multipart (bounded memory).
         
         Args:
             bucket: Bucket name
@@ -134,18 +134,36 @@ class MinIOClient:
             object_key: The key of the uploaded object
         """
         try:
-            with open(file_path, 'rb') as file:
-                file_data = file.read()
-            
-            # Detect content type if not provided
+            self._create_bucket_if_not_exists(bucket)
             if not content_type:
                 import mimetypes
                 content_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
             
-            return self.upload_file(bucket, object_key, file_data, content_type, metadata)
+            self.client.fput_object(
+                bucket_name=bucket,
+                object_name=object_key,
+                file_path=file_path,
+                content_type=content_type,
+                metadata=metadata or {}
+            )
+            file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 0
+            logger.info(f"📤 Uploaded from path: {bucket}/{object_key} ({file_size} bytes)")
+            return object_key
             
         except Exception as e:
             logger.error(f"❌ Upload from path failed: {str(e)}")
+            raise
+    
+    def download_file_to_path(self, bucket: str, object_key: str, file_path: str) -> str:
+        """
+        Download an object from MinIO directly to a local file path (bounded memory).
+        """
+        try:
+            self.client.fget_object(bucket_name=bucket, object_name=object_key, file_path=file_path)
+            logger.info(f"📥 Downloaded to path: {bucket}/{object_key} -> {file_path}")
+            return file_path
+        except Exception as e:
+            logger.error(f"❌ Download to path failed: {str(e)}")
             raise
     
     def download_file(self, bucket: str, object_key: str) -> bytes:

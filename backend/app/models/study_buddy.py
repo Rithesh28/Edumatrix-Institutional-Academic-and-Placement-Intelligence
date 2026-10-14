@@ -72,6 +72,12 @@ class Subject(Base):
         cascade="all, delete-orphan",
         order_by="desc(SyllabusDocument.version)"
     )
+    lecture_notes = relationship(
+        "LectureNote",
+        back_populates="subject",
+        cascade="all, delete-orphan",
+        order_by="desc(LectureNote.created_at)"
+    )
 
     __table_args__ = (
         UniqueConstraint(
@@ -373,5 +379,109 @@ class StudyBuddyPlanTask(Base):
 
     def __repr__(self):
         return f"<StudyBuddyPlanTask id={self.id} plan={self.plan_id} order={self.order} completed={self.is_completed}>"
+
+
+class LectureNoteStatus(str, enum.Enum):
+    """Lifecycle status for a lecture note."""
+    DRAFT = "DRAFT"
+    PUBLISHED = "PUBLISHED"
+    ARCHIVED = "ARCHIVED"
+
+
+class LectureNoteProcessingStatus(str, enum.Enum):
+    """Extraction processing status for a lecture note."""
+    UPLOADED = "UPLOADED"
+    PROCESSING = "PROCESSING"
+    EXTRACTED = "EXTRACTED"
+    FAILED = "FAILED"
+
+
+class LectureNoteIndexingStatus(str, enum.Enum):
+    """Qdrant RAG vector indexing status for a lecture note."""
+    NOT_INDEXED = "NOT_INDEXED"
+    INDEXING = "INDEXING"
+    INDEXED = "INDEXED"
+    FAILED = "FAILED"
+
+
+class LectureNote(Base):
+    """
+    Lecture note uploaded by faculty for an academic subject.
+    Optionally associated with a syllabus unit/topic.
+    Maintains independent lifecycle and RAG vector indexing state
+    without affecting official syllabus versioning or publication.
+    """
+    __tablename__ = "study_buddy_lecture_notes"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    file_id = Column(UUID(as_uuid=True), ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Optional syllabus alignment
+    unit_id = Column(Integer, ForeignKey("syllabus_units.id", ondelete="SET NULL"), nullable=True, index=True)
+    topic_id = Column(Integer, ForeignKey("syllabus_topics.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Note Content & Storage coordinates
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    original_filename = Column(String(255), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    mime_type = Column(String(100), nullable=False)
+
+    minio_bucket = Column(String(100), nullable=False, default="lecture-notes")
+    minio_object_key = Column(String(500), nullable=False, unique=True)
+
+    # Lifecycle status
+    status = Column(
+        Enum(LectureNoteStatus, name="study_buddy_lecture_note_status"),
+        default=LectureNoteStatus.DRAFT,
+        nullable=False,
+        index=True
+    )
+    is_published = Column(Boolean, default=False, nullable=False, index=True)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Text extraction status
+    processing_status = Column(
+        Enum(LectureNoteProcessingStatus, name="study_buddy_lecture_note_processing_status"),
+        default=LectureNoteProcessingStatus.UPLOADED,
+        nullable=False,
+        index=True
+    )
+    extracted_text = Column(Text, nullable=True)
+    extraction_error = Column(Text, nullable=True)
+    extraction_metadata = Column(JSONB, nullable=True, default=dict)
+
+    # Vector indexing status
+    indexing_status = Column(
+        Enum(LectureNoteIndexingStatus, name="study_buddy_lecture_note_indexing_status"),
+        default=LectureNoteIndexingStatus.NOT_INDEXED,
+        nullable=False,
+        index=True
+    )
+    indexed_chunk_count = Column(Integer, default=0, nullable=False)
+
+    # Usage metrics
+    download_count = Column(Integer, default=0, nullable=False)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    subject = relationship("Subject", back_populates="lecture_notes")
+    uploader = relationship("User", foreign_keys=[uploaded_by_id])
+    file = relationship("File", foreign_keys=[file_id])
+    unit = relationship("SyllabusUnit")
+    topic = relationship("SyllabusTopic")
+
+    __table_args__ = (
+        Index("ix_study_buddy_lecture_notes_subject_status", "subject_id", "status"),
+        Index("ix_study_buddy_lecture_notes_subject_published", "subject_id", "is_published"),
+    )
+
+    def __repr__(self):
+        return f"<LectureNote id={self.id} subject_id={self.subject_id} title={self.title} status={self.status}>"
 
 

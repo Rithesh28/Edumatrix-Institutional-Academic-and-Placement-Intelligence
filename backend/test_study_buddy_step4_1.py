@@ -86,7 +86,7 @@ class TestStudyBuddyStep41(unittest.TestCase):
         """Verify Alembic migration head in database is 016."""
         with engine.connect() as conn:
             result = conn.execute(sa.text("SELECT version_num FROM alembic_version;")).fetchone()
-            self.assertIn(result[0], ["016", "017", "018"], f"Database Alembic revision must be at least 016 (found {result[0]})")
+            self.assertIn(result[0], ["016", "017", "018", "019"], f"Database Alembic revision must be at least 016 (found {result[0]})")
 
     def test_02_database_tables_exist(self):
         """Verify subjects, syllabus_documents, syllabus_units, syllabus_topics tables exist."""

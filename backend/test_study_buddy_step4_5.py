@@ -132,7 +132,7 @@ class TestStudyBuddyStep45(unittest.TestCase):
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version;")).fetchone()
             self.assertIsNotNone(result)
-            self.assertIn(result[0], ["018"], f"Database revision must be 018 (found {result[0]})")
+            self.assertIn(result[0], ["018", "019"], f"Database revision must be at least 018 (found {result[0]})")
 
         inspector = inspect(engine)
         tables = inspector.get_table_names()

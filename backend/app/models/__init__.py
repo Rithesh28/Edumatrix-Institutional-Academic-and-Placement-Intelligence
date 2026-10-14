@@ -45,6 +45,13 @@ from .study_buddy import (
     SyllabusReviewStatus,
     QuizStatus,
     StudyBuddyQuizAttempt,
+    PlanStatus,
+    StudyBuddyPlan,
+    StudyBuddyPlanTask,
+    LectureNoteStatus,
+    LectureNoteProcessingStatus,
+    LectureNoteIndexingStatus,
+    LectureNote,
 )
 
 __all__ = [
@@ -107,5 +114,12 @@ __all__ = [
     'SyllabusProcessingStatus',
     'SyllabusReviewStatus',
     'QuizStatus',
-    'StudyBuddyQuizAttempt'
+    'StudyBuddyQuizAttempt',
+    'PlanStatus',
+    'StudyBuddyPlan',
+    'StudyBuddyPlanTask',
+    'LectureNoteStatus',
+    'LectureNoteProcessingStatus',
+    'LectureNoteIndexingStatus',
+    'LectureNote',
 ]
