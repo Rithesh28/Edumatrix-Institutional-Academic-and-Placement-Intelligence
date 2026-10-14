@@ -10,6 +10,7 @@ Orchestrates syllabus-grounded academic study summaries and interactive quizzes:
 6. Enforces attempt ownership so students cannot view or submit other students' quizzes.
 """
 
+import re
 import time
 import logging
 from datetime import datetime, timezone
@@ -499,6 +500,13 @@ class StudyBuddyContentService:
         model_used = gen_res.get("model_used", "deterministic_syllabus_synthesizer")
 
         # 4. Strict Server-Side Question Validation against Retrieved Evidence
+        raw_evidence_text = " ".join([s.get("text", "") or s.get("source_evidence", "") for s in evidence_sources]).strip()
+        evidence_sentences = [
+            s.strip() for s in re.split(r'(?<=[.!?])\s+', raw_evidence_text)
+            if len(s.strip()) > 15
+        ]
+        max_supportable_questions = max(1, min(len(evidence_sentences) * 2, num_questions))
+
         valid_questions = []
         seen_questions = set()
 
@@ -534,6 +542,15 @@ class StudyBuddyContentService:
                 continue
             seen_questions.add(q_norm)
 
+            # Grounding check: correct option must have token support in retrieved context
+            correct_opt_text = clean_options[correct_idx].lower()
+            ans_tokens = [w for w in re.findall(r'[a-zA-Z0-9]{3,}', correct_opt_text)]
+            stop_words = {"the", "and", "for", "with", "that", "this", "from", "are", "not", "has", "have", "can", "all", "none"}
+            meaningful_ans = [w for w in ans_tokens if w not in stop_words]
+            if meaningful_ans and not any(w in context_str.lower() for w in meaningful_ans):
+                logger.info(f"🛡️ Question rejected: correct answer '{correct_opt_text}' not grounded in syllabus context")
+                continue
+
             # Assign or resolve citation
             citation_data = q.get("citation")
             if not citation_data and evidence_sources:
@@ -563,7 +580,7 @@ class StudyBuddyContentService:
                 "citation": citation_data
             })
 
-            if len(valid_questions) >= num_questions:
+            if len(valid_questions) >= min(num_questions, max_supportable_questions):
                 break
 
         if not valid_questions:
@@ -571,7 +588,7 @@ class StudyBuddyContentService:
             fallback_cands = ai_generator._synthesize_study_buddy_quiz(
                 subject_name=f"{subject.code} {subject.name}",
                 sources=evidence_sources,
-                num_questions=num_questions,
+                num_questions=min(num_questions, max_supportable_questions),
                 difficulty=difficulty
             )
             for fq in fallback_cands:
@@ -583,7 +600,7 @@ class StudyBuddyContentService:
                     "explanation": fq.get("explanation") or f"Grounded in verified syllabus material for {subject.code}.",
                     "citation": fq.get("citation") or (evidence_sources[0] if evidence_sources else None)
                 })
-                if len(valid_questions) >= num_questions:
+                if len(valid_questions) >= min(num_questions, max_supportable_questions):
                     break
             if valid_questions:
                 model_used = "deterministic_syllabus_synthesizer"

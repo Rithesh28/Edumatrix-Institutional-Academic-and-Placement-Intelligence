@@ -67,6 +67,14 @@ export const studyBuddyAPI = {
   submitQuiz: (attemptId, answers) => api.post(`/study-buddy/quizzes/attempts/${attemptId}/submit`, { answers }),
   getQuizAttempts: (subjectId = null) => api.get('/study-buddy/quizzes/attempts', { params: subjectId ? { subject_id: subjectId } : {} }),
   getQuizResult: (attemptId) => api.get(`/study-buddy/quizzes/attempts/${attemptId}`),
+  // Step 4.5: Progress Dashboard & Adaptive Planner
+  getDashboardProgress: () => api.get('/study-buddy/progress/dashboard'),
+  createPlan: (payload) => api.post('/study-buddy/plans', payload),
+  getPlans: (subjectId = null, status = null) => api.get('/study-buddy/plans', { params: { ...(subjectId ? { subject_id: subjectId } : {}), ...(status ? { status } : {}) } }),
+  getPlanDetail: (planId) => api.get(`/study-buddy/plans/${planId}`),
+  updatePlan: (planId, payload) => api.patch(`/study-buddy/plans/${planId}`, payload),
+  updateTaskStatus: (planId, taskId, isCompleted) => api.patch(`/study-buddy/plans/${planId}/tasks/${taskId}`, { is_completed: isCompleted }),
+  regeneratePlan: (planId) => api.post(`/study-buddy/plans/${planId}/regenerate`),
 }
 
 // ============================================

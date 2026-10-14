@@ -44,12 +44,19 @@ from ..schemas.study_buddy import (
     StudyBuddyQuizPublicResponse,
     StudyBuddyQuizSubmitRequest,
     StudyBuddyQuizResultResponse,
-    StudyBuddyQuizAttemptSummaryResponse
+    StudyBuddyQuizAttemptSummaryResponse,
+    StudentProgressDashboardResponse,
+    StudyBuddyPlanResponse,
+    StudyBuddyPlanTaskResponse,
+    StudyBuddyPlanCreateRequest,
+    StudyBuddyPlanUpdateRequest,
+    StudyBuddyTaskStatusUpdateRequest
 )
 from ..services.syllabus_ingestion_service import syllabus_ingestion_service
 from ..services.syllabus_indexing_service import syllabus_indexing_service
 from ..services.study_buddy_chat_service import study_buddy_chat_service
 from ..services.study_buddy_content_service import study_buddy_content_service
+from ..services.study_buddy_progress_service import study_buddy_progress_service
 
 logger = logging.getLogger(__name__)
 
@@ -858,4 +865,148 @@ async def get_quiz_attempt_result(
         current_user=current_user,
         attempt_id=attempt_id
     )
+
+
+# ============================================
+# STEP 4.5: PROGRESS DASHBOARD & ADAPTIVE PLANNER
+# ============================================
+
+@router.get("/progress/dashboard", response_model=StudentProgressDashboardResponse)
+async def get_student_progress_dashboard(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve comprehensive learning progress metrics derived from persisted quiz attempts.
+    - Gracefully handles zero attempts, incomplete attempts, and limited history.
+    - Transparent weak-topic calculation rules.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_progress_service.get_student_dashboard_progress(
+        db=db,
+        current_user=current_user
+    )
+
+
+@router.post("/plans", response_model=StudyBuddyPlanResponse, status_code=status.HTTP_201_CREATED)
+async def create_study_plan(
+    request: StudyBuddyPlanCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Generate an adaptive, syllabus-grounded study plan.
+    - Prioritizes topics with repeated low quiz scores and unpracticed topics.
+    - Enforces realistic scheduling feasibility based on target date and daily study budget.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_progress_service.create_study_plan(
+        db=db,
+        current_user=current_user,
+        request=request
+    )
+
+
+@router.get("/plans", response_model=List[StudyBuddyPlanResponse])
+async def list_student_plans(
+    subject_id: Optional[int] = Query(None, description="Optional subject ID filter"),
+    status: Optional[str] = Query(None, description="Optional plan status filter (ACTIVE, COMPLETED, ARCHIVED)"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    List all study plans owned by the authenticated student.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_progress_service.list_student_plans(
+        db=db,
+        current_user=current_user,
+        subject_id=subject_id,
+        status_filter=status
+    )
+
+
+@router.get("/plans/{plan_id}", response_model=StudyBuddyPlanResponse)
+async def get_study_plan_detail(
+    plan_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve full study plan and ordered tasks with syllabus provenance.
+    - Strict student ownership enforcement.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_progress_service.get_plan_detail(
+        db=db,
+        current_user=current_user,
+        plan_id=plan_id
+    )
+
+
+@router.patch("/plans/{plan_id}", response_model=StudyBuddyPlanResponse)
+async def update_study_plan(
+    plan_id: int,
+    request: StudyBuddyPlanUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update permitted study plan settings (target_date, daily_budget_minutes, title, status).
+    - Checks feasibility if schedule is modified.
+    - Strict student ownership enforcement.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_progress_service.update_plan(
+        db=db,
+        current_user=current_user,
+        plan_id=plan_id,
+        request=request
+    )
+
+
+@router.patch("/plans/{plan_id}/tasks/{task_id}", response_model=StudyBuddyPlanTaskResponse)
+async def update_study_plan_task_status(
+    plan_id: int,
+    task_id: int,
+    request: StudyBuddyTaskStatusUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a study plan task as completed or reopen it.
+    - Updates plan's completed_tasks counter and auto-updates plan status.
+    - Strict student ownership enforcement.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_progress_service.update_task_status(
+        db=db,
+        current_user=current_user,
+        plan_id=plan_id,
+        task_id=task_id,
+        is_completed=request.is_completed
+    )
+
+
+@router.post("/plans/{plan_id}/regenerate", response_model=StudyBuddyPlanResponse)
+async def regenerate_study_plan(
+    plan_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Regenerate plan task priorities based on latest quiz history, preserving completed tasks.
+    - Strict student ownership enforcement.
+    """
+    verify_study_buddy_access(current_user)
+    return study_buddy_progress_service.regenerate_plan(
+        db=db,
+        current_user=current_user,
+        plan_id=plan_id
+    )
+
 

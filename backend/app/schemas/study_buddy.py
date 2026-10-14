@@ -6,7 +6,7 @@ Units, and Topics.
 """
 
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, date
 from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict
 from ..models.study_buddy import SyllabusProcessingStatus, SyllabusReviewStatus
@@ -304,5 +304,151 @@ class StudyBuddyQuizAttemptSummaryResponse(BaseModel):
     submitted_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ============================================
+# PROGRESS DASHBOARD & ADAPTIVE PLANNER SCHEMAS
+# ============================================
+
+class SubjectPerformanceSummary(BaseModel):
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    quizzes_attempted: int
+    quizzes_completed: int
+    average_score: Optional[float] = None
+    average_percentage: Optional[float] = None
+    latest_quiz_date: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WeakTopicSummary(BaseModel):
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    unit_id: Optional[int] = None
+    unit_title: Optional[str] = None
+    topic_id: Optional[int] = None
+    topic_title: Optional[str] = None
+    attempts_evaluated: int
+    questions_evaluated: int
+    accuracy_percentage: float
+    reason: str
+    has_sufficient_evidence: bool = True
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ActivityHistoryItem(BaseModel):
+    date: str  # YYYY-MM-DD
+    count: int
+    average_percentage: Optional[float] = None
+
+
+class ActivePlanSummary(BaseModel):
+    plan_id: int
+    title: str
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    status: str
+    target_date: Optional[date] = None
+    daily_budget_minutes: int
+    total_tasks: int
+    completed_tasks: int
+    progress_percentage: float
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudentProgressDashboardResponse(BaseModel):
+    quizzes_attempted: int
+    quizzes_completed: int
+    average_percentage: Optional[float] = None
+    most_recent_quiz: Optional[StudyBuddyQuizAttemptSummaryResponse] = None
+    subject_performances: List[SubjectPerformanceSummary] = []
+    recent_attempts: List[StudyBuddyQuizAttemptSummaryResponse] = []
+    activity_history: List[ActivityHistoryItem] = []
+    weak_topics: List[WeakTopicSummary] = []
+    active_plan: Optional[ActivePlanSummary] = None
+    plan_task_stats: Dict[str, int] = Field(
+        default_factory=lambda: {"total": 0, "completed": 0, "pending": 0}
+    )
+    metric_rules: Dict[str, str] = Field(
+        default_factory=lambda: {
+            "average_percentage": "Calculated as the unweighted mean percentage across all COMPLETED quiz attempts. Excludes abandoned or unsubmitted quizzes. Null if no quizzes completed.",
+            "weak_topics": "Identified strictly when a student has answered at least 2 questions or completed 2 quizzes covering a specific unit/topic with an accuracy rate below 60%. Single quiz results are never used to claim weakness or mastery.",
+            "unpracticed_topics": "Syllabus units or topics present in published curriculum where no quiz attempts have been recorded yet."
+        }
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudyBuddyPlanTaskResponse(BaseModel):
+    id: int
+    plan_id: int
+    order: int
+    title: str
+    description: Optional[str] = None
+    unit_id: Optional[int] = None
+    unit_title: Optional[str] = None
+    topic_id: Optional[int] = None
+    topic_title: Optional[str] = None
+    syllabus_document_id: int
+    syllabus_version: int
+    estimated_duration_minutes: int
+    scheduled_date: Optional[date] = None
+    priority: str
+    recommendation_reason: Optional[str] = None
+    task_type: str
+    is_completed: bool
+    completed_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudyBuddyPlanResponse(BaseModel):
+    id: int
+    student_id: int
+    subject_id: int
+    subject_code: str
+    subject_name: str
+    syllabus_document_id: int
+    syllabus_version: int
+    title: str
+    description: Optional[str] = None
+    target_date: Optional[date] = None
+    daily_budget_minutes: int
+    status: str
+    total_tasks: int
+    completed_tasks: int
+    progress_percentage: float
+    tasks: List[StudyBuddyPlanTaskResponse] = []
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudyBuddyPlanCreateRequest(BaseModel):
+    subject_id: int = Field(..., description="Target academic subject ID")
+    unit_ids: Optional[List[int]] = Field(None, description="Optional unit IDs to focus the study plan on")
+    target_date: Optional[date] = Field(None, description="Optional target completion date (must be today or in future)")
+    daily_budget_minutes: int = Field(60, ge=15, le=480, description="Daily study time budget in minutes (15 - 480)")
+    title: Optional[str] = Field(None, max_length=255, description="Custom title for the study plan")
+
+
+class StudyBuddyPlanUpdateRequest(BaseModel):
+    title: Optional[str] = Field(None, max_length=255)
+    target_date: Optional[date] = None
+    daily_budget_minutes: Optional[int] = Field(None, ge=15, le=480)
+    status: Optional[str] = Field(None, pattern="^(ACTIVE|COMPLETED|ARCHIVED)$")
+
+
+class StudyBuddyTaskStatusUpdateRequest(BaseModel):
+    is_completed: bool = Field(..., description="Set true to mark completed, false to reopen")
+
 
 
