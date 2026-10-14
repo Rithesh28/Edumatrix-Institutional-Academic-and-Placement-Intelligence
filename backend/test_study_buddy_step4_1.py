@@ -41,6 +41,7 @@ from app.models.study_buddy import (
 )
 from app.services.file_storage.minio_client import minio_client
 from app.services.syllabus_ingestion_service import syllabus_ingestion_service
+from app.services.syllabus_indexing_service import syllabus_indexing_service
 from app.main import app
 
 
@@ -72,10 +73,23 @@ class TestStudyBuddyStep41(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        # Clean up test subjects (cascades documents, units, topics)
-        if cls.created_subject_ids:
-            cls.db.query(Subject).filter(Subject.id.in_(cls.created_subject_ids)).delete(synchronize_session=False)
-            cls.db.commit()
+        # Cleanup test subjects and clean their chunks from Qdrant
+        if hasattr(cls, "created_subject_ids") and cls.created_subject_ids:
+            try:
+                docs = cls.db.query(SyllabusDocument).filter(
+                    SyllabusDocument.subject_id.in_(cls.created_subject_ids)
+                ).all()
+                for d in docs:
+                    try:
+                        syllabus_indexing_service.delete_document_chunks(d.id)
+                    except Exception as e:
+                        print(f"Warning: Failed to delete Qdrant chunks for doc {d.id}: {e}")
+
+                cls.db.query(Subject).filter(Subject.id.in_(cls.created_subject_ids)).delete(synchronize_session=False)
+                cls.db.commit()
+            except Exception as e:
+                cls.db.rollback()
+                print(f"Error during tearDownClass cleanup: {e}")
         cls.db.close()
 
     # =========================================================================

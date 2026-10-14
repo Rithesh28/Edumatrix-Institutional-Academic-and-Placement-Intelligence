@@ -75,6 +75,18 @@ export const studyBuddyAPI = {
   updatePlan: (planId, payload) => api.patch(`/study-buddy/plans/${planId}`, payload),
   updateTaskStatus: (planId, taskId, isCompleted) => api.patch(`/study-buddy/plans/${planId}/tasks/${taskId}`, { is_completed: isCompleted }),
   regeneratePlan: (planId) => api.post(`/study-buddy/plans/${planId}/regenerate`),
+  // Step 4.6C: Lecture Notes Library
+  getSubjectNotes: (subjectId, params = {}) => api.get(`/study-buddy/subjects/${subjectId}/notes`, { params }),
+  getNoteDetail: (noteId) => api.get(`/study-buddy/notes/${noteId}`),
+  uploadNote: (subjectId, formData, onUploadProgress) => api.post(`/study-buddy/subjects/${subjectId}/notes`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
+    onUploadProgress,
+  }),
+  updateNote: (noteId, payload) => api.patch(`/study-buddy/notes/${noteId}`, payload),
+  deleteNote: (noteId) => api.delete(`/study-buddy/notes/${noteId}`),
+  retryNoteProcessing: (noteId) => api.post(`/study-buddy/notes/${noteId}/retry`),
+  downloadNoteFile: (fileId) => api.get(`/files/${fileId}/download`, { responseType: 'blob' }),
 }
 
 // ============================================

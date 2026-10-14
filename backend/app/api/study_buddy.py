@@ -1294,6 +1294,6 @@ async def retry_lecture_note_processing(
 
     verify_subject_access(note.subject, current_user, require_write=True)
 
-    return lecture_notes_service.retry_note_processing(db, note)
+    return await lecture_notes_service.retry_note_processing(db, note_id=note_id)
 
 

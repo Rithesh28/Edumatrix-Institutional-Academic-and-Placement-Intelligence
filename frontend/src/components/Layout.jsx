@@ -50,6 +50,7 @@ function Layout() {
     if (role === 'lecturer') {
       return [
         { name: 'Dashboard', path: '/lecturer/dashboard', icon: '📊' },
+        { name: 'Course Materials', path: '/lecturer/course-materials', icon: '📖' },
         { name: 'Chat', path: '/lecturer/chat', icon: '💬' },
         { name: 'Circulars', path: '/lecturer/circulars', icon: '📝' },
         { name: 'Exam Duties', path: '/lecturer/exam-duties', icon: '📅' },

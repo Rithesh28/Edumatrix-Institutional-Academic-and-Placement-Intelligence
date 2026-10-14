@@ -24,6 +24,7 @@ import StudentApplications from './pages/student/Applications'
 import ReminderList from './pages/reminders/ReminderList'
 import HODExamDuties from './pages/hod/ExamDuties'
 import LecturerExamDuties from './pages/lecturer/ExamDuties'
+import LecturerCourseMaterials from './pages/lecturer/CourseMaterials'
 import HODChat from './pages/hod/Chat'
 import PlacementChat from './pages/placement/Chat'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -123,6 +124,7 @@ function App() {
             {/* Lecturer Routes (lecturer, admin) */}
             <Route element={<ProtectedRoute allowedRoles={['lecturer', 'admin']} />}>
               <Route path="/lecturer/dashboard" element={<LecturerDashboard />} />
+              <Route path="/lecturer/course-materials" element={<LecturerCourseMaterials />} />
               <Route path="/lecturer/circulars" element={<LecturerCirculars />} />
               <Route path="/lecturer/exam-duties" element={<LecturerExamDuties />} />
             </Route>

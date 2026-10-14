@@ -61,7 +61,22 @@ from app.models.study_buddy import (
     LectureNoteIndexingStatus,
 )
 from app.services.file_storage.minio_client import minio_client
-from app.services.lecture_notes_service import lecture_notes_service, MAX_NOTE_FILE_SIZE
+from app.services.lecture_notes_service import (
+    lecture_notes_service,
+    MAX_NOTE_FILE_SIZE,
+    MAX_PDF_PAGES,
+    OCR_TIMEOUT_SECONDS,
+    MAX_PNG_WIDTH,
+    MAX_PNG_HEIGHT,
+    MAX_PNG_TOTAL_PIXELS,
+    MAX_ZIP_ENTRIES,
+    MAX_ZIP_UNCOMPRESSED_SIZE,
+    MAX_ZIP_COMPRESSION_RATIO,
+    MAX_EXTRACTED_TEXT_LENGTH,
+    TRUNCATION_MARKER,
+    extraction_executor,
+    inspect_zip_safety,
+)
 from app.main import app
 
 
@@ -756,6 +771,390 @@ class TestStudyBuddyStep46B(unittest.TestCase):
         self.assertTrue(initial_syllabus.is_published)
         self.assertEqual(initial_syllabus.review_status, SyllabusReviewStatus.APPROVED)
         self.assertEqual(initial_syllabus.version, 1)
+
+    # =========================================================================
+    # 11. STEP 4.6B.1 HARDENING: RESOURCE SAFEGUARDS & EXTRACTION LIMITS
+    # =========================================================================
+
+    def test_24_pdf_page_limit_enforced(self):
+        """Verify PDF exceeding MAX_PDF_PAGES (300 pages) is rejected with safe error."""
+        import tempfile
+
+        with patch("pdfplumber.open") as mock_open:
+            mock_pdf = MagicMock()
+            mock_pdf.pages = [MagicMock() for _ in range(305)]
+            mock_open.return_value.__enter__.return_value = mock_pdf
+
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                f.write(b"%PDF-1.4 mock content")
+                temp_pdf_path = f.name
+
+            try:
+                text, metadata, error = lecture_notes_service.extract_content(temp_pdf_path, ".pdf")
+                self.assertIsNone(text)
+                self.assertIn("exceeds limit of 300 pages", error)
+                self.assertEqual(metadata.get("page_count"), 305)
+            finally:
+                if os.path.exists(temp_pdf_path):
+                    os.unlink(temp_pdf_path)
+
+    def test_25_pdf_ocr_timeout_and_error_handling(self):
+        """Verify PDF OCR timeout is caught safely without leaking images or crashing."""
+        import tempfile
+
+        with patch("pdfplumber.open") as mock_open, \
+             patch("pytesseract.image_to_string") as mock_ocr:
+
+            mock_pdf = MagicMock()
+            mock_page = MagicMock()
+            mock_page.extract_text.return_value = ""
+            mock_page.width = 100
+            mock_page.height = 100
+            mock_img = MagicMock()
+            mock_page.to_image.return_value.original = mock_img
+            mock_pdf.pages = [mock_page]
+            mock_open.return_value.__enter__.return_value = mock_pdf
+
+            mock_ocr.side_effect = RuntimeError("OCR invocation timed out after 10 seconds")
+
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
+                f.write(b"%PDF-1.4 mock content")
+                temp_pdf_path = f.name
+
+            try:
+                text, metadata, error = lecture_notes_service.extract_content(temp_pdf_path, ".pdf")
+                mock_ocr.assert_called_with(mock_img, timeout=OCR_TIMEOUT_SECONDS)
+                self.assertIn("no extractable or readable text", error.lower())
+            finally:
+                if os.path.exists(temp_pdf_path):
+                    os.unlink(temp_pdf_path)
+
+    def test_26_png_dimension_and_pixel_limits(self):
+        """Verify PNGs exceeding dimensions (8192x8192) or total pixels (25MP) are rejected."""
+        import tempfile
+
+        # 1. Dimensions exceeding 8192x8192
+        with patch("PIL.Image.open") as mock_open:
+            mock_img = MagicMock()
+            mock_img.size = (9000, 100)
+            mock_img.width = 9000
+            mock_img.height = 100
+            mock_open.return_value.__enter__.return_value = mock_img
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                f.write(b"\x89PNG\r\n\x1a\n mock")
+                temp_path = f.name
+
+            try:
+                text, metadata, error = lecture_notes_service.extract_content(temp_path, ".png")
+                self.assertIsNone(text)
+                self.assertIn("dimensions (9000x100) exceed maximum", error)
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+
+        # 2. Total pixels exceeding 25,000,000
+        with patch("PIL.Image.open") as mock_open:
+            mock_img = MagicMock()
+            mock_img.size = (6000, 5000)
+            mock_img.width = 6000
+            mock_img.height = 5000
+            mock_open.return_value.__enter__.return_value = mock_img
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                f.write(b"\x89PNG\r\n\x1a\n mock")
+                temp_path = f.name
+
+            try:
+                text, metadata, error = lecture_notes_service.extract_content(temp_path, ".png")
+                self.assertIsNone(text)
+                self.assertIn("pixel count (30,000,000) exceeds maximum allowed", error)
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+
+    def test_27_png_decompression_bomb_handling(self):
+        """Verify safe handling of Pillow DecompressionBombError without crashing."""
+        import tempfile
+        from PIL import Image
+
+        with patch("PIL.Image.open") as mock_open:
+            mock_open.side_effect = Image.DecompressionBombError("Image exceeds DOS limits.")
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+                f.write(b"\x89PNG\r\n\x1a\n mock")
+                temp_path = f.name
+
+            try:
+                text, metadata, error = lecture_notes_service.extract_content(temp_path, ".png")
+                self.assertIsNone(text)
+                self.assertIn("decompression bomb", error.lower())
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+
+    def test_28_zip_safety_entry_count_limit(self):
+        """Verify ZIP archive exceeding 5,000 entries is rejected."""
+        import tempfile
+
+        with patch("zipfile.ZipFile") as mock_zip_cls:
+            mock_zip = MagicMock()
+            mock_zip.infolist.return_value = [MagicMock() for _ in range(5005)]
+            mock_zip_cls.return_value.__enter__.return_value = mock_zip
+
+            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+                f.write(b"PK\x03\x04 mock")
+                temp_path = f.name
+
+            try:
+                err = inspect_zip_safety(temp_path, ".docx")
+                self.assertIsNotNone(err)
+                self.assertIn("entry count (5005) exceeds safe limit of 5000", err)
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+
+    def test_29_zip_safety_uncompressed_size_limit(self):
+        """Verify ZIP archive exceeding 1.5 GiB uncompressed size is rejected."""
+        import tempfile
+
+        with patch("zipfile.ZipFile") as mock_zip_cls:
+            mock_zip = MagicMock()
+            info1 = MagicMock()
+            info1.filename = "word/document.xml"
+            info1.file_size = 1_700_000_000
+            info1.compress_size = 50_000_000
+            mock_zip.infolist.return_value = [info1]
+            mock_zip_cls.return_value.__enter__.return_value = mock_zip
+
+            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+                f.write(b"PK\x03\x04 mock")
+                temp_path = f.name
+
+            try:
+                err = inspect_zip_safety(temp_path, ".docx")
+                self.assertIsNotNone(err)
+                self.assertIn("total uncompressed size", err)
+                self.assertIn("exceeds safe limit", err)
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+
+    def test_30_zip_safety_compression_ratio_limit(self):
+        """Verify ZIP archive with suspicious compression ratio (>100x) is rejected."""
+        import tempfile
+
+        with patch("zipfile.ZipFile") as mock_zip_cls:
+            mock_zip = MagicMock()
+            info = MagicMock()
+            info.filename = "word/bomb.xml"
+            info.file_size = 200_000
+            info.compress_size = 500
+            mock_zip.infolist.return_value = [info]
+            mock_zip_cls.return_value.__enter__.return_value = mock_zip
+
+            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+                f.write(b"PK\x03\x04 mock")
+                temp_path = f.name
+
+            try:
+                err = inspect_zip_safety(temp_path, ".docx")
+                self.assertIsNotNone(err)
+                self.assertIn("suspicious compression ratio", err)
+                self.assertIn("400.0x > 100.0x threshold", err)
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+
+    def test_31_zip_safety_zero_length_and_corrupt(self):
+        """Verify zero-length entries and corrupted archives are handled safely."""
+        import tempfile
+
+        # Zero length file handling (no division by zero)
+        with patch("zipfile.ZipFile") as mock_zip_cls:
+            mock_zip = MagicMock()
+            info = MagicMock()
+            info.filename = "word/empty.xml"
+            info.file_size = 0
+            info.compress_size = 0
+            mock_zip.infolist.return_value = [info]
+            mock_zip_cls.return_value.__enter__.return_value = mock_zip
+
+            with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+                f.write(b"PK\x03\x04 mock")
+                temp_path = f.name
+
+            try:
+                err = inspect_zip_safety(temp_path, ".docx")
+                self.assertIsNone(err)
+            finally:
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
+
+        # Corrupted archive handling
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+            f.write(b"PK\x03\x04 not a valid zip")
+            temp_path = f.name
+
+        try:
+            err = inspect_zip_safety(temp_path, ".docx")
+            self.assertIsNotNone(err)
+            self.assertIn("damaged zip package", err)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_32_extracted_text_truncation_and_metadata(self):
+        """Verify extracted text exceeding 500,000 characters is safely truncated with marker."""
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            huge_text = "A" * 550_000
+            mock_doc = MagicMock()
+            mock_p = MagicMock()
+            mock_p.text = huge_text
+            mock_doc.paragraphs = [mock_p]
+            mock_doc.tables = []
+
+            with patch("docx.Document", return_value=mock_doc), \
+                 patch("app.services.lecture_notes_service.inspect_zip_safety", return_value=None):
+                text, metadata, error = lecture_notes_service.extract_content(temp_path, ".docx")
+                self.assertIsNone(error)
+                self.assertEqual(len(text), MAX_EXTRACTED_TEXT_LENGTH)
+                self.assertTrue(text.endswith(TRUNCATION_MARKER))
+                self.assertTrue(metadata["truncated"])
+                self.assertEqual(metadata["original_char_count"], 550_000)
+                self.assertEqual(metadata["truncated_char_count"], MAX_EXTRACTED_TEXT_LENGTH)
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    def test_33_non_blocking_async_extraction_in_executor(self):
+        """Verify extract_content_async runs in dedicated threadpool without blocking event loop."""
+        import asyncio
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
+            temp_path = f.name
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                with patch.object(lecture_notes_service, "extract_content", return_value=("Hello async", {"chars": 11}, None)) as mock_sync:
+                    res = loop.run_until_complete(lecture_notes_service.extract_content_async(temp_path, ".txt"))
+                    self.assertEqual(res[0], "Hello async")
+                    mock_sync.assert_called_once_with(temp_path, ".txt")
+            finally:
+                loop.close()
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
+    # =========================================================================
+    # 12. STEP 4.6B.1 HARDENING: RETRY ELIGIBILITY & ATOMIC CONCURRENCY
+    # =========================================================================
+
+    def test_34_retry_ineligible_states_rejected(self):
+        """Verify retry is rejected with 400 for EXTRACTED and 409 for PROCESSING."""
+        pdf_bytes = self._create_sample_pdf("Retry Eligibility Test")
+        resp = self.client.post(
+            f"/api/v1/study-buddy/subjects/{self.subject_aiml.id}/notes",
+            headers=self.lecturer_aiml_headers,
+            data={"title": "Eligibility Test Note"},
+            files={"file": ("elig.pdf", pdf_bytes, "application/pdf")},
+        )
+        self.assertIn(resp.status_code, [200, 201])
+        note_id = resp.json()["id"]
+
+        # 1. Note is EXTRACTED -> retry must be rejected with 400 Bad Request
+        retry_extracted = self.client.post(
+            f"/api/v1/study-buddy/notes/{note_id}/retry",
+            headers=self.lecturer_aiml_headers
+        )
+        self.assertEqual(retry_extracted.status_code, 400)
+        self.assertIn("not in an eligible state for retry", retry_extracted.json()["detail"])
+        self.assertIn("EXTRACTED", retry_extracted.json()["detail"])
+
+        # 2. Note is PROCESSING -> retry must be rejected with 409 Conflict
+        note = self.db.query(LectureNote).filter(LectureNote.id == note_id).first()
+        note.processing_status = LectureNoteProcessingStatus.PROCESSING
+        self.db.commit()
+
+        retry_processing = self.client.post(
+            f"/api/v1/study-buddy/notes/{note_id}/retry",
+            headers=self.lecturer_aiml_headers
+        )
+        self.assertEqual(retry_processing.status_code, 409)
+        self.assertIn("currently being processed", retry_processing.json()["detail"])
+
+    def test_35_concurrent_retry_atomic_claim_and_failure_recovery(self):
+        """Verify atomic conditional update prevents race conditions and failure resets to FAILED."""
+        import asyncio
+
+        # Create note in FAILED state
+        pdf_bytes = self._create_sample_pdf("Atomic Concurrency Test")
+        resp = self.client.post(
+            f"/api/v1/study-buddy/subjects/{self.subject_aiml.id}/notes",
+            headers=self.lecturer_aiml_headers,
+            data={"title": "Concurrency Test Note"},
+            files={"file": ("concurrent.pdf", pdf_bytes, "application/pdf")},
+        )
+        self.assertIn(resp.status_code, [200, 201])
+        note_id = resp.json()["id"]
+
+        note = self.db.query(LectureNote).filter(LectureNote.id == note_id).first()
+        note.processing_status = LectureNoteProcessingStatus.FAILED
+        self.db.commit()
+
+        # Simulate two concurrent retry claims on the same note
+        db2 = SessionLocal()
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                async def mock_extract(*args, **kwargs):
+                    await asyncio.sleep(0.05)
+                    return "Recovered text", {"pages": 1}, None
+
+                with patch.object(lecture_notes_service, "extract_content_async", side_effect=mock_extract):
+                    task1 = asyncio.ensure_future(lecture_notes_service.retry_note_processing(self.db, note_id=note_id))
+                    loop.run_until_complete(asyncio.sleep(0.01))
+
+                    try:
+                        loop.run_until_complete(lecture_notes_service.retry_note_processing(db2, note_id=note_id))
+                        self.fail("Second retry should have raised HTTPException 409 Conflict")
+                    except Exception as e:
+                        from fastapi import HTTPException
+                        self.assertIsInstance(e, HTTPException)
+                        self.assertEqual(e.status_code, 409)
+                        self.assertIn("currently being processed", e.detail)
+
+                    res1 = loop.run_until_complete(task1)
+                    self.assertEqual(res1.processing_status, LectureNoteProcessingStatus.EXTRACTED)
+            finally:
+                loop.close()
+        finally:
+            db2.close()
+
+        # Failure recovery test: If an unhandled error occurs during retry extraction,
+        # status must revert to FAILED and error message recorded (never stuck in PROCESSING)
+        note = self.db.query(LectureNote).filter(LectureNote.id == note_id).first()
+        note.processing_status = LectureNoteProcessingStatus.FAILED
+        self.db.commit()
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            with patch.object(lecture_notes_service, "extract_content_async", side_effect=RuntimeError("MinIO connection reset")):
+                recovered_note = loop.run_until_complete(lecture_notes_service.retry_note_processing(self.db, note_id=note_id))
+                self.assertEqual(recovered_note.processing_status, LectureNoteProcessingStatus.FAILED)
+                self.assertIn("RuntimeError", recovered_note.extraction_error)
+        finally:
+            loop.close()
 
 
 if __name__ == "__main__":

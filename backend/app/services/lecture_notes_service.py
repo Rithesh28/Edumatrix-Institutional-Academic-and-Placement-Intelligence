@@ -2,12 +2,16 @@
 Lecture Notes Ingestion and Lifecycle Service
 
 Handles:
-- Streaming upload validation with strict 500 MB bounded-memory limit
+- Streaming upload validation with strict 500 MiB bounded-memory limit
 - Magic signature and format validation for PDF, PNG, DOCX, and PPTX
-- Multimodal text extraction (pdfplumber, pytesseract OCR, python-docx, python-pptx)
+- Deep archive security checks (anti-zip-bomb: entry counts, uncompressed size, compression ratios)
+- Resource-bounded multimodal text extraction (pdfplumber with page cap, pytesseract with timeout, python-docx, python-pptx)
+- Non-blocking extraction offloaded to a dedicated ThreadPoolExecutor
+- Text truncation at 500,000 characters with explicit provenance metadata
 - Streaming storage to dedicated 'lecture-notes' MinIO bucket
 - Transactional database persistence and failure rollback cleanup
-- Note lifecycle updates, publication guards, retries, and deletions
+- Atomic conditional claims for retry concurrency
+- Note lifecycle updates, publication guards, retries, and safe deletions
 """
 
 import os
@@ -16,6 +20,8 @@ import uuid
 import zipfile
 import logging
 import tempfile
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Tuple, Dict, Any, List
 from datetime import datetime, timezone
 from PIL import Image
@@ -45,10 +51,89 @@ from .file_storage.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
 
-# Constants
-MAX_NOTE_FILE_SIZE = 500 * 1024 * 1024  # 500 MB (524,288,000 bytes)
+# ============================================
+# EXTRACTION RESOURCE & SAFETY CONSTANTS
+# ============================================
+MAX_NOTE_FILE_SIZE = 500 * 1024 * 1024  # 500 MiB (524,288,000 bytes)
 ALLOWED_NOTE_EXTENSIONS = {".pdf", ".png", ".docx", ".pptx"}
 CHUNK_SIZE = 64 * 1024  # 64 KB streaming buffer
+
+# PDF Safeguards
+MAX_PDF_PAGES = 300  # Max pages to process per PDF
+OCR_TIMEOUT_SECONDS = 10  # Max seconds per pytesseract OCR call
+PDF_RENDER_DPI = 150  # Render resolution for OCR fallback
+
+# PNG Safeguards
+MAX_PNG_WIDTH = 8192
+MAX_PNG_HEIGHT = 8192
+MAX_PNG_TOTAL_PIXELS = 25_000_000  # 25 Megapixels
+
+# DOCX & PPTX ZIP Archive Safeguards (Anti-Zip-Bomb)
+MAX_ZIP_ENTRIES = 5000  # Max file entries inside the ZIP container
+MAX_ZIP_UNCOMPRESSED_SIZE = int(1.5 * 1024 * 1024 * 1024)  # 1.5 GiB uncompressed total
+MAX_ZIP_COMPRESSION_RATIO = 100.0  # Max compression ratio for non-empty entries
+
+# Extracted Text Limit
+MAX_EXTRACTED_TEXT_LENGTH = 500_000  # 500,000 characters
+TRUNCATION_MARKER = (
+    "\n\n[TRUNCATED: Content exceeded maximum limit of 500,000 characters. "
+    "Remaining content omitted.]"
+)
+
+# Dedicated thread pool executor for CPU/IO-bound extraction tasks
+# Concurrency limit: 4 workers prevents thread starvation and CPU saturation
+extraction_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="lecture_note_extractor")
+
+
+def inspect_zip_safety(temp_path: str, ext: str) -> Optional[str]:
+    """
+    Inspects ZIP container for ZIP bomb signatures and malformed packages:
+    - Entry count <= MAX_ZIP_ENTRIES (5,000)
+    - Total uncompressed size <= MAX_ZIP_UNCOMPRESSED_SIZE (1.5 GiB)
+    - Per-entry compression ratio <= MAX_ZIP_COMPRESSION_RATIO (100.0x)
+    - Expected internal structure ('word/' or 'ppt/')
+    Returns an error string if unsafe or malformed, None if safe.
+    """
+    try:
+        with zipfile.ZipFile(temp_path, "r") as z:
+            infolist = z.infolist()
+            entry_count = len(infolist)
+            if entry_count > MAX_ZIP_ENTRIES:
+                return f"Archive rejected: entry count ({entry_count}) exceeds safe limit of {MAX_ZIP_ENTRIES}."
+
+            total_uncompressed = 0
+            has_structure = False
+            expected_prefix = "word/" if ext == ".docx" else "ppt/"
+
+            for info in infolist:
+                if info.filename.startswith(expected_prefix):
+                    has_structure = True
+                total_uncompressed += info.file_size
+
+                # Check compression ratio for entries with compressed size > 0
+                if info.compress_size > 0:
+                    ratio = info.file_size / info.compress_size
+                    if ratio > MAX_ZIP_COMPRESSION_RATIO:
+                        return (
+                            f"Archive rejected: entry '{info.filename}' has suspicious compression ratio "
+                            f"({ratio:.1f}x > {MAX_ZIP_COMPRESSION_RATIO}x threshold)."
+                        )
+
+            if not has_structure:
+                struct_desc = "Word document" if ext == ".docx" else "PowerPoint presentation"
+                return f"Corrupt or invalid {ext.upper()[1:]} file: missing {struct_desc} structure."
+
+            if total_uncompressed > MAX_ZIP_UNCOMPRESSED_SIZE:
+                return (
+                    f"Archive rejected: total uncompressed size ({total_uncompressed / (1024 * 1024):.1f} MiB) "
+                    f"exceeds safe limit of {MAX_ZIP_UNCOMPRESSED_SIZE / (1024 * 1024):.1f} MiB."
+                )
+    except zipfile.BadZipFile:
+        return f"Corrupt or invalid {ext.upper()[1:]} archive: damaged zip package."
+    except Exception as e:
+        return f"Invalid archive structure: {e.__class__.__name__}."
+
+    return None
 
 
 class LectureNotesService:
@@ -58,6 +143,7 @@ class LectureNotesService:
         self.bucket = "lecture-notes"
         self.max_file_size = MAX_NOTE_FILE_SIZE
         self.allowed_extensions = ALLOWED_NOTE_EXTENSIONS
+        self.executor = extraction_executor
 
     def _sanitize_filename(self, filename: Optional[str]) -> str:
         """Sanitize filename to prevent directory traversal and invalid characters."""
@@ -73,7 +159,7 @@ class LectureNotesService:
     ) -> Tuple[str, str, int, str]:
         """
         Streams uploaded file to a temporary file on disk with strict size bounding.
-        Validates extension and binary magic signatures.
+        Validates extension, binary magic signatures, and archive safety.
         Returns: (temp_path, sanitized_filename, total_bytes, mime_type)
         """
         raw_filename = file.filename or "upload"
@@ -147,30 +233,15 @@ class LectureNotesService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Corrupt or invalid {ext.upper()[1:]} file: missing PK zip header signature."
                     )
-                # Verify internal XML structure
-                try:
-                    with zipfile.ZipFile(temp_path, "r") as z:
-                        namelist = z.namelist()
-                        if ext == ".docx" and not any(n.startswith("word/") for n in namelist):
-                            if os.path.exists(temp_path):
-                                os.unlink(temp_path)
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="Corrupt or invalid DOCX file: missing Word document structure."
-                            )
-                        if ext == ".pptx" and not any(n.startswith("ppt/") for n in namelist):
-                            if os.path.exists(temp_path):
-                                os.unlink(temp_path)
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="Corrupt or invalid PPTX file: missing PowerPoint presentation structure."
-                            )
-                except zipfile.BadZipFile:
+
+                # Inspect ZIP archive safety (anti-zip-bomb & structural check)
+                zip_err = inspect_zip_safety(temp_path, ext)
+                if zip_err:
                     if os.path.exists(temp_path):
                         os.unlink(temp_path)
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=f"Corrupt or invalid {ext.upper()[1:]} archive: damaged zip package."
+                        detail=zip_err
                     )
 
             mime_type = file.content_type or "application/octet-stream"
@@ -190,6 +261,23 @@ class LectureNotesService:
                 detail="Failed to stream and validate uploaded file."
             )
 
+    async def extract_content_async(
+        self,
+        file_path: str,
+        ext: str
+    ) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
+        """
+        Asynchronously runs the synchronous, CPU-bound extraction off the main
+        asyncio event loop using the dedicated ThreadPoolExecutor.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self.executor,
+            self.extract_content,
+            file_path,
+            ext
+        )
+
     def extract_content(
         self,
         file_path: str,
@@ -197,6 +285,8 @@ class LectureNotesService:
     ) -> Tuple[Optional[str], Dict[str, Any], Optional[str]]:
         """
         Extract readable textual content and metadata from the document file on disk.
+        Executes with strict safety limits (page limits, image dimension limits,
+        OCR timeouts, and 500k text truncation).
         Returns: (extracted_text, metadata, error_msg)
         """
         ext = ext.lower()
@@ -208,46 +298,111 @@ class LectureNotesService:
             if ext == ".pdf":
                 pages_parts = []
                 with pdfplumber.open(file_path) as pdf:
-                    metadata["page_count"] = len(pdf.pages)
+                    page_count = len(pdf.pages)
+                    metadata["page_count"] = page_count
                     metadata["extractor"] = "pdfplumber"
+
+                    if page_count > MAX_PDF_PAGES:
+                        return (
+                            None,
+                            metadata,
+                            f"PDF rejected: page count ({page_count}) exceeds limit of {MAX_PDF_PAGES} pages."
+                        )
+
                     for idx, page in enumerate(pdf.pages):
                         txt = page.extract_text() or ""
                         # OCR fallback on scanned/sparse pages
                         if len(txt.strip()) < 30:
                             try:
-                                img = page.to_image(resolution=150).original
-                                ocr_txt = pytesseract.image_to_string(img)
+                                dpi = PDF_RENDER_DPI
+                                if page.width > 2000 or page.height > 2000:
+                                    dpi = 72
+                                img = page.to_image(resolution=dpi).original
+                                ocr_txt = pytesseract.image_to_string(img, timeout=OCR_TIMEOUT_SECONDS)
                                 if ocr_txt and len(ocr_txt.strip()) > len(txt.strip()):
                                     txt = ocr_txt
                                     metadata["ocr_pages_used"] = metadata.get("ocr_pages_used", 0) + 1
                             except Exception as ocr_err:
-                                logger.debug(f"PDF page {idx + 1} OCR fallback skipped: {ocr_err}")
+                                logger.debug(f"PDF page {idx + 1} OCR fallback skipped/timed out: {ocr_err}")
 
                         if txt.strip():
                             pages_parts.append(f"--- Page {idx + 1} ---\n{txt.strip()}")
 
                 full = "\n\n".join(pages_parts).strip()
                 if full and len(full) >= 10:
-                    extracted_text = full
+                    if len(full) > MAX_EXTRACTED_TEXT_LENGTH:
+                        metadata["truncated"] = True
+                        metadata["original_char_count"] = len(full)
+                        metadata["truncated_char_count"] = MAX_EXTRACTED_TEXT_LENGTH
+                        keep_len = MAX_EXTRACTED_TEXT_LENGTH - len(TRUNCATION_MARKER)
+                        extracted_text = full[:keep_len] + TRUNCATION_MARKER
+                    else:
+                        metadata["truncated"] = False
+                        metadata["original_char_count"] = len(full)
+                        extracted_text = full
                 else:
                     error_msg = "PDF document contained no extractable or readable text content."
 
             elif ext == ".png":
                 metadata["extractor"] = "tesseract_ocr"
-                with Image.open(file_path) as img:
-                    img.verify()
 
-                with Image.open(file_path) as img:
-                    metadata["dimensions"] = f"{img.width}x{img.height}"
-                    metadata["format"] = img.format
-                    ocr_result = pytesseract.image_to_string(img)
+                # Step 1: Verify image integrity and decompression bomb check
+                try:
+                    with Image.open(file_path) as img:
+                        img.verify()
+                except Image.DecompressionBombError:
+                    return None, metadata, "PNG image rejected: exceeds decompression bomb threshold."
+                except Exception as e:
+                    return None, metadata, f"Corrupt or invalid PNG image: {e.__class__.__name__}."
+
+                # Step 2: Reopen image to inspect dimensions and perform OCR
+                try:
+                    with Image.open(file_path) as img:
+                        w, h = img.width, img.height
+                        total_pixels = w * h
+                        metadata["dimensions"] = f"{w}x{h}"
+                        metadata["total_pixels"] = total_pixels
+                        metadata["format"] = img.format
+
+                        if w > MAX_PNG_WIDTH or h > MAX_PNG_HEIGHT:
+                            return (
+                                None,
+                                metadata,
+                                f"PNG dimensions ({w}x{h}) exceed maximum allowed {MAX_PNG_WIDTH}x{MAX_PNG_HEIGHT}."
+                            )
+                        if total_pixels > MAX_PNG_TOTAL_PIXELS:
+                            return (
+                                None,
+                                metadata,
+                                f"PNG pixel count ({total_pixels:,}) exceeds maximum allowed {MAX_PNG_TOTAL_PIXELS:,} pixels."
+                            )
+
+                        ocr_result = pytesseract.image_to_string(img, timeout=OCR_TIMEOUT_SECONDS)
+                except Image.DecompressionBombError:
+                    return None, metadata, "PNG image rejected: decompression bomb threshold exceeded."
+                except Exception as ocr_err:
+                    return None, metadata, f"PNG OCR processing failed or timed out: {ocr_err.__class__.__name__}."
 
                 if ocr_result and len(ocr_result.strip()) >= 10:
-                    extracted_text = ocr_result.strip()
+                    raw_text = ocr_result.strip()
+                    if len(raw_text) > MAX_EXTRACTED_TEXT_LENGTH:
+                        metadata["truncated"] = True
+                        metadata["original_char_count"] = len(raw_text)
+                        metadata["truncated_char_count"] = MAX_EXTRACTED_TEXT_LENGTH
+                        keep_len = MAX_EXTRACTED_TEXT_LENGTH - len(TRUNCATION_MARKER)
+                        extracted_text = raw_text[:keep_len] + TRUNCATION_MARKER
+                    else:
+                        metadata["truncated"] = False
+                        metadata["original_char_count"] = len(raw_text)
+                        extracted_text = raw_text
                 else:
                     error_msg = "PNG image contained no discernible text via optical character recognition."
 
             elif ext == ".docx":
+                zip_err = inspect_zip_safety(file_path, ext)
+                if zip_err:
+                    return None, metadata, zip_err
+
                 doc = docx.Document(file_path)
                 metadata["extractor"] = "python-docx"
                 metadata["paragraph_count"] = len(doc.paragraphs)
@@ -269,11 +424,24 @@ class LectureNotesService:
 
                 full = "\n\n".join(parts).strip()
                 if full and len(full) >= 10:
-                    extracted_text = full
+                    if len(full) > MAX_EXTRACTED_TEXT_LENGTH:
+                        metadata["truncated"] = True
+                        metadata["original_char_count"] = len(full)
+                        metadata["truncated_char_count"] = MAX_EXTRACTED_TEXT_LENGTH
+                        keep_len = MAX_EXTRACTED_TEXT_LENGTH - len(TRUNCATION_MARKER)
+                        extracted_text = full[:keep_len] + TRUNCATION_MARKER
+                    else:
+                        metadata["truncated"] = False
+                        metadata["original_char_count"] = len(full)
+                        extracted_text = full
                 else:
                     error_msg = "Word document contained no readable text or paragraph content."
 
             elif ext == ".pptx":
+                zip_err = inspect_zip_safety(file_path, ext)
+                if zip_err:
+                    return None, metadata, zip_err
+
                 prs = pptx.Presentation(file_path)
                 metadata["extractor"] = "python-pptx"
                 metadata["slide_count"] = len(prs.slides)
@@ -298,7 +466,16 @@ class LectureNotesService:
 
                 full = "\n\n".join(slide_texts).strip()
                 if full and len(full) >= 10:
-                    extracted_text = full
+                    if len(full) > MAX_EXTRACTED_TEXT_LENGTH:
+                        metadata["truncated"] = True
+                        metadata["original_char_count"] = len(full)
+                        metadata["truncated_char_count"] = MAX_EXTRACTED_TEXT_LENGTH
+                        keep_len = MAX_EXTRACTED_TEXT_LENGTH - len(TRUNCATION_MARKER)
+                        extracted_text = full[:keep_len] + TRUNCATION_MARKER
+                    else:
+                        metadata["truncated"] = False
+                        metadata["original_char_count"] = len(full)
+                        extracted_text = full
                 else:
                     error_msg = "PowerPoint presentation contained no readable text frames or slide notes."
 
@@ -370,7 +547,7 @@ class LectureNotesService:
         topic_id: Optional[int] = None
     ) -> LectureNote:
         """
-        Stream upload, validate, extract, and persist a new lecture note.
+        Stream upload, validate, extract (non-blocking in threadpool), and persist a new lecture note.
         Cleans up temporary disk files and MinIO storage if a failure occurs.
         """
         subject = db.query(Subject).filter(Subject.id == subject_id).first()
@@ -389,7 +566,7 @@ class LectureNotesService:
         # Validate unit and topic alignment
         self.validate_unit_topic_alignment(db, subject_id, unit_id, topic_id)
 
-        # 1. Stream upload and validate magic bytes (bounded memory)
+        # 1. Stream upload and validate magic bytes and archive safety
         temp_path, sanitized_filename, file_size, mime_type = await self._stream_and_validate_upload(file)
         _, ext = os.path.splitext(sanitized_filename)
 
@@ -424,8 +601,8 @@ class LectureNotesService:
             )
             db.add(file_record)
 
-            # 4. Extract content from local temporary file
-            extracted_text, metadata, error_msg = self.extract_content(temp_path, ext)
+            # 4. Extract content off the main asyncio event loop via threadpool
+            extracted_text, metadata, error_msg = await self.extract_content_async(temp_path, ext)
 
             if error_msg or not extracted_text:
                 processing_status = LectureNoteProcessingStatus.FAILED
@@ -495,19 +672,47 @@ class LectureNotesService:
                 except Exception:
                     pass
 
-    def retry_note_processing(
+    async def retry_note_processing(
         self,
         db: Session,
-        note: LectureNote
+        note_id: int
     ) -> LectureNote:
         """
-        Downloads the original file from MinIO to a temporary file and retries text extraction.
+        Atomically claims an eligible failed note for retry, downloads original file
+        from MinIO to a temporary file, and runs non-blocking text extraction.
+        Prevents concurrent duplicates and ensures safe state transitions.
         """
-        if note.processing_status == LectureNoteProcessingStatus.PROCESSING:
+        # 1. Atomically claim note: only FAILED or UPLOADED notes are eligible for retry
+        rows_updated = db.query(LectureNote).filter(
+            LectureNote.id == note_id,
+            LectureNote.processing_status.in_([
+                LectureNoteProcessingStatus.FAILED,
+                LectureNoteProcessingStatus.UPLOADED
+            ])
+        ).update({
+            LectureNote.processing_status: LectureNoteProcessingStatus.PROCESSING,
+            LectureNote.updated_at: datetime.now(timezone.utc)
+        }, synchronize_session=False)
+        db.commit()
+
+        if rows_updated == 0:
+            current = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+            if not current:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Lecture note with ID {note_id} not found."
+                )
+            if current.processing_status == LectureNoteProcessingStatus.PROCESSING:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Note is currently being processed."
+                )
             raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Note is currently being processed."
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Note is not in an eligible state for retry (current status: {current.processing_status.value}). Retry is only allowed for FAILED or UPLOADED notes."
             )
+
+        note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
 
         _, ext = os.path.splitext(note.original_filename)
         temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
@@ -515,34 +720,48 @@ class LectureNotesService:
         temp_file.close()
 
         try:
-            # Download file from MinIO to temp file
+            # 2. Download original file from MinIO directly to temp file path
             minio_client.download_file_to_path(note.minio_bucket, note.minio_object_key, temp_path)
 
-            extracted_text, metadata, error_msg = self.extract_content(temp_path, ext)
+            # 3. Run extraction off the main event loop
+            extracted_text, metadata, error_msg = await self.extract_content_async(temp_path, ext)
+
+            # 4. Re-query note in case it was deleted during extraction
+            refreshed_note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+            if not refreshed_note:
+                logger.warning(f"Note {note_id} was deleted during retry extraction; aborting persistence.")
+                return note
 
             if error_msg or not extracted_text:
-                note.processing_status = LectureNoteProcessingStatus.FAILED
-                note.extracted_text = None
-                note.extraction_error = error_msg or "Extraction yielded empty or unparseable text."
-                note.extraction_metadata = metadata
+                refreshed_note.processing_status = LectureNoteProcessingStatus.FAILED
+                refreshed_note.extracted_text = None
+                refreshed_note.extraction_error = error_msg or "Extraction yielded empty or unparseable text."
+                refreshed_note.extraction_metadata = metadata
             else:
-                note.processing_status = LectureNoteProcessingStatus.EXTRACTED
-                note.extracted_text = extracted_text
-                note.extraction_error = None
-                note.extraction_metadata = metadata
+                refreshed_note.processing_status = LectureNoteProcessingStatus.EXTRACTED
+                refreshed_note.extracted_text = extracted_text
+                refreshed_note.extraction_error = None
+                refreshed_note.extraction_metadata = metadata
 
             db.commit()
-            db.refresh(note)
-            logger.info(f"🔄 Retry processing completed for note {note.id} (status: {note.processing_status})")
-            return note
+            db.refresh(refreshed_note)
+            logger.info(f"🔄 Retry processing completed for note {refreshed_note.id} (status: {refreshed_note.processing_status})")
+            return refreshed_note
 
         except Exception as e:
-            logger.error(f"Retry processing failed for note {note.id}: {e}")
-            note.processing_status = LectureNoteProcessingStatus.FAILED
-            note.extraction_error = f"Retry extraction failed: {e.__class__.__name__}"
-            db.commit()
-            db.refresh(note)
-            return note
+            logger.error(f"Retry processing failed for note {note_id}: {e}")
+            db.rollback()
+            refreshed_note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+            if refreshed_note:
+                refreshed_note.processing_status = LectureNoteProcessingStatus.FAILED
+                refreshed_note.extraction_error = f"Retry extraction failed: {e.__class__.__name__}"
+                db.commit()
+                db.refresh(refreshed_note)
+                return refreshed_note
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Retry processing failed: {str(e)}"
+            )
         finally:
             if os.path.exists(temp_path):
                 try:
@@ -558,7 +777,7 @@ class LectureNotesService:
     ) -> LectureNote:
         """
         Updates metadata, optional unit/topic alignment, and publication status.
-        Enforces that notes with failed or missing extractions cannot be published.
+        Enforces that notes with failed, processing, or missing extractions cannot be published.
         """
         # Validate unit and topic if updated
         new_unit_id = update_data.unit_id if update_data.unit_id is not None else note.unit_id
