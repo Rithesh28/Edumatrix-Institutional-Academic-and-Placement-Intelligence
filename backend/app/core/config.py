@@ -64,7 +64,7 @@ class Settings:
     MINIO_ACCESS_KEY: str = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     MINIO_SECRET_KEY: str = os.getenv("MINIO_SECRET_KEY", "minioadmin")
     MINIO_SECURE: bool = os.getenv("MINIO_SECURE", "False").lower() == "true"
-    MINIO_BUCKETS: List[str] = os.getenv("MINIO_BUCKETS", "exam-duties,assignments,circulars,resumes,timetables,certificates,placement-docs").split(",")
+    MINIO_BUCKETS: List[str] = os.getenv("MINIO_BUCKETS", "exam-duties,assignments,circulars,resumes,timetables,certificates,placement-docs,syllabus,lecture-notes").split(",")
     
     @property
     def MINIO_ENDPOINT(self) -> str:

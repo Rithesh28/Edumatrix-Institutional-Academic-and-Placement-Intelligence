@@ -11,7 +11,7 @@ Provides institutional endpoints for:
 import logging
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile, Query
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile, Query, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -24,7 +24,11 @@ from ..models.study_buddy import (
     SyllabusUnit,
     SyllabusTopic,
     SyllabusProcessingStatus,
-    SyllabusReviewStatus
+    SyllabusReviewStatus,
+    LectureNote,
+    LectureNoteStatus,
+    LectureNoteProcessingStatus,
+    LectureNoteIndexingStatus,
 )
 from ..schemas.study_buddy import (
     SubjectCreate,
@@ -50,13 +54,18 @@ from ..schemas.study_buddy import (
     StudyBuddyPlanTaskResponse,
     StudyBuddyPlanCreateRequest,
     StudyBuddyPlanUpdateRequest,
-    StudyBuddyTaskStatusUpdateRequest
+    StudyBuddyTaskStatusUpdateRequest,
+    LectureNoteResponse,
+    LectureNoteDetailResponse,
+    LectureNoteUpdateRequest,
+    LectureNoteListResponse,
 )
 from ..services.syllabus_ingestion_service import syllabus_ingestion_service
 from ..services.syllabus_indexing_service import syllabus_indexing_service
 from ..services.study_buddy_chat_service import study_buddy_chat_service
 from ..services.study_buddy_content_service import study_buddy_content_service
 from ..services.study_buddy_progress_service import study_buddy_progress_service
+from ..services.lecture_notes_service import lecture_notes_service
 
 logger = logging.getLogger(__name__)
 
@@ -111,16 +120,22 @@ def verify_subject_access(subject: Subject, current_user: User, require_write: b
         return
 
     if current_user.role == UserRole.LECTURER:
+        assigned_subjects = []
+        if current_user.lecturer_profile and current_user.lecturer_profile.subjects:
+            assigned_subjects = [str(s).strip().upper() for s in current_user.lecturer_profile.subjects]
+
         if not dept_matches:
             # Check if lecturer has subject assigned in profile
-            assigned_subjects = []
-            if current_user.lecturer_profile and current_user.lecturer_profile.subjects:
-                assigned_subjects = [str(s).strip().upper() for s in current_user.lecturer_profile.subjects]
             if subject.code.strip().upper() not in assigned_subjects:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail=f"Lecturer access restricted to department '{user_dept}' or assigned subjects."
                 )
+        elif require_write and assigned_subjects and subject.code.strip().upper() not in assigned_subjects:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Lecturer is not assigned to teach subject '{subject.code}'."
+            )
         return
 
     if current_user.role == UserRole.STUDENT:
@@ -1008,5 +1023,277 @@ async def regenerate_study_plan(
         current_user=current_user,
         plan_id=plan_id
     )
+
+
+# ============================================
+# LECTURE NOTES LIBRARY ENDPOINTS
+# ============================================
+
+@router.post(
+    "/subjects/{subject_id}/notes",
+    response_model=LectureNoteResponse,
+    status_code=status.HTTP_201_CREATED
+)
+async def upload_lecture_note(
+    subject_id: int,
+    file: UploadFile = FastAPIFile(...),
+    title: str = Form(...),
+    description: Optional[str] = Form(None),
+    unit_id: Optional[int] = Form(None),
+    topic_id: Optional[int] = Form(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload a lecture note for an authorized subject.
+    - PDF, PNG, DOCX, and PPTX supported up to 500 MB.
+    - Streams and validates file with bounded memory.
+    - Extracts readable text and saves to dedicated 'lecture-notes' bucket.
+    - Placement Officers blocked (403). Students blocked (403).
+    - Lecturers authorized for subject, HODs for department, Admins global.
+    """
+    verify_study_buddy_access(current_user)
+    if current_user.role == UserRole.STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Students are not authorized to upload lecture notes."
+        )
+
+    subject = db.query(Subject).filter(Subject.id == subject_id).first()
+    if not subject:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Subject with ID {subject_id} not found."
+        )
+
+    verify_subject_access(subject, current_user, require_write=True)
+
+    return await lecture_notes_service.upload_and_ingest_note(
+        db=db,
+        subject_id=subject_id,
+        file=file,
+        current_user=current_user,
+        title=title,
+        description=description,
+        unit_id=unit_id,
+        topic_id=topic_id
+    )
+
+
+@router.get(
+    "/subjects/{subject_id}/notes",
+    response_model=List[LectureNoteResponse]
+)
+async def list_lecture_notes(
+    subject_id: int,
+    unit_id: Optional[int] = None,
+    topic_id: Optional[int] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    search: Optional[str] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    List lecture notes for an authorized subject.
+    - Students see only PUBLISHED notes for active subjects in their department.
+    - Staff (Lecturer/HOD/Admin) see notes across lifecycle states.
+    - Placement Officers blocked (403).
+    """
+    verify_study_buddy_access(current_user)
+
+    subject = db.query(Subject).filter(Subject.id == subject_id).first()
+    if not subject:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Subject with ID {subject_id} not found."
+        )
+
+    verify_subject_access(subject, current_user, require_write=False)
+
+    query = db.query(LectureNote).filter(LectureNote.subject_id == subject_id)
+
+    # Students strictly restricted to published notes
+    if current_user.role == UserRole.STUDENT:
+        query = query.filter(
+            LectureNote.is_published == True,
+            LectureNote.status == LectureNoteStatus.PUBLISHED
+        )
+    elif status_filter:
+        query = query.filter(LectureNote.status == status_filter)
+
+    if unit_id is not None:
+        query = query.filter(LectureNote.unit_id == unit_id)
+    if topic_id is not None:
+        query = query.filter(LectureNote.topic_id == topic_id)
+    if search and search.strip():
+        query = query.filter(LectureNote.title.ilike(f"%{search.strip()}%"))
+
+    notes = query.order_by(LectureNote.created_at.desc()).offset(skip).limit(limit).all()
+    return notes
+
+
+@router.get(
+    "/notes/{note_id}",
+    response_model=LectureNoteDetailResponse
+)
+async def get_lecture_note(
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieve metadata for an authorized lecture note.
+    - Students can access only published notes for active subjects in their department.
+    - Staff can access notes for subjects they are authorized to manage.
+    - Placement Officers blocked (403).
+    """
+    verify_study_buddy_access(current_user)
+
+    note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lecture note with ID {note_id} not found."
+        )
+
+    verify_subject_access(note.subject, current_user, require_write=False)
+
+    if current_user.role == UserRole.STUDENT:
+        if not note.is_published or note.status != LectureNoteStatus.PUBLISHED:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Lecture note not found or not published."
+            )
+
+    return LectureNoteDetailResponse(
+        id=note.id,
+        subject_id=note.subject_id,
+        uploaded_by_id=note.uploaded_by_id,
+        file_id=note.file_id,
+        unit_id=note.unit_id,
+        topic_id=note.topic_id,
+        title=note.title,
+        description=note.description,
+        original_filename=note.original_filename,
+        file_size=note.file_size,
+        mime_type=note.mime_type,
+        status=note.status,
+        is_published=note.is_published,
+        published_at=note.published_at,
+        processing_status=note.processing_status,
+        indexing_status=note.indexing_status,
+        indexed_chunk_count=note.indexed_chunk_count,
+        download_count=note.download_count,
+        extraction_error=note.extraction_error,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+        subject_name=note.subject.name,
+        subject_code=note.subject.code,
+        uploader_name=note.uploader.name if note.uploader else None,
+        unit_title=note.unit.title if note.unit else None,
+        topic_title=note.topic.title if note.topic else None,
+        extraction_metadata=note.extraction_metadata
+    )
+
+
+@router.patch(
+    "/notes/{note_id}",
+    response_model=LectureNoteResponse
+)
+async def update_lecture_note(
+    note_id: int,
+    request: LectureNoteUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update lecture note metadata and publication status.
+    - Students blocked (403). Placement Officers blocked (403).
+    - Publication strictly guarded: requires successful text extraction.
+    """
+    verify_study_buddy_access(current_user)
+    if current_user.role == UserRole.STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Students are not authorized to modify lecture notes."
+        )
+
+    note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lecture note with ID {note_id} not found."
+        )
+
+    verify_subject_access(note.subject, current_user, require_write=True)
+
+    return lecture_notes_service.update_note(db, note, request)
+
+
+@router.delete(
+    "/notes/{note_id}",
+    status_code=status.HTTP_200_OK
+)
+async def delete_lecture_note(
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Safely delete a lecture note and remove its binary object from MinIO.
+    - Students blocked (403). Placement Officers blocked (403).
+    """
+    verify_study_buddy_access(current_user)
+    if current_user.role == UserRole.STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Students are not authorized to delete lecture notes."
+        )
+
+    note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lecture note with ID {note_id} not found."
+        )
+
+    verify_subject_access(note.subject, current_user, require_write=True)
+
+    lecture_notes_service.delete_note(db, note)
+    return {"message": "Lecture note deleted successfully", "id": note_id}
+
+
+@router.post(
+    "/notes/{note_id}/retry",
+    response_model=LectureNoteResponse
+)
+async def retry_lecture_note_processing(
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retry text extraction for an eligible failed lecture note by re-reading from MinIO.
+    - Students blocked (403). Placement Officers blocked (403).
+    """
+    verify_study_buddy_access(current_user)
+    if current_user.role == UserRole.STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Students are not authorized to retry processing lecture notes."
+        )
+
+    note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lecture note with ID {note_id} not found."
+        )
+
+    verify_subject_access(note.subject, current_user, require_write=True)
+
+    return lecture_notes_service.retry_note_processing(db, note)
 
 

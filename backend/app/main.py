@@ -113,6 +113,7 @@ app.include_router(recruitment_circulars_router)
 app.include_router(recruitment_results_router)
 app.include_router(admin_router)
 app.include_router(study_buddy_router)
+app.include_router(study_buddy_router, prefix="/api/v1")
 
 # Root endpoint
 @app.get("/")

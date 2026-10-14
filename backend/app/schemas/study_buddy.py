@@ -9,7 +9,13 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict
-from ..models.study_buddy import SyllabusProcessingStatus, SyllabusReviewStatus
+from ..models.study_buddy import (
+    SyllabusProcessingStatus,
+    SyllabusReviewStatus,
+    LectureNoteStatus,
+    LectureNoteProcessingStatus,
+    LectureNoteIndexingStatus,
+)
 
 
 # ============================================
@@ -449,6 +455,63 @@ class StudyBuddyPlanUpdateRequest(BaseModel):
 
 class StudyBuddyTaskStatusUpdateRequest(BaseModel):
     is_completed: bool = Field(..., description="Set true to mark completed, false to reopen")
+
+
+# ============================================
+# LECTURE NOTE SCHEMAS
+# ============================================
+
+class LectureNoteResponse(BaseModel):
+    id: int
+    subject_id: int
+    uploaded_by_id: Optional[int] = None
+    file_id: Optional[UUID] = None
+    unit_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    title: str
+    description: Optional[str] = None
+    original_filename: str
+    file_size: int
+    mime_type: str
+    status: LectureNoteStatus
+    is_published: bool
+    published_at: Optional[datetime] = None
+    processing_status: LectureNoteProcessingStatus
+    indexing_status: LectureNoteIndexingStatus
+    indexed_chunk_count: int = 0
+    download_count: int = 0
+    extraction_error: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LectureNoteDetailResponse(LectureNoteResponse):
+    subject_name: Optional[str] = None
+    subject_code: Optional[str] = None
+    uploader_name: Optional[str] = None
+    unit_title: Optional[str] = None
+    topic_title: Optional[str] = None
+    extraction_metadata: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LectureNoteUpdateRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+    unit_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    status: Optional[LectureNoteStatus] = None
+    is_published: Optional[bool] = None
+
+
+class LectureNoteListResponse(BaseModel):
+    items: List[LectureNoteResponse]
+    total: int
+    skip: int
+    limit: int
 
 
 
