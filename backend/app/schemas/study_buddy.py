@@ -5,6 +5,7 @@ Data transfer and validation schemas for Subjects, Syllabus Documents,
 Units, and Topics.
 """
 
+import enum
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from uuid import UUID
@@ -157,14 +158,29 @@ class SyllabusPublishRequest(BaseModel):
 # STUDY BUDDY RAG CHAT SCHEMAS
 # ============================================
 
+class StudyBuddySourceMode(str, enum.Enum):
+    SYLLABUS = "syllabus"
+    LECTURE_NOTES = "lecture_notes"
+    ALL = "all"
+
+
 class StudyBuddyQuestionRequest(BaseModel):
     question: str = Field(..., min_length=2, max_length=1000, description="Student academic query")
     subject_id: Optional[int] = Field(None, description="Optional subject ID to focus the query")
+    source_mode: Optional[StudyBuddySourceMode] = Field(
+        default=StudyBuddySourceMode.SYLLABUS,
+        description="Source mode: 'syllabus', 'lecture_notes', or 'all'"
+    )
 
 
 class StudyBuddyCitation(BaseModel):
-    document_id: int
-    version: int
+    source_type: str = "syllabus"  # "syllabus" or "lecture_note"
+    source_id: Optional[int] = None
+    source_title: Optional[str] = None
+    original_filename: Optional[str] = None
+    document_id: Optional[int] = None
+    version: Optional[int] = None
+    lecture_note_id: Optional[int] = None
     subject_id: int
     subject_code: str
     subject_name: str

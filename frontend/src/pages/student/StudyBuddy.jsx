@@ -1,12 +1,104 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import { studyBuddyAPI } from '../../services/api'
 import toast from 'react-hot-toast'
+import {
+  Search,
+  Download,
+  FileText,
+  Image as ImageIcon,
+  FileSpreadsheet,
+  Presentation,
+  RefreshCw,
+  BookOpen,
+  Filter,
+  AlertTriangle,
+  Clock,
+  Layers,
+  CheckCircle,
+  Sparkles,
+  FileCheck
+} from 'lucide-react'
+
+// Helper utilities for formatting and citation handling
+export function formatFileSize(bytes) {
+  if (!bytes || bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
+
+export function formatDate(dateString) {
+  if (!dateString) return '—'
+  try {
+    const date = new Date(dateString)
+    return date.toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+  } catch {
+    return dateString
+  }
+}
+
+export function getFileFormatInfo(filename) {
+  const ext = (filename || '').split('.').pop().toLowerCase()
+  switch (ext) {
+    case 'pdf':
+      return {
+        label: 'PDF',
+        color: 'text-red-600 bg-red-50 dark:bg-red-950/40 dark:text-red-400 border-red-200 dark:border-red-900',
+        badge: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300',
+        icon: FileText
+      }
+    case 'png':
+      return {
+        label: 'PNG',
+        color: 'text-purple-600 bg-purple-50 dark:bg-purple-950/40 dark:text-purple-400 border-purple-200 dark:border-purple-900',
+        badge: 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300',
+        icon: ImageIcon
+      }
+    case 'docx':
+      return {
+        label: 'DOCX',
+        color: 'text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400 border-blue-200 dark:border-blue-900',
+        badge: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300',
+        icon: FileSpreadsheet
+      }
+    case 'pptx':
+      return {
+        label: 'PPTX',
+        color: 'text-orange-600 bg-orange-50 dark:bg-orange-950/40 dark:text-orange-400 border-orange-200 dark:border-orange-900',
+        badge: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300',
+        icon: Presentation
+      }
+    default:
+      return {
+        label: ext.toUpperCase() || 'FILE',
+        color: 'text-gray-600 bg-gray-50 dark:bg-gray-800 dark:text-gray-400 border-gray-200 dark:border-gray-700',
+        badge: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
+        icon: FileText
+      }
+  }
+}
+
+export function deduplicateCitations(citations = []) {
+  if (!Array.isArray(citations) || citations.length === 0) return []
+  const seen = new Set()
+  return citations.filter((c) => {
+    const key = `${c.source_type || 'syllabus'}-${c.source_id || ''}-${c.unit_number ?? ''}-${c.source_page ?? ''}-${c.topic_title || ''}-${(c.source_evidence || '').trim().slice(0, 50)}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 
 const StudyBuddy = () => {
   const { user } = useAuthStore()
 
-  // Navigation tab state: 'chat' | 'summaries' | 'quizzes'
+  // Navigation tab state: 'chat' | 'notes' | 'summaries' | 'quizzes' | 'progress'
   const [activeTab, setActiveTab] = useState('chat')
 
   // Common Subject & Syllabus units/topics state
@@ -19,20 +111,46 @@ const StudyBuddy = () => {
   const [selectedTopicId, setSelectedTopicId] = useState('')
 
   // ----------------------------------------------------
-  // CHAT STATE
+  // CHAT STATE & SOURCE MODE
   // ----------------------------------------------------
+  // Source Mode: 'syllabus' (default) | 'lecture_notes' | 'all'
+  const [sourceMode, setSourceMode] = useState('syllabus')
   const [messages, setMessages] = useState([])
   const [inputQuestion, setInputQuestion] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [expandedChatCitations, setExpandedChatCitations] = useState({})
   const messagesEndRef = useRef(null)
 
-  const samplePrompts = [
-    'What are the core units covered in this syllabus?',
-    'Explain the fundamental concepts in Unit 1.',
-    'What topics should I prepare for our upcoming assessments?',
-    'Summarize the prerequisites and learning objectives.'
-  ]
+  // ----------------------------------------------------
+  // LECTURE NOTES LIBRARY STATE
+  // ----------------------------------------------------
+  const [lectureNotes, setLectureNotes] = useState([])
+  const [loadingNotes, setLoadingNotes] = useState(false)
+  const [notesError, setNotesError] = useState(null)
+  const [noteSearchQuery, setNoteSearchQuery] = useState('')
+  const [selectedNotesUnitId, setSelectedNotesUnitId] = useState('')
+  const [downloadingNoteId, setDownloadingNoteId] = useState(null)
+
+  const samplePromptsByMode = {
+    syllabus: [
+      'What are the core units covered in this syllabus?',
+      'Explain the fundamental concepts in Unit 1.',
+      'What topics should I prepare for our upcoming assessments?',
+      'Summarize the prerequisites and learning objectives.'
+    ],
+    lecture_notes: [
+      'What key concepts are covered in the lecturer slides?',
+      'Summarize the faculty notes for Unit 1.',
+      'What formulas and examples are detailed in the class materials?',
+      'Explain the practical demonstrations in the lecture notes.'
+    ],
+    all: [
+      'Synthesize the syllabus objectives with the lecturer slides.',
+      'How do the lecturer notes expand on Unit 1 syllabus topics?',
+      'Provide a comprehensive revision guide using syllabus and notes.',
+      'Summarize core curriculum requirements and faculty examples.'
+    ]
+  }
 
   // ----------------------------------------------------
   // SUMMARIES STATE
@@ -190,6 +308,91 @@ const StudyBuddy = () => {
     }
   }
 
+  // Load notes when switching to notes tab or subject/unit filter changes
+  useEffect(() => {
+    if (activeTab === 'notes') {
+      fetchNotes()
+    }
+  }, [activeTab, selectedSubjectId, selectedNotesUnitId, subjects])
+
+  const fetchNotes = async () => {
+    try {
+      setLoadingNotes(true)
+      setNotesError(null)
+
+      if (selectedSubjectId) {
+        const params = {}
+        if (selectedNotesUnitId) {
+          params.unit_id = Number(selectedNotesUnitId)
+        }
+        const res = await studyBuddyAPI.getSubjectNotes(selectedSubjectId, params)
+        const sub = subjects.find((s) => String(s.id) === String(selectedSubjectId))
+        const mapped = (res.data || []).map((n) => ({
+          ...n,
+          subject_code: sub?.code || '',
+          subject_name: sub?.name || ''
+        }))
+        setLectureNotes(mapped)
+      } else {
+        if (!subjects || subjects.length === 0) {
+          setLectureNotes([])
+          return
+        }
+        // Fetch published notes across all department subjects
+        const results = await Promise.allSettled(
+          subjects.map(async (sub) => {
+            const res = await studyBuddyAPI.getSubjectNotes(sub.id)
+            return (res.data || []).map((n) => ({
+              ...n,
+              subject_code: sub.code,
+              subject_name: sub.name
+            }))
+          })
+        )
+        const allNotes = []
+        for (const r of results) {
+          if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+            allNotes.push(...r.value)
+          }
+        }
+        setLectureNotes(allNotes)
+      }
+    } catch (err) {
+      console.error('Failed to load published lecture notes:', err)
+      setNotesError('Failed to load published lecture notes. Please try again.')
+      toast.error('Could not load lecture notes for your department.')
+    } finally {
+      setLoadingNotes(false)
+    }
+  }
+
+  const handleDownloadNote = async (note) => {
+    if (downloadingNoteId) return
+    setDownloadingNoteId(note.id)
+    const toastId = toast.loading(`Preparing ${note.original_filename || note.title}...`)
+    try {
+      const res = await studyBuddyAPI.downloadNote(note.id)
+      const blob = new Blob([res.data], { type: note.mime_type || 'application/octet-stream' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', note.original_filename || `${note.title}.pdf`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Download complete!', { id: toastId })
+      setLectureNotes((prev) =>
+        prev.map((n) => (n.id === note.id ? { ...n, download_count: (n.download_count || 0) + 1 } : n))
+      )
+    } catch (err) {
+      console.error('Download note error:', err)
+      toast.error(err.response?.data?.detail || 'Failed to download lecture note.', { id: toastId })
+    } finally {
+      setDownloadingNoteId(null)
+    }
+  }
+
   // ----------------------------------------------------
   // CHAT HANDLERS
   // ----------------------------------------------------
@@ -202,7 +405,8 @@ const StudyBuddy = () => {
       sender: 'student',
       text: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      subjectId: selectedSubjectId ? Number(selectedSubjectId) : null
+      subjectId: selectedSubjectId ? Number(selectedSubjectId) : null,
+      sourceMode: sourceMode
     }
 
     setMessages((prev) => [...prev, studentMessage])
@@ -211,7 +415,7 @@ const StudyBuddy = () => {
 
     try {
       const subjectFilter = selectedSubjectId ? Number(selectedSubjectId) : null
-      const res = await studyBuddyAPI.askQuestion(text, subjectFilter)
+      const res = await studyBuddyAPI.askQuestion(text, subjectFilter, sourceMode)
       const data = res.data
 
       const aiMessage = {
@@ -219,7 +423,8 @@ const StudyBuddy = () => {
         sender: 'assistant',
         text: data.answer,
         hasSufficientEvidence: data.has_sufficient_evidence,
-        citations: data.citations || [],
+        sourceMode: data.source_mode || sourceMode,
+        citations: deduplicateCitations(data.citations || []),
         modelUsed: data.model_used,
         latencyMs: data.latency_ms,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -231,8 +436,9 @@ const StudyBuddy = () => {
       const errorMessage = {
         id: Date.now() + 1,
         sender: 'assistant',
-        text: 'Sorry, I encountered a temporary problem retrieving the syllabus material. Please check your connection and try again.',
+        text: 'Sorry, I encountered a temporary problem retrieving the study material. Please check your connection and try again.',
         hasSufficientEvidence: false,
+        sourceMode: sourceMode,
         isError: true,
         citations: [],
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -486,6 +692,43 @@ const StudyBuddy = () => {
   const activeUnit = subjectDetails?.units?.find((u) => String(u.id) === String(selectedUnitId))
   const availableTopics = activeUnit?.topics || []
 
+  // Filter notes in Lecture Notes Library
+  const filteredNotes = useMemo(() => {
+    let list = lectureNotes || []
+
+    // Filter by unit if selected in Notes tab
+    if (selectedNotesUnitId && selectedNotesUnitId !== 'ALL') {
+      list = list.filter((n) => String(n.unit_id) === String(selectedNotesUnitId))
+    }
+
+    if (noteSearchQuery && noteSearchQuery.trim()) {
+      const q = noteSearchQuery.trim().toLowerCase()
+      list = list.filter((n) => {
+        const titleMatch = (n.title || '').toLowerCase().includes(q)
+        const fnMatch = (n.original_filename || '').toLowerCase().includes(q)
+        const descMatch = (n.description || '').toLowerCase().includes(q)
+        const subCodeMatch = (n.subject_code || '').toLowerCase().includes(q)
+        const subNameMatch = (n.subject_name || '').toLowerCase().includes(q)
+        return titleMatch || fnMatch || descMatch || subCodeMatch || subNameMatch
+      })
+    }
+
+    return list
+  }, [lectureNotes, selectedNotesUnitId, noteSearchQuery])
+
+  // Group filtered notes by subject for structured viewing
+  const groupedNotes = useMemo(() => {
+    const groups = {}
+    for (const note of filteredNotes) {
+      const key = note.subject_code && note.subject_name
+        ? `${note.subject_code} - ${note.subject_name}`
+        : (note.subject_name || note.subject_code || 'General Course Materials')
+      if (!groups[key]) groups[key] = []
+      groups[key].push(note)
+    }
+    return groups
+  }, [filteredNotes])
+
   return (
     <div className="flex flex-col min-h-[calc(100vh-120px)] max-w-6xl mx-auto">
       {/* ========================================================
@@ -504,7 +747,7 @@ const StudyBuddy = () => {
               </span>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              Approved syllabus-grounded chat, revision summaries, and quizzes for{' '}
+              Approved syllabus-grounded chat, lecturer course notes library, revision summaries, and quizzes for{' '}
               <span className="font-semibold text-gray-700 dark:text-gray-300">
                 {user?.department || 'your department'}
               </span>
@@ -514,6 +757,7 @@ const StudyBuddy = () => {
           {/* Tab Switcher Pills */}
           <div className="flex items-center bg-gray-100 dark:bg-gray-800 p-1 rounded-lg border border-gray-200 dark:border-gray-700 w-full sm:w-auto overflow-x-auto">
             <button
+              id="tab-btn-chat"
               onClick={() => setActiveTab('chat')}
               className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                 activeTab === 'chat'
@@ -525,6 +769,24 @@ const StudyBuddy = () => {
               <span>Ask Buddy</span>
             </button>
             <button
+              id="tab-btn-notes"
+              onClick={() => setActiveTab('notes')}
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
+                activeTab === 'notes'
+                  ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+              }`}
+            >
+              <span>📚</span>
+              <span>Notes Library</span>
+              {filteredNotes.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 text-[10px] rounded-full bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 font-semibold">
+                  {filteredNotes.length}
+                </span>
+              )}
+            </button>
+            <button
+              id="tab-btn-summaries"
               onClick={() => setActiveTab('summaries')}
               className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                 activeTab === 'summaries'
@@ -536,6 +798,7 @@ const StudyBuddy = () => {
               <span>Study Summaries</span>
             </button>
             <button
+              id="tab-btn-quizzes"
               onClick={() => setActiveTab('quizzes')}
               className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                 activeTab === 'quizzes'
@@ -547,6 +810,7 @@ const StudyBuddy = () => {
               <span>Practice Quizzes</span>
             </button>
             <button
+              id="tab-btn-progress"
               onClick={() => setActiveTab('progress')}
               className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
                 activeTab === 'progress'
@@ -565,7 +829,7 @@ const StudyBuddy = () => {
           {/* Subject Dropdown */}
           <div>
             <label className="block text-[11px] font-medium text-gray-500 dark:text-gray-400 mb-1">
-              Select Subject {activeTab !== 'chat' && <span className="text-red-500">*</span>}
+              Select Subject {activeTab !== 'chat' && activeTab !== 'notes' && <span className="text-red-500">*</span>}
             </label>
             <select
               value={selectedSubjectId}
@@ -573,7 +837,7 @@ const StudyBuddy = () => {
               className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg px-2.5 py-1.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               disabled={loadingSubjects}
             >
-              <option value="">{activeTab === 'chat' ? 'All Department Subjects' : '-- Select Subject --'}</option>
+              <option value="">{activeTab === 'chat' || activeTab === 'notes' ? 'All Department Subjects' : '-- Select Subject --'}</option>
               {subjects.map((sub) => (
                 <option key={sub.id} value={sub.id}>
                   {sub.code} - {sub.name}
@@ -629,6 +893,73 @@ const StudyBuddy = () => {
       ======================================================== */}
       {activeTab === 'chat' && (
         <div className="flex flex-col flex-1 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl overflow-hidden shadow-sm transition-colors">
+          {/* Source Selector Toolbar */}
+          <div className="px-4 py-2.5 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5 whitespace-nowrap">
+                <span>🎯</span>
+                <span>Grounding Source:</span>
+              </span>
+              {/* 3-way Segmented Control */}
+              <div className="inline-flex p-0.5 rounded-lg bg-gray-200/80 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs">
+                <button
+                  type="button"
+                  id="source-mode-syllabus"
+                  onClick={() => setSourceMode('syllabus')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                    sourceMode === 'syllabus'
+                      ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  <span>🏛️</span>
+                  <span>Official Syllabus</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="source-mode-lecture-notes"
+                  onClick={() => setSourceMode('lecture_notes')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                    sourceMode === 'lecture_notes'
+                      ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  <span>📝</span>
+                  <span>Lecturer Notes</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="source-mode-all"
+                  onClick={() => setSourceMode('all')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                    sourceMode === 'all'
+                      ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  <span>🌐</span>
+                  <span>Syllabus + Notes</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Explanatory subtext explaining what is searched */}
+            <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
+              {sourceMode === 'syllabus' && (
+                <span>Searches university-approved curriculum, units, and learning objectives.</span>
+              )}
+              {sourceMode === 'lecture_notes' && (
+                <span>Searches published & indexed lecture materials uploaded by your course faculty.</span>
+              )}
+              {sourceMode === 'all' && (
+                <span>Synthesizes across both official syllabus requirements and published lecturer materials.</span>
+              )}
+            </div>
+          </div>
+
           {/* Messages Feed */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 max-h-[calc(100vh-320px)]">
             {messages.length === 0 ? (
@@ -640,11 +971,15 @@ const StudyBuddy = () => {
                   How can I help you study today?
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 max-w-md mb-6">
-                  Ask questions about course definitions, unit syllabus topics, learning objectives, or exam expectations.
+                  {sourceMode === 'lecture_notes'
+                    ? 'Ask questions about faculty lecture notes, presentation slides, code examples, or exam preparations.'
+                    : sourceMode === 'all'
+                    ? 'Ask questions grounded across both university syllabus guidelines and lecturer course materials.'
+                    : 'Ask questions about course definitions, unit syllabus topics, learning objectives, or exam expectations.'}
                 </p>
 
                 <div className="w-full max-w-lg grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-                  {samplePrompts.map((prompt, idx) => (
+                  {(samplePromptsByMode[sourceMode] || samplePromptsByMode.syllabus).map((prompt, idx) => (
                     <button
                       key={idx}
                       onClick={() => handleSendChat(prompt)}
@@ -680,6 +1015,13 @@ const StudyBuddy = () => {
                               ({msg.modelUsed.includes('Qwen') ? 'Qwen Instruct' : 'Synthesized'})
                             </span>
                           )}
+                          <span className="ml-1 px-1.5 py-0.5 text-[9px] rounded font-medium bg-gray-200/80 dark:bg-gray-750 text-gray-600 dark:text-gray-300">
+                            {msg.sourceMode === 'lecture_notes'
+                              ? '📝 Notes'
+                              : msg.sourceMode === 'all'
+                              ? '🌐 Combined'
+                              : '🏛️ Syllabus'}
+                          </span>
                         </div>
                         {msg.latencyMs && (
                           <span className="text-[10px] text-gray-400">
@@ -693,7 +1035,19 @@ const StudyBuddy = () => {
                       <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
                         <span className="text-base">⚠️</span>
                         <span>
-                          <strong>Notice:</strong> This query is not covered in the approved syllabus material.
+                          {msg.sourceMode === 'lecture_notes' ? (
+                            <>
+                              <strong>Notice:</strong> This query is not covered in the published lecturer notes.
+                            </>
+                          ) : msg.sourceMode === 'all' ? (
+                            <>
+                              <strong>Notice:</strong> Insufficient evidence found in both the official syllabus and published lecturer notes.
+                            </>
+                          ) : (
+                            <>
+                              <strong>Notice:</strong> This query is not covered in the approved syllabus material.
+                            </>
+                          )}
                         </span>
                       </div>
                     )}
@@ -706,25 +1060,57 @@ const StudyBuddy = () => {
                       <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
                           <span>📑</span>
-                          <span>Verified Syllabus Sources ({msg.citations.length}):</span>
+                          <span>Verified Sources ({deduplicateCitations(msg.citations).length}):</span>
                         </div>
 
                         <div className="space-y-2">
-                          {msg.citations.map((cit, cIdx) => {
+                          {deduplicateCitations(msg.citations).map((cit, cIdx) => {
+                            const isLectureNote = cit.source_type === 'lecture_note'
                             const isExpanded = !!expandedChatCitations[`${msg.id}-${cIdx}`]
                             return (
                               <div
                                 key={cIdx}
-                                className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-750 rounded-lg p-2.5 text-xs transition-colors"
+                                className={`border rounded-lg p-2.5 text-xs transition-colors ${
+                                  isLectureNote
+                                    ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-900/60'
+                                    : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-750'
+                                }`}
                               >
                                 <div className="flex flex-wrap items-center justify-between gap-1">
-                                  <div className="font-semibold text-blue-600 dark:text-blue-400">
-                                    {cit.subject_code} - {cit.subject_name}
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {isLectureNote ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
+                                        <span>📝</span>
+                                        <span>Faculty Lecture Note</span>
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 flex items-center gap-1">
+                                        <span>🏛️</span>
+                                        <span>Official Syllabus</span>
+                                      </span>
+                                    )}
+                                    <span className="font-semibold text-blue-600 dark:text-blue-400">
+                                      {cit.subject_code} - {cit.subject_name}
+                                    </span>
                                   </div>
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                                    {Math.round(cit.relevance_score * 100)}% match
-                                  </span>
+                                  {cit.relevance_score != null && (
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                      {Math.round(cit.relevance_score * 100)}% match
+                                    </span>
+                                  )}
                                 </div>
+
+                                {(cit.source_title || cit.original_filename) && (
+                                  <div className="mt-1 font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1">
+                                    <span>📄</span>
+                                    <span>{cit.source_title || cit.original_filename}</span>
+                                    {cit.original_filename && cit.source_title && cit.original_filename !== cit.source_title && (
+                                      <span className="text-[11px] text-gray-400 font-normal">
+                                        ({cit.original_filename})
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
 
                                 <div className="text-gray-600 dark:text-gray-400 mt-1 flex flex-wrap gap-x-3 gap-y-1">
                                   {cit.unit_number && (
@@ -737,9 +1123,9 @@ const StudyBuddy = () => {
                                       <strong>Topic:</strong> {cit.topic_title}
                                     </span>
                                   )}
-                                  {cit.source_page && (
+                                  {cit.source_page != null && (
                                     <span>
-                                      <strong>Page:</strong> {cit.source_page}
+                                      <strong>{isLectureNote ? 'Page/Slide:' : 'Page:'}</strong> {cit.source_page}
                                     </span>
                                   )}
                                 </div>
@@ -784,7 +1170,13 @@ const StudyBuddy = () => {
                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse delay-75" />
                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse delay-150" />
-                    <span className="ml-1 text-xs font-medium">Retrieving syllabus evidence & synthesizing answer...</span>
+                    <span className="ml-1 text-xs font-medium">
+                      {sourceMode === 'lecture_notes'
+                        ? 'Retrieving published lecturer notes & synthesizing answer...'
+                        : sourceMode === 'all'
+                        ? 'Retrieving syllabus & lecturer notes evidence...'
+                        : 'Retrieving syllabus evidence & synthesizing answer...'}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -806,7 +1198,15 @@ const StudyBuddy = () => {
                   }
                 }}
                 placeholder={
-                  selectedSubjectId
+                  sourceMode === 'lecture_notes'
+                    ? selectedSubjectId
+                      ? "Ask a question about this subject's lecturer notes..."
+                      : "Ask about any lecturer notes in your department..."
+                    : sourceMode === 'all'
+                    ? selectedSubjectId
+                      ? "Ask across syllabus & lecturer notes for this subject..."
+                      : "Ask across syllabus & lecturer notes in your department..."
+                    : selectedSubjectId
                     ? "Ask a question about this subject's syllabus..."
                     : "Ask about any syllabus topic in your department..."
                 }
@@ -832,6 +1232,261 @@ const StudyBuddy = () => {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          TAB 2: LECTURE NOTES LIBRARY
+      ======================================================== */}
+      {activeTab === 'notes' && (
+        <div className="space-y-4">
+          {/* Header Card with Controls */}
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm transition-colors">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">📚</span>
+                  <h2 className="text-base font-bold text-gray-900 dark:text-white">
+                    Department Lecture Notes Library
+                  </h2>
+                  <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                    {filteredNotes.length} {filteredNotes.length === 1 ? 'Material' : 'Materials'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Access official lecture presentations, study handouts, and unit materials published by faculty for{' '}
+                  <span className="font-semibold text-gray-700 dark:text-gray-300">
+                    {user?.department || 'your department'}
+                  </span>.
+                </p>
+              </div>
+
+              {/* Action Buttons & Quick Refresh */}
+              <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+                <button
+                  onClick={fetchNotes}
+                  disabled={loadingNotes}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-1.5"
+                  title="Reload notes"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingNotes ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Search and Unit Filter Bar */}
+            <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Search input */}
+              <div className="sm:col-span-2 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                  <Search className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  value={noteSearchQuery}
+                  onChange={(e) => setNoteSearchQuery(e.target.value)}
+                  placeholder="Search notes by title, filename, or topic..."
+                  className="w-full text-xs pl-9 pr-8 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                />
+                {noteSearchQuery && (
+                  <button
+                    onClick={() => setNoteSearchQuery('')}
+                    className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Unit filter (if subject is selected) */}
+              <div>
+                <select
+                  value={selectedNotesUnitId}
+                  onChange={(e) => setSelectedNotesUnitId(e.target.value)}
+                  disabled={!selectedSubjectId || !subjectDetails?.units?.length}
+                  className="w-full text-xs py-2 px-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors disabled:opacity-50"
+                >
+                  <option value="">
+                    {selectedSubjectId ? 'All Units in Subject' : 'Select a subject to filter by unit'}
+                  </option>
+                  {subjectDetails?.units?.map((u) => (
+                    <option key={u.id} value={u.unit_number || u.order}>
+                      Unit {u.unit_number || u.order}: {u.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Notes Content Feed */}
+          {loadingNotes ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm animate-pulse space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="h-5 w-16 bg-gray-200 dark:bg-gray-800 rounded-full" />
+                    <div className="h-4 w-20 bg-gray-200 dark:bg-gray-800 rounded" />
+                  </div>
+                  <div className="h-5 w-3/4 bg-gray-200 dark:bg-gray-800 rounded" />
+                  <div className="h-4 w-1/2 bg-gray-200 dark:bg-gray-800 rounded" />
+                  <div className="h-10 w-full bg-gray-200 dark:bg-gray-800 rounded-lg mt-4" />
+                </div>
+              ))}
+            </div>
+          ) : notesError ? (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-xl p-8 text-center">
+              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
+              <h3 className="font-semibold text-red-900 dark:text-red-200 text-sm">
+                Failed to load lecture notes
+              </h3>
+              <p className="text-xs text-red-700 dark:text-red-300 mt-1 max-w-md mx-auto">
+                {notesError}
+              </p>
+              <button
+                onClick={fetchNotes}
+                className="mt-4 px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition-colors"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : filteredNotes.length === 0 ? (
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-12 text-center">
+              <div className="w-16 h-16 rounded-full bg-blue-50 dark:bg-blue-950/40 flex items-center justify-center text-3xl mx-auto mb-3">
+                📂
+              </div>
+              <h3 className="text-base font-semibold text-gray-800 dark:text-gray-200 mb-1">
+                {noteSearchQuery || selectedNotesUnitId
+                  ? 'No matching lecture notes found'
+                  : 'No published lecture notes yet'}
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+                {noteSearchQuery || selectedNotesUnitId
+                  ? 'Try clearing your search query or unit filter to see other available materials.'
+                  : 'Approved course materials uploaded by your department lecturers will appear here once published.'}
+              </p>
+              {(noteSearchQuery || selectedNotesUnitId) && (
+                <button
+                  onClick={() => {
+                    setNoteSearchQuery('')
+                    setSelectedNotesUnitId('')
+                  }}
+                  className="mt-4 px-3 py-1.5 text-xs text-blue-600 dark:text-blue-400 font-semibold hover:underline"
+                >
+                  Clear filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {Object.entries(groupedNotes).map(([subjectTitle, notesInGroup]) => (
+                <div key={subjectTitle} className="space-y-3">
+                  {/* Subject Group Header */}
+                  <div className="flex items-center gap-2 pb-1.5 border-b border-gray-200 dark:border-gray-800">
+                    <BookOpen className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">
+                      {subjectTitle}
+                    </h3>
+                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                      {notesInGroup.length} {notesInGroup.length === 1 ? 'file' : 'files'}
+                    </span>
+                  </div>
+
+                  {/* Note Cards Grid */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {notesInGroup.map((note) => {
+                      const formatInfo = getFileFormatInfo(note.original_filename)
+                      const FormatIcon = formatInfo.icon
+                      const isDownloading = downloadingNoteId === note.id
+
+                      return (
+                        <div
+                          key={note.id}
+                          className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-blue-300 dark:hover:border-blue-700 rounded-xl p-4 shadow-sm transition-all flex flex-col justify-between"
+                        >
+                          <div>
+                            {/* Top Badges */}
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <span
+                                className={`px-2 py-0.5 rounded text-[10px] font-bold border flex items-center gap-1 ${formatInfo.color}`}
+                              >
+                                <FormatIcon className="w-3 h-3" />
+                                <span>{formatInfo.label}</span>
+                              </span>
+
+                              {note.unit_id && (
+                                <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                                  Unit {note.unit_id}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Note Title */}
+                            <h4
+                              className="font-bold text-sm text-gray-900 dark:text-white line-clamp-2 mb-1"
+                              title={note.title}
+                            >
+                              {note.title}
+                            </h4>
+
+                            {/* Description if present */}
+                            {note.description && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2">
+                                {note.description}
+                              </p>
+                            )}
+
+                            {/* Original Filename */}
+                            <div
+                              className="text-[11px] font-mono text-gray-500 dark:text-gray-400 truncate mb-3 flex items-center gap-1"
+                              title={note.original_filename}
+                            >
+                              <FileCheck className="w-3 h-3 text-gray-400 shrink-0" />
+                              <span className="truncate">{note.original_filename}</span>
+                            </div>
+                          </div>
+
+                          {/* Footer with Metadata and Download Action */}
+                          <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-2.5">
+                            <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
+                              <span>{formatFileSize(note.file_size_bytes)}</span>
+                              <span>{formatDate(note.created_at)}</span>
+                              <span className="font-medium text-gray-600 dark:text-gray-300">
+                                ⬇️ {note.download_count || 0}
+                              </span>
+                            </div>
+
+                            <button
+                              id={`download-note-${note.id}`}
+                              onClick={() => handleDownloadNote(note)}
+                              disabled={isDownloading}
+                              className="w-full py-2 px-3 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
+                            >
+                              {isDownloading ? (
+                                <>
+                                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                  <span>Downloading...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="w-3.5 h-3.5" />
+                                  <span>Download Note</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

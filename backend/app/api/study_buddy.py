@@ -9,9 +9,11 @@ Provides institutional endpoints for:
 """
 
 import logging
+import urllib.parse
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile, Query, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 
@@ -40,6 +42,7 @@ from ..schemas.study_buddy import (
     SyllabusTopicResponse,
     SyllabusReviewRequest,
     SyllabusPublishRequest,
+    StudyBuddySourceMode,
     StudyBuddyQuestionRequest,
     StudyBuddyAnswerResponse,
     StudyBuddySummaryRequest,
@@ -66,6 +69,8 @@ from ..services.study_buddy_chat_service import study_buddy_chat_service
 from ..services.study_buddy_content_service import study_buddy_content_service
 from ..services.study_buddy_progress_service import study_buddy_progress_service
 from ..services.lecture_notes_service import lecture_notes_service
+from ..services.lecture_notes_indexing_service import lecture_notes_indexing_service
+from ..services.file_storage.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
 
@@ -724,21 +729,24 @@ async def get_indexing_status(
 async def search_syllabus_content(
     query: str = Query(..., min_length=2, max_length=500, description="Search query string"),
     subject_id: Optional[int] = Query(None, description="Optional subject ID filter"),
+    source_mode: Optional[StudyBuddySourceMode] = Query(StudyBuddySourceMode.SYLLABUS, description="Source mode: 'syllabus', 'lecture_notes', or 'all'"),
     limit: int = Query(5, ge=1, le=20, description="Max results to return"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Semantic search across approved and published syllabus chunks in dedicated Qdrant collection.
+    Semantic search across approved and published academic chunks in dedicated Qdrant collection.
+    - Scoped by source_mode: 'syllabus', 'lecture_notes', or 'all'.
     - Role & department authorization enforced against PostgreSQL before and after Qdrant search.
     - Placement Officer forbidden.
     """
     verify_study_buddy_access(current_user)
-    return syllabus_indexing_service.search_chunks(
+    return study_buddy_chat_service.search_unified_chunks(
         db=db,
         query=query,
         current_user=current_user,
         subject_id=subject_id,
+        source_mode=source_mode,
         limit=limit
     )
 
@@ -752,7 +760,8 @@ async def ask_study_buddy(
 ):
     """
     RAG-powered academic Study Buddy QA endpoint.
-    - Scoped strictly to student's authorized department and approved, published syllabi.
+    - Scoped strictly to student's authorized department and approved materials.
+    - Supports source modes: 'syllabus', 'lecture_notes', or 'all'.
     - Retrieves relevant chunks from dedicated Qdrant collection.
     - Passes bounded context to shared Qwen Instruct singleton.
     - Provides verified source citations with document, unit, topic, and page provenance.
@@ -763,7 +772,8 @@ async def ask_study_buddy(
         db=db,
         current_user=current_user,
         question=request.question,
-        subject_id=request.subject_id
+        subject_id=request.subject_id,
+        source_mode=request.source_mode
     )
 
 
@@ -1295,5 +1305,183 @@ async def retry_lecture_note_processing(
     verify_subject_access(note.subject, current_user, require_write=True)
 
     return await lecture_notes_service.retry_note_processing(db, note_id=note_id)
+
+
+@router.get(
+    "/notes/{note_id}/download",
+    status_code=status.HTTP_200_OK
+)
+async def download_lecture_note(
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Securely stream the original binary of an authorized lecture note.
+    - Students: restricted to published notes of active subjects in their department (resolved via _get_user_department).
+    - Lecturers: scoped to department or assigned subjects.
+    - HOD: scoped to department.
+    - Admin: institutional scope.
+    - Placement Officers: forbidden (HTTP 403).
+    - Unapproved / draft notes return 404 for students (anti-enumeration).
+    - Increments download_count atomically on PostgreSQL before streaming begins.
+    - Streams directly from MinIO with bounded memory (64 KiB chunks).
+    """
+    verify_study_buddy_access(current_user)
+
+    note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lecture note with ID {note_id} not found."
+        )
+
+    verify_subject_access(note.subject, current_user, require_write=False)
+
+    if current_user.role == UserRole.STUDENT:
+        if not note.is_published or note.status != LectureNoteStatus.PUBLISHED:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Lecture note not found or not published."
+            )
+
+    # 1. Retrieve stream from MinIO bucket & key
+    try:
+        response_stream = minio_client.get_object_stream(note.minio_bucket, note.minio_object_key)
+    except Exception as e:
+        logger.error(f"MinIO storage error retrieving note {note_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Storage service error while retrieving file."
+        )
+
+    if response_stream is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture note file content not found in storage."
+        )
+
+    # 2. Atomically increment download_count once authorization succeeds and stream is ready
+    try:
+        db.query(LectureNote).filter(LectureNote.id == note_id).update(
+            {LectureNote.download_count: LectureNote.download_count + 1},
+            synchronize_session=False
+        )
+        db.commit()
+    except Exception as count_err:
+        logger.warning(f"Failed to increment download count for note {note_id}: {count_err}")
+        db.rollback()
+
+    # 3. Format safe Content-Disposition with RFC 5987 / RFC 6266 encoding
+    clean_filename = (note.original_filename or f"note_{note.id}").replace('"', '\\"')
+    encoded_filename = urllib.parse.quote(note.original_filename or f"note_{note.id}")
+
+    def file_iterator():
+        try:
+            if hasattr(response_stream, "stream"):
+                for chunk in response_stream.stream(amt=64 * 1024):
+                    yield chunk
+            else:
+                while True:
+                    chunk = response_stream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            try:
+                if hasattr(response_stream, "close"):
+                    response_stream.close()
+                if hasattr(response_stream, "release_conn"):
+                    response_stream.release_conn()
+            except Exception as close_err:
+                logger.debug(f"Error releasing MinIO stream connection: {close_err}")
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{clean_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+    }
+    if note.file_size and note.file_size > 0:
+        headers["Content-Length"] = str(note.file_size)
+
+    return StreamingResponse(
+        file_iterator(),
+        media_type=note.mime_type or "application/octet-stream",
+        headers=headers
+    )
+
+
+@router.post(
+    "/notes/{note_id}/index",
+    response_model=Dict[str, Any]
+)
+async def index_lecture_note_endpoint(
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Manually trigger or retry vector indexing for an eligible published lecture note.
+    - Requires faculty write access to note's subject (or Admin).
+    - Students and Placement Officers strictly forbidden (403).
+    """
+    verify_study_buddy_access(current_user)
+    if current_user.role == UserRole.STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Students are not authorized to trigger indexing."
+        )
+
+    note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lecture note with ID {note_id} not found."
+        )
+
+    verify_subject_access(note.subject, current_user, require_write=True)
+
+    return lecture_notes_indexing_service.index_lecture_note(db, note_id)
+
+
+@router.get(
+    "/notes/{note_id}/indexing-status",
+    response_model=Dict[str, Any]
+)
+async def get_lecture_note_indexing_status(
+    note_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Inspect indexing status and metadata for a lecture note.
+    Faculty and Admin only.
+    """
+    verify_study_buddy_access(current_user)
+    if current_user.role == UserRole.STUDENT:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Students cannot inspect internal indexing status."
+        )
+
+    note = db.query(LectureNote).filter(LectureNote.id == note_id).first()
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Lecture note with ID {note_id} not found."
+        )
+
+    verify_subject_access(note.subject, current_user, require_write=False)
+
+    return {
+        "note_id": note.id,
+        "subject_id": note.subject_id,
+        "status": note.status.value,
+        "is_published": note.is_published,
+        "indexing_status": note.indexing_status.value,
+        "indexed_chunk_count": note.indexed_chunk_count,
+        "extraction_metadata": note.extraction_metadata or {},
+        "updated_at": note.updated_at.isoformat() if note.updated_at else None
+    }
+
+
 
 

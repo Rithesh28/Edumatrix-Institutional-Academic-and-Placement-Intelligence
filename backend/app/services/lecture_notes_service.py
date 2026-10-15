@@ -48,6 +48,7 @@ from ..models.study_buddy import (
 )
 from ..schemas.study_buddy import LectureNoteUpdateRequest
 from .file_storage.minio_client import minio_client
+from .lecture_notes_indexing_service import lecture_notes_indexing_service
 
 logger = logging.getLogger(__name__)
 
@@ -791,6 +792,9 @@ class LectureNotesService:
             update_data.status == LectureNoteStatus.PUBLISHED
         )
 
+        should_trigger_indexing = False
+        should_remove_indexing = False
+
         if is_requesting_publish:
             if note.processing_status != LectureNoteProcessingStatus.EXTRACTED:
                 raise HTTPException(
@@ -800,12 +804,16 @@ class LectureNotesService:
             note.is_published = True
             note.status = LectureNoteStatus.PUBLISHED
             note.published_at = datetime.now(timezone.utc)
+            should_trigger_indexing = True
         elif update_data.is_published is False:
             note.is_published = False
             if update_data.status:
                 note.status = update_data.status
             elif note.status == LectureNoteStatus.PUBLISHED:
                 note.status = LectureNoteStatus.DRAFT
+            note.indexing_status = LectureNoteIndexingStatus.NOT_INDEXED
+            note.indexed_chunk_count = 0
+            should_remove_indexing = True
 
         if update_data.title is not None:
             if not update_data.title.strip():
@@ -826,9 +834,28 @@ class LectureNotesService:
 
         if update_data.status is not None and not is_requesting_publish:
             note.status = update_data.status
+            if update_data.status != LectureNoteStatus.PUBLISHED:
+                note.is_published = False
+                note.indexing_status = LectureNoteIndexingStatus.NOT_INDEXED
+                note.indexed_chunk_count = 0
+                should_remove_indexing = True
 
         db.commit()
         db.refresh(note)
+
+        # Vector indexing lifecycle triggers
+        if should_trigger_indexing:
+            try:
+                lecture_notes_indexing_service.index_lecture_note(db, note.id)
+            except Exception as idx_err:
+                logger.warning(f"Auto-indexing on publish failed for lecture note {note.id}: {idx_err}")
+            db.refresh(note)
+        elif should_remove_indexing:
+            try:
+                lecture_notes_indexing_service.delete_note_chunks(note.id)
+            except Exception as del_err:
+                logger.warning(f"Failed to delete Qdrant points on unpublish for note {note.id}: {del_err}")
+
         return note
 
     def delete_note(
@@ -837,15 +864,24 @@ class LectureNotesService:
         note: LectureNote
     ) -> None:
         """
-        Safely removes the lecture note from database and MinIO storage.
+        Safely removes the lecture note from database and MinIO storage,
+        and deletes its vector embeddings from Qdrant.
         """
+        note_id = note.id
         bucket = note.minio_bucket
         object_key = note.minio_object_key
 
+        # 1. Clean Qdrant points first
+        try:
+            lecture_notes_indexing_service.delete_note_chunks(note_id)
+        except Exception as qd_err:
+            logger.warning(f"Failed to delete Qdrant points for note {note_id}: {qd_err}")
+
+        # 2. Delete database record
         db.delete(note)
         db.commit()
 
-        # Delete object from MinIO
+        # 3. Delete object from MinIO
         try:
             minio_client.delete_file(bucket, object_key)
         except Exception as e:

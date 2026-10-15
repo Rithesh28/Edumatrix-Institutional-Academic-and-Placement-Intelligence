@@ -60,8 +60,8 @@ export const chatAPI = {
 export const studyBuddyAPI = {
   getSubjects: () => api.get('/study-buddy/subjects'),
   getSyllabusDetail: (documentId) => api.get(`/study-buddy/syllabi/${documentId}`),
-  askQuestion: (question, subjectId = null) => api.post('/study-buddy/chat', { question, subject_id: subjectId }),
-  searchSyllabus: (query, subjectId = null) => api.get('/study-buddy/search', { params: { query, subject_id: subjectId } }),
+  askQuestion: (question, subjectId = null, sourceMode = 'syllabus') => api.post('/study-buddy/chat', { question, subject_id: subjectId, source_mode: sourceMode }),
+  searchSyllabus: (query, subjectId = null, sourceMode = 'syllabus') => api.get('/study-buddy/search', { params: { query, subject_id: subjectId, source_mode: sourceMode } }),
   generateSummary: (payload) => api.post('/study-buddy/summaries/generate', payload),
   generateQuiz: (payload) => api.post('/study-buddy/quizzes/generate', payload),
   submitQuiz: (attemptId, answers) => api.post(`/study-buddy/quizzes/attempts/${attemptId}/submit`, { answers }),
@@ -75,7 +75,7 @@ export const studyBuddyAPI = {
   updatePlan: (planId, payload) => api.patch(`/study-buddy/plans/${planId}`, payload),
   updateTaskStatus: (planId, taskId, isCompleted) => api.patch(`/study-buddy/plans/${planId}/tasks/${taskId}`, { is_completed: isCompleted }),
   regeneratePlan: (planId) => api.post(`/study-buddy/plans/${planId}/regenerate`),
-  // Step 4.6C: Lecture Notes Library
+  // Step 4.6C & 4.6D: Lecture Notes Library & Secure Download
   getSubjectNotes: (subjectId, params = {}) => api.get(`/study-buddy/subjects/${subjectId}/notes`, { params }),
   getNoteDetail: (noteId) => api.get(`/study-buddy/notes/${noteId}`),
   uploadNote: (subjectId, formData, onUploadProgress) => api.post(`/study-buddy/subjects/${subjectId}/notes`, formData, {
@@ -86,6 +86,7 @@ export const studyBuddyAPI = {
   updateNote: (noteId, payload) => api.patch(`/study-buddy/notes/${noteId}`, payload),
   deleteNote: (noteId) => api.delete(`/study-buddy/notes/${noteId}`),
   retryNoteProcessing: (noteId) => api.post(`/study-buddy/notes/${noteId}/retry`),
+  downloadNote: (noteId) => api.get(`/study-buddy/notes/${noteId}/download`, { responseType: 'blob' }),
   downloadNoteFile: (fileId) => api.get(`/files/${fileId}/download`, { responseType: 'blob' }),
 }
 

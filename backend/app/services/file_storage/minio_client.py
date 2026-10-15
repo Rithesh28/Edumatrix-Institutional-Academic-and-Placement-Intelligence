@@ -192,6 +192,24 @@ class MinIOClient:
         except Exception as e:
             logger.error(f"❌ Download failed: {str(e)}")
             raise
+
+    def get_object_stream(self, bucket: str, object_key: str):
+        """
+        Get an unbuffered object stream from MinIO for memory-bounded streaming.
+        Returns the raw urllib3 response stream, or None if the object does not exist.
+        Caller is responsible for reading chunks and closing the stream in a finally block.
+        """
+        try:
+            return self.client.get_object(bucket, object_key)
+        except S3Error as e:
+            if e.code in ("NoSuchKey", "NoSuchBucket"):
+                logger.warning(f"⚠️ Object not found for streaming: {bucket}/{object_key}")
+                return None
+            logger.error(f"❌ Failed to get object stream: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"❌ Failed to get object stream: {e}")
+            raise
     
     def delete_file(self, bucket: str, object_key: str) -> bool:
         """
