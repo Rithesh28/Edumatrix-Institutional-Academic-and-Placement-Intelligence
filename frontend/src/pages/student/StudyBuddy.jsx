@@ -17,7 +17,17 @@ import {
   Layers,
   CheckCircle,
   Sparkles,
-  FileCheck
+  FileCheck,
+  UploadCloud,
+  Trash2,
+  Edit3,
+  AlertCircle,
+  X,
+  Check,
+  FolderOpen,
+  HardDrive,
+  Info,
+  Lock
 } from 'lucide-react'
 
 // Helper utilities for formatting and citation handling
@@ -74,6 +84,13 @@ export function getFileFormatInfo(filename) {
         badge: 'bg-orange-100 text-orange-800 dark:bg-orange-950 dark:text-orange-300',
         icon: Presentation
       }
+    case 'txt':
+      return {
+        label: 'TXT',
+        color: 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-900',
+        badge: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300',
+        icon: FileText
+      }
     default:
       return {
         label: ext.toUpperCase() || 'FILE',
@@ -88,7 +105,8 @@ export function deduplicateCitations(citations = []) {
   if (!Array.isArray(citations) || citations.length === 0) return []
   const seen = new Set()
   return citations.filter((c) => {
-    const key = `${c.source_type || 'syllabus'}-${c.source_id || ''}-${c.unit_number ?? ''}-${c.source_page ?? ''}-${c.topic_title || ''}-${(c.source_evidence || '').trim().slice(0, 50)}`
+    const docId = c.student_study_document_id || c.source_id || ''
+    const key = `${c.source_type || 'syllabus'}-${docId}-${c.unit_number ?? ''}-${c.source_page ?? ''}-${c.topic_title || ''}-${(c.source_evidence || '').trim().slice(0, 50)}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -149,8 +167,87 @@ const StudyBuddy = () => {
       'How do the lecturer notes expand on Unit 1 syllabus topics?',
       'Provide a comprehensive revision guide using syllabus and notes.',
       'Summarize core curriculum requirements and faculty examples.'
+    ],
+    my_documents: [
+      'Summarize key topics from my uploaded study documents.',
+      'What formulas and definitions are in my personal notes?',
+      'Explain the core concepts highlighted in my uploaded files.',
+      'What practice questions or exercises are in my documents?'
+    ],
+    all_my_sources: [
+      'Synthesize my personal study notes with syllabus and faculty slides.',
+      'Compare what my lecturer presented with my uploaded notes.',
+      'Create an all-inclusive revision plan across all my materials.',
+      'Where do my personal notes complement the official syllabus?'
     ]
   }
+
+  // ----------------------------------------------------
+  // PERSONAL STUDY DOCUMENTS STATE (Step 4.6H)
+  // ----------------------------------------------------
+  const [myDocuments, setMyDocuments] = useState([])
+  const [loadingMyDocs, setLoadingMyDocs] = useState(false)
+  const [myDocsError, setMyDocsError] = useState(null)
+  const [myDocsSearchQuery, setMyDocsSearchQuery] = useState('')
+  const [myDocsSubjectFilter, setMyDocsSubjectFilter] = useState('')
+  const [downloadingDocId, setDownloadingDocId] = useState(null)
+  const [retryingDocId, setRetryingDocId] = useState(null)
+  const [deletingDocId, setDeletingDocId] = useState(null)
+
+  // Upload modal state
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadFile, setUploadFile] = useState(null)
+  const [uploadTitle, setUploadTitle] = useState('')
+  const [uploadDescription, setUploadDescription] = useState('')
+  const [uploadSubjectId, setUploadSubjectId] = useState('')
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const [isUploading, setIsUploading] = useState(false)
+  const [uploadError, setUploadError] = useState(null)
+
+  // Edit metadata modal state
+  const [editingDoc, setEditingDoc] = useState(null)
+  const [editFormTitle, setEditFormTitle] = useState('')
+  const [editFormDescription, setEditFormDescription] = useState('')
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
+
+  // Delete confirmation modal state
+  const [deleteConfirmDoc, setDeleteConfirmDoc] = useState(null)
+  const [isDeletingDoc, setIsDeletingDoc] = useState(false)
+
+  // Quota specifications: 15 active documents, 200 MiB total storage limit
+  const MAX_ACTIVE_DOCS = 15
+  const MAX_STORAGE_BYTES = 200 * 1024 * 1024 // 209,715,200 bytes
+
+  const activeDocs = useMemo(() => {
+    return (myDocuments || []).filter((d) => d.is_active !== false)
+  }, [myDocuments])
+
+  const activeDocsCount = activeDocs.length
+  const totalStorageUsedBytes = useMemo(() => {
+    return activeDocs.reduce((acc, d) => acc + (d.file_size || 0), 0)
+  }, [activeDocs])
+
+  const docsQuotaRemaining = Math.max(0, MAX_ACTIVE_DOCS - activeDocsCount)
+  const storageQuotaRemainingBytes = Math.max(0, MAX_STORAGE_BYTES - totalStorageUsedBytes)
+  const isDocsQuotaFull = activeDocsCount >= MAX_ACTIVE_DOCS
+  const isStorageQuotaFull = totalStorageUsedBytes >= MAX_STORAGE_BYTES
+
+  const filteredMyDocs = useMemo(() => {
+    let list = myDocuments || []
+    if (myDocsSubjectFilter) {
+      list = list.filter((d) => String(d.subject_id) === String(myDocsSubjectFilter))
+    }
+    if (myDocsSearchQuery && myDocsSearchQuery.trim()) {
+      const q = myDocsSearchQuery.trim().toLowerCase()
+      list = list.filter((d) => {
+        const titleMatch = (d.title || '').toLowerCase().includes(q)
+        const fnMatch = (d.original_filename || '').toLowerCase().includes(q)
+        const descMatch = (d.description || '').toLowerCase().includes(q)
+        return titleMatch || fnMatch || descMatch
+      })
+    }
+    return list
+  }, [myDocuments, myDocsSubjectFilter, myDocsSearchQuery])
 
   // ----------------------------------------------------
   // SUMMARIES STATE
@@ -390,6 +487,217 @@ const StudyBuddy = () => {
       toast.error(err.response?.data?.detail || 'Failed to download lecture note.', { id: toastId })
     } finally {
       setDownloadingNoteId(null)
+    }
+  }
+
+  // ----------------------------------------------------
+  // PERSONAL STUDY DOCUMENTS HANDLERS (Step 4.6H)
+  // ----------------------------------------------------
+  const fetchMyDocuments = async () => {
+    try {
+      setLoadingMyDocs(true)
+      setMyDocsError(null)
+      const res = await studyBuddyAPI.getMyDocuments({ limit: 100 })
+      const items = res.data?.items || res.data || []
+      setMyDocuments(items)
+    } catch (err) {
+      console.error('Failed to load personal study documents:', err)
+      setMyDocsError(err.response?.data?.detail || 'Failed to load personal documents.')
+      toast.error('Could not load your personal study documents.')
+    } finally {
+      setLoadingMyDocs(false)
+    }
+  }
+
+  // Load personal documents on mount and tab switch
+  useEffect(() => {
+    fetchMyDocuments()
+  }, [])
+
+  useEffect(() => {
+    if (activeTab === 'my_documents') {
+      fetchMyDocuments()
+    }
+  }, [activeTab])
+
+  const handleDownloadMyDocument = async (docId, fallbackFilename = 'document') => {
+    if (downloadingDocId) return
+    setDownloadingDocId(docId)
+    const toastId = toast.loading('Preparing download...')
+    try {
+      const res = await studyBuddyAPI.downloadMyDocument(docId)
+      const blob = new Blob([res.data], { type: 'application/octet-stream' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', fallbackFilename || 'document')
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success('Download complete!', { id: toastId })
+    } catch (err) {
+      console.error('Download document error:', err)
+      toast.error(err.response?.data?.detail || 'Failed to download document.', { id: toastId })
+    } finally {
+      setDownloadingDocId(null)
+    }
+  }
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadError(null)
+
+    const ext = file.name.split('.').pop().toLowerCase()
+    const allowedExts = ['pdf', 'png', 'docx', 'pptx', 'txt']
+    if (!allowedExts.includes(ext)) {
+      setUploadError(`Unsupported file format .${ext}. Supported: PDF, PNG, DOCX, PPTX, TXT.`)
+      return
+    }
+
+    const MAX_FILE_SIZE = 50 * 1024 * 1024
+    if (file.size > MAX_FILE_SIZE) {
+      setUploadError(`File size (${formatFileSize(file.size)}) exceeds the 50 MiB limit.`)
+      return
+    }
+
+    setUploadFile(file)
+    if (!uploadTitle.trim()) {
+      const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name
+      setUploadTitle(baseName.replace(/[_-]/g, ' '))
+    }
+  }
+
+  const handleUploadDocument = async (e) => {
+    e.preventDefault()
+    if (!uploadFile) {
+      toast.error('Please select a file to upload.')
+      return
+    }
+    if (!uploadTitle.trim()) {
+      toast.error('Please enter a document title.')
+      return
+    }
+    if (isDocsQuotaFull) {
+      toast.error('Document quota reached (15/15 active documents). Please delete an existing document first.')
+      return
+    }
+    if (isStorageQuotaFull || (totalStorageUsedBytes + uploadFile.size > MAX_STORAGE_BYTES)) {
+      toast.error(`Storage quota exceeded (200 MiB limit). Remaining: ${formatFileSize(storageQuotaRemainingBytes)}.`)
+      return
+    }
+
+    setIsUploading(true)
+    setUploadProgress(0)
+    setUploadError(null)
+    const toastId = toast.loading('Uploading and processing document...')
+
+    try {
+      const formData = new FormData()
+      formData.append('file', uploadFile)
+      formData.append('title', uploadTitle.trim())
+      if (uploadDescription.trim()) {
+        formData.append('description', uploadDescription.trim())
+      }
+      if (uploadSubjectId) {
+        formData.append('subject_id', uploadSubjectId)
+      }
+
+      await studyBuddyAPI.uploadMyDocument(formData, (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          setUploadProgress(percent)
+        }
+      })
+
+      toast.success('Document uploaded and processed successfully!', { id: toastId })
+      setShowUploadModal(false)
+      setUploadFile(null)
+      setUploadTitle('')
+      setUploadDescription('')
+      setUploadSubjectId('')
+      setUploadProgress(0)
+      fetchMyDocuments()
+    } catch (err) {
+      console.error('Upload document error:', err)
+      const detail = err.response?.data?.detail || 'Failed to upload document.'
+      setUploadError(detail)
+      toast.error(detail, { id: toastId })
+    } finally {
+      setIsUploading(false)
+    }
+  }
+
+  const handleOpenEditModal = (doc) => {
+    setEditingDoc(doc)
+    setEditFormTitle(doc.title || '')
+    setEditFormDescription(doc.description || '')
+  }
+
+  const handleSaveEdit = async (e) => {
+    e.preventDefault()
+    if (!editingDoc) return
+    if (!editFormTitle.trim()) {
+      toast.error('Title cannot be empty.')
+      return
+    }
+
+    setIsSavingEdit(true)
+    try {
+      const res = await studyBuddyAPI.updateMyDocument(editingDoc.id, {
+        title: editFormTitle.trim(),
+        description: editFormDescription.trim() || null
+      })
+      toast.success('Document details updated!')
+      setEditingDoc(null)
+      setMyDocuments((prev) =>
+        prev.map((d) => (d.id === editingDoc.id ? { ...d, ...res.data } : d))
+      )
+    } catch (err) {
+      console.error('Update document error:', err)
+      toast.error(err.response?.data?.detail || 'Failed to update document details.')
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
+
+  const handleOpenDeleteModal = (doc) => {
+    setDeleteConfirmDoc(doc)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmDoc) return
+    setIsDeletingDoc(true)
+    const toastId = toast.loading(`Deleting ${deleteConfirmDoc.title}...`)
+    try {
+      await studyBuddyAPI.deleteMyDocument(deleteConfirmDoc.id)
+      toast.success('Document deleted successfully.', { id: toastId })
+      setMyDocuments((prev) => prev.filter((d) => d.id !== deleteConfirmDoc.id))
+      setDeleteConfirmDoc(null)
+    } catch (err) {
+      console.error('Delete document error:', err)
+      toast.error(err.response?.data?.detail || 'Failed to delete document.', { id: toastId })
+    } finally {
+      setIsDeletingDoc(false)
+    }
+  }
+
+  const handleRetryDocument = async (docId) => {
+    if (retryingDocId) return
+    setRetryingDocId(docId)
+    const toastId = toast.loading('Retrying text extraction & indexing...')
+    try {
+      const res = await studyBuddyAPI.retryMyDocument(docId)
+      toast.success('Processing & indexing retry initiated!', { id: toastId })
+      setMyDocuments((prev) =>
+        prev.map((d) => (d.id === docId ? { ...d, ...res.data } : d))
+      )
+    } catch (err) {
+      console.error('Retry document error:', err)
+      toast.error(err.response?.data?.detail || 'Failed to retry document processing.')
+    } finally {
+      setRetryingDocId(null)
     }
   }
 
@@ -786,6 +1094,23 @@ const StudyBuddy = () => {
               )}
             </button>
             <button
+              id="tab-btn-my-docs"
+              onClick={() => setActiveTab('my_documents')}
+              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
+                activeTab === 'my_documents'
+                  ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-sm'
+                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+              }`}
+            >
+              <span>📁</span>
+              <span>My Documents</span>
+              {myDocuments.length > 0 && (
+                <span className="ml-0.5 px-1.5 py-0.2 text-[10px] rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-semibold">
+                  {myDocuments.length}
+                </span>
+              )}
+            </button>
+            <button
               id="tab-btn-summaries"
               onClick={() => setActiveTab('summaries')}
               className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
@@ -900,13 +1225,13 @@ const StudyBuddy = () => {
                 <span>🎯</span>
                 <span>Grounding Source:</span>
               </span>
-              {/* 3-way Segmented Control */}
-              <div className="inline-flex p-0.5 rounded-lg bg-gray-200/80 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs">
+              {/* 5-way Segmented Control */}
+              <div className="inline-flex p-0.5 rounded-lg bg-gray-200/80 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs overflow-x-auto max-w-full">
                 <button
                   type="button"
                   id="source-mode-syllabus"
                   onClick={() => setSourceMode('syllabus')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                     sourceMode === 'syllabus'
                       ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
@@ -920,7 +1245,7 @@ const StudyBuddy = () => {
                   type="button"
                   id="source-mode-lecture-notes"
                   onClick={() => setSourceMode('lecture_notes')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                     sourceMode === 'lecture_notes'
                       ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
@@ -934,7 +1259,7 @@ const StudyBuddy = () => {
                   type="button"
                   id="source-mode-all"
                   onClick={() => setSourceMode('all')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 ${
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
                     sourceMode === 'all'
                       ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
                       : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
@@ -942,6 +1267,34 @@ const StudyBuddy = () => {
                 >
                   <span>🌐</span>
                   <span>Syllabus + Notes</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="source-mode-my-documents"
+                  onClick={() => setSourceMode('my_documents')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                    sourceMode === 'my_documents'
+                      ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-sm font-semibold'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  <span>📁</span>
+                  <span>My Documents</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="source-mode-all-my-sources"
+                  onClick={() => setSourceMode('all_my_sources')}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
+                    sourceMode === 'all_my_sources'
+                      ? 'bg-white dark:bg-gray-900 text-indigo-600 dark:text-indigo-400 shadow-sm font-semibold'
+                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                  }`}
+                >
+                  <span>🚀</span>
+                  <span>All My Sources</span>
                 </button>
               </div>
             </div>
@@ -956,6 +1309,12 @@ const StudyBuddy = () => {
               )}
               {sourceMode === 'all' && (
                 <span>Synthesizes across both official syllabus requirements and published lecturer materials.</span>
+              )}
+              {sourceMode === 'my_documents' && (
+                <span>Searches your private uploaded study documents, lecture slides, and notes.</span>
+              )}
+              {sourceMode === 'all_my_sources' && (
+                <span>Comprehensive search synthesizing university syllabus, lecturer course notes, and your personal documents.</span>
               )}
             </div>
           </div>
@@ -1020,6 +1379,10 @@ const StudyBuddy = () => {
                               ? '📝 Notes'
                               : msg.sourceMode === 'all'
                               ? '🌐 Combined'
+                              : msg.sourceMode === 'my_documents'
+                              ? '📁 My Docs'
+                              : msg.sourceMode === 'all_my_sources'
+                              ? '🚀 All Sources'
                               : '🏛️ Syllabus'}
                           </span>
                         </div>
@@ -1042,6 +1405,14 @@ const StudyBuddy = () => {
                           ) : msg.sourceMode === 'all' ? (
                             <>
                               <strong>Notice:</strong> Insufficient evidence found in both the official syllabus and published lecturer notes.
+                            </>
+                          ) : msg.sourceMode === 'my_documents' ? (
+                            <>
+                              <strong>Notice:</strong> Insufficient evidence found in your uploaded personal study documents.
+                            </>
+                          ) : msg.sourceMode === 'all_my_sources' ? (
+                            <>
+                              <strong>Notice:</strong> Insufficient evidence found across official syllabus, lecturer notes, and personal documents.
                             </>
                           ) : (
                             <>
@@ -1066,19 +1437,28 @@ const StudyBuddy = () => {
                         <div className="space-y-2">
                           {deduplicateCitations(msg.citations).map((cit, cIdx) => {
                             const isLectureNote = cit.source_type === 'lecture_note'
+                            const isStudentDoc = cit.source_type === 'student_upload'
                             const isExpanded = !!expandedChatCitations[`${msg.id}-${cIdx}`]
+                            const docId = cit.student_study_document_id || cit.source_id
                             return (
                               <div
                                 key={cIdx}
                                 className={`border rounded-lg p-2.5 text-xs transition-colors ${
-                                  isLectureNote
+                                  isStudentDoc
+                                    ? 'bg-purple-50/40 dark:bg-purple-950/20 border-purple-200 dark:border-purple-900/60'
+                                    : isLectureNote
                                     ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-900/60'
                                     : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-750'
                                 }`}
                               >
                                 <div className="flex flex-wrap items-center justify-between gap-1">
                                   <div className="flex items-center gap-1.5 flex-wrap">
-                                    {isLectureNote ? (
+                                    {isStudentDoc ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200 dark:border-purple-800 flex items-center gap-1">
+                                        <span>📁</span>
+                                        <span>My Document</span>
+                                      </span>
+                                    ) : isLectureNote ? (
                                       <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 flex items-center gap-1">
                                         <span>📝</span>
                                         <span>Faculty Lecture Note</span>
@@ -1089,20 +1469,36 @@ const StudyBuddy = () => {
                                         <span>Official Syllabus</span>
                                       </span>
                                     )}
-                                    <span className="font-semibold text-blue-600 dark:text-blue-400">
-                                      {cit.subject_code} - {cit.subject_name}
-                                    </span>
+                                    {cit.subject_code && cit.subject_name && (
+                                      <span className="font-semibold text-blue-600 dark:text-blue-400">
+                                        {cit.subject_code} - {cit.subject_name}
+                                      </span>
+                                    )}
                                   </div>
-                                  {cit.relevance_score != null && (
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                                      {Math.round(cit.relevance_score * 100)}% match
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-2">
+                                    {cit.relevance_score != null && (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                                        {Math.round(cit.relevance_score * 100)}% match
+                                      </span>
+                                    )}
+                                    {isStudentDoc && docId && (
+                                      <button
+                                        id={`download-citation-${docId}`}
+                                        onClick={() => handleDownloadMyDocument(docId, cit.original_filename || cit.source_title)}
+                                        disabled={downloadingDocId === docId}
+                                        className="px-2 py-0.5 text-[10px] font-medium rounded bg-purple-100 hover:bg-purple-200 dark:bg-purple-900/60 dark:hover:bg-purple-800 text-purple-800 dark:text-purple-200 border border-purple-200 dark:border-purple-700 flex items-center gap-1 transition-colors disabled:opacity-50"
+                                        title="Download original document"
+                                      >
+                                        <Download className="w-2.5 h-2.5" />
+                                        <span>{downloadingDocId === docId ? '...' : 'Download'}</span>
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {(cit.source_title || cit.original_filename) && (
                                   <div className="mt-1 font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1">
-                                    <span>📄</span>
+                                    <span>{isStudentDoc ? '📁' : '📄'}</span>
                                     <span>{cit.source_title || cit.original_filename}</span>
                                     {cit.original_filename && cit.source_title && cit.original_filename !== cit.source_title && (
                                       <span className="text-[11px] text-gray-400 font-normal">
@@ -1125,7 +1521,7 @@ const StudyBuddy = () => {
                                   )}
                                   {cit.source_page != null && (
                                     <span>
-                                      <strong>{isLectureNote ? 'Page/Slide:' : 'Page:'}</strong> {cit.source_page}
+                                      <strong>{isLectureNote || isStudentDoc ? 'Page/Slide:' : 'Page:'}</strong> {cit.source_page}
                                     </span>
                                   )}
                                 </div>
@@ -1175,6 +1571,10 @@ const StudyBuddy = () => {
                         ? 'Retrieving published lecturer notes & synthesizing answer...'
                         : sourceMode === 'all'
                         ? 'Retrieving syllabus & lecturer notes evidence...'
+                        : sourceMode === 'my_documents'
+                        ? 'Searching your personal documents & synthesizing answer...'
+                        : sourceMode === 'all_my_sources'
+                        ? 'Synthesizing syllabus, lecturer materials, and your documents...'
                         : 'Retrieving syllabus evidence & synthesizing answer...'}
                     </span>
                   </div>
@@ -1485,6 +1885,445 @@ const StudyBuddy = () => {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================
+          TAB 3: MY PERSONAL STUDY DOCUMENTS (Step 4.6H)
+      ======================================================== */}
+      {activeTab === 'my_documents' && (
+        <div className="space-y-4">
+          {/* Header Card with Quota & Action Controls */}
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm transition-colors">
+            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">📁</span>
+                  <h2 className="text-base font-bold text-gray-900 dark:text-white">
+                    My Study Documents
+                  </h2>
+                  <span className="px-2.5 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300">
+                    {filteredMyDocs.length} {filteredMyDocs.length === 1 ? 'Document' : 'Documents'}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 max-w-xl">
+                  Upload your private lecture slides, class notes, handouts, or reference files (PDF, PNG, DOCX, PPTX, TXT up to 50 MiB).
+                  Files are securely stored and indexed for personal Study Buddy RAG retrieval.
+                </p>
+              </div>
+
+              {/* Action Buttons: Upload & Refresh */}
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  id="btn-refresh-my-docs"
+                  onClick={fetchMyDocuments}
+                  disabled={loadingMyDocs}
+                  className="px-3 py-1.5 text-xs font-medium text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-1.5"
+                  title="Reload personal documents"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loadingMyDocs ? 'animate-spin' : ''}`} />
+                  <span>Refresh</span>
+                </button>
+
+                <button
+                  id="btn-upload-my-doc"
+                  onClick={() => {
+                    setUploadError(null)
+                    setUploadFile(null)
+                    setUploadTitle('')
+                    setUploadDescription('')
+                    setUploadSubjectId(selectedSubjectId || '')
+                    setShowUploadModal(true)
+                  }}
+                  disabled={isDocsQuotaFull || isStorageQuotaFull}
+                  className="px-3.5 py-1.5 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                  title={
+                    isDocsQuotaFull
+                      ? 'Quota reached: 15 active documents maximum'
+                      : isStorageQuotaFull
+                      ? 'Storage quota full: 200 MiB maximum'
+                      : 'Upload a study document'
+                  }
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>Upload Document</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quota Indicators */}
+            <div id="my-docs-quota-status" className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* Document Count Quota Card */}
+              <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200/80 dark:border-gray-700">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1">
+                    <FileText className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                    <span>Active Documents:</span>
+                  </span>
+                  <span className="font-bold text-gray-900 dark:text-white">
+                    {activeDocsCount} / {MAX_ACTIVE_DOCS}
+                    <span className="font-normal text-gray-500 dark:text-gray-400 text-[11px] ml-1">
+                      ({docsQuotaRemaining} remaining)
+                    </span>
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-300 ${
+                      activeDocsCount >= MAX_ACTIVE_DOCS
+                        ? 'bg-red-500'
+                        : activeDocsCount >= 12
+                        ? 'bg-amber-500'
+                        : 'bg-purple-600'
+                    }`}
+                    style={{ width: `${Math.min(100, (activeDocsCount / MAX_ACTIVE_DOCS) * 100)}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Storage Quota Card */}
+              <div className="p-2.5 rounded-lg bg-gray-50 dark:bg-gray-800/60 border border-gray-200/80 dark:border-gray-700">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1">
+                    <HardDrive className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                    <span>Storage Usage:</span>
+                  </span>
+                  <span className="font-bold text-gray-900 dark:text-white">
+                    {formatFileSize(totalStorageUsedBytes)} / 200 MB
+                    <span className="font-normal text-gray-500 dark:text-gray-400 text-[11px] ml-1">
+                      ({formatFileSize(storageQuotaRemainingBytes)} left)
+                    </span>
+                  </span>
+                </div>
+                <div className="w-full bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-300 ${
+                      totalStorageUsedBytes >= MAX_STORAGE_BYTES
+                        ? 'bg-red-500'
+                        : totalStorageUsedBytes >= MAX_STORAGE_BYTES * 0.8
+                        ? 'bg-amber-500'
+                        : 'bg-purple-600'
+                    }`}
+                    style={{
+                      width: `${Math.min(100, (totalStorageUsedBytes / MAX_STORAGE_BYTES) * 100)}%`
+                    }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Search and Subject Filter Bar */}
+            <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {/* Search input */}
+              <div className="sm:col-span-2 relative">
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                  <Search className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  id="search-my-docs"
+                  value={myDocsSearchQuery}
+                  onChange={(e) => setMyDocsSearchQuery(e.target.value)}
+                  placeholder="Search your documents by title, original filename, or notes..."
+                  className="w-full text-xs pl-9 pr-8 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+                />
+                {myDocsSearchQuery && (
+                  <button
+                    onClick={() => setMyDocsSearchQuery('')}
+                    className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                    title="Clear search"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              {/* Subject filter */}
+              <div>
+                <select
+                  id="filter-my-docs-subject"
+                  value={myDocsSubjectFilter}
+                  onChange={(e) => setMyDocsSubjectFilter(e.target.value)}
+                  className="w-full text-xs py-2 px-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-colors"
+                >
+                  <option value="">All Linked Subjects</option>
+                  {subjects.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.code} - {s.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Personal Documents Content Feed */}
+          {loadingMyDocs ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-4 shadow-sm animate-pulse space-y-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="h-5 w-16 bg-gray-200 dark:bg-gray-800 rounded-full" />
+                    <div className="h-4 w-20 bg-gray-200 dark:bg-gray-800 rounded" />
+                  </div>
+                  <div className="h-5 w-3/4 bg-gray-200 dark:bg-gray-800 rounded" />
+                  <div className="h-4 w-1/2 bg-gray-200 dark:bg-gray-800 rounded" />
+                  <div className="h-10 w-full bg-gray-200 dark:bg-gray-800 rounded-lg mt-4" />
+                </div>
+              ))}
+            </div>
+          ) : myDocsError ? (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 rounded-xl p-8 text-center">
+              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
+              <h3 className="font-semibold text-red-900 dark:text-red-200 text-sm">
+                Failed to load personal documents
+              </h3>
+              <p className="text-xs text-red-700 dark:text-red-300 mt-1 max-w-md mx-auto">
+                {myDocsError}
+              </p>
+              <button
+                onClick={fetchMyDocuments}
+                className="mt-4 px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition-colors"
+              >
+                Try Again
+              </button>
+            </div>
+          ) : filteredMyDocs.length === 0 ? (
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-12 text-center">
+              <div className="w-16 h-16 rounded-full bg-purple-50 dark:bg-purple-950/40 flex items-center justify-center text-3xl mx-auto mb-3">
+                📁
+              </div>
+              <h3 className="text-base font-semibold text-gray-800 dark:text-gray-200 mb-1">
+                {myDocsSearchQuery || myDocsSubjectFilter
+                  ? 'No matching personal documents found'
+                  : 'No personal study documents yet'}
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-4">
+                {myDocsSearchQuery || myDocsSubjectFilter
+                  ? 'Try clearing your search query or subject filter to view all your uploaded documents.'
+                  : 'Upload your first study document to ask Study Buddy questions grounded in your own notes, presentations, and handouts!'}
+              </p>
+              {myDocsSearchQuery || myDocsSubjectFilter ? (
+                <button
+                  onClick={() => {
+                    setMyDocsSearchQuery('')
+                    setMyDocsSubjectFilter('')
+                  }}
+                  className="px-3 py-1.5 text-xs text-purple-600 dark:text-purple-400 font-semibold hover:underline"
+                >
+                  Clear filters
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setUploadError(null)
+                    setUploadFile(null)
+                    setUploadTitle('')
+                    setUploadDescription('')
+                    setUploadSubjectId(selectedSubjectId || '')
+                    setShowUploadModal(true)
+                  }}
+                  disabled={isDocsQuotaFull || isStorageQuotaFull}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-sm transition-all inline-flex items-center gap-1.5"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  <span>Upload Your First Document</span>
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredMyDocs.map((doc) => {
+                const formatInfo = getFileFormatInfo(doc.original_filename)
+                const FormatIcon = formatInfo.icon
+                const isDownloading = downloadingDocId === doc.id
+                const isRetrying = retryingDocId === doc.id
+                const subject = subjects.find((s) => String(s.id) === String(doc.subject_id))
+                const canRetry =
+                  (doc.processing_status === 'failed' || doc.indexing_status === 'failed') &&
+                  doc.processing_status !== 'processing' &&
+                  doc.indexing_status !== 'indexing'
+
+                return (
+                  <div
+                    key={doc.id}
+                    id={`my-doc-card-${doc.id}`}
+                    className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 hover:border-purple-300 dark:hover:border-purple-700 rounded-xl p-4 shadow-sm transition-all flex flex-col justify-between"
+                  >
+                    <div>
+                      {/* Top Badges: File Format & Linked Subject */}
+                      <div className="flex items-center justify-between gap-2 mb-2">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold border flex items-center gap-1 ${formatInfo.color}`}
+                        >
+                          <FormatIcon className="w-3 h-3" />
+                          <span>{formatInfo.label}</span>
+                        </span>
+
+                        {subject ? (
+                          <span
+                            className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300 border border-blue-200 dark:border-blue-900 truncate max-w-[140px]"
+                            title={`${subject.code} - ${subject.name}`}
+                          >
+                            {subject.code}
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                            General
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Title */}
+                      <h4
+                        className="font-bold text-sm text-gray-900 dark:text-white line-clamp-2 mb-1"
+                        title={doc.title}
+                      >
+                        {doc.title}
+                      </h4>
+
+                      {/* Description if present */}
+                      {doc.description && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2">
+                          {doc.description}
+                        </p>
+                      )}
+
+                      {/* Original Filename */}
+                      <div
+                        className="text-[11px] font-mono text-gray-500 dark:text-gray-400 truncate mb-3 flex items-center gap-1"
+                        title={doc.original_filename}
+                      >
+                        <FileCheck className="w-3 h-3 text-purple-500 shrink-0" />
+                        <span className="truncate">{doc.original_filename}</span>
+                      </div>
+
+                      {/* Status Badges Row: Extraction & Indexing */}
+                      <div className="space-y-1.5 mb-3 bg-gray-50 dark:bg-gray-800/50 p-2.5 rounded-lg border border-gray-100 dark:border-gray-800 text-[11px]">
+                        {/* Text Extraction Status */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-500 dark:text-gray-400">Extraction:</span>
+                          {doc.processing_status === 'extracted' ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                              <CheckCircle className="w-3 h-3" />
+                              <span>Extracted</span>
+                            </span>
+                          ) : doc.processing_status === 'processing' ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              <span>Processing...</span>
+                            </span>
+                          ) : doc.processing_status === 'failed' ? (
+                            <span className="text-red-600 dark:text-red-400 font-medium flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" />
+                              <span>Failed</span>
+                            </span>
+                          ) : (
+                            <span className="text-gray-500 dark:text-gray-400">
+                              {doc.processing_status || 'Uploaded'}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Qdrant Indexing Status */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-500 dark:text-gray-400">Vector Index:</span>
+                          {doc.indexing_status === 'indexed' ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-purple-500" />
+                              <span>{doc.indexed_chunk_count || 0} chunks</span>
+                            </span>
+                          ) : doc.indexing_status === 'indexing' ? (
+                            <span className="text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1">
+                              <RefreshCw className="w-3 h-3 animate-spin" />
+                              <span>Indexing...</span>
+                            </span>
+                          ) : doc.indexing_status === 'failed' ? (
+                            <span className="text-red-600 dark:text-red-400 font-medium flex items-center gap-1">
+                              <AlertCircle className="w-3 h-3" />
+                              <span>Indexing Failed</span>
+                            </span>
+                          ) : (
+                            <span className="text-gray-400">Not indexed</span>
+                          )}
+                        </div>
+
+                        {/* Error detail if present */}
+                        {doc.extraction_error && (
+                          <div className="text-[10px] text-red-600 dark:text-red-400 pt-1 border-t border-gray-200 dark:border-gray-700 truncate" title={doc.extraction_error}>
+                            ⚠️ {doc.extraction_error}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Footer Actions: File Info & Buttons */}
+                    <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] text-gray-500 dark:text-gray-400">
+                        <span>{formatFileSize(doc.file_size)}</span>
+                        <span>{formatDate(doc.created_at)}</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {/* Download Original File Button */}
+                        <button
+                          id={`download-doc-${doc.id}`}
+                          onClick={() => handleDownloadMyDocument(doc.id, doc.original_filename)}
+                          disabled={isDownloading}
+                          className="py-1.5 px-2 text-xs font-semibold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 hover:bg-purple-100 dark:hover:bg-purple-900 border border-purple-200 dark:border-purple-800 rounded-lg transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+                          title="Download original document file"
+                        >
+                          <Download className="w-3 h-3" />
+                          <span>{isDownloading ? 'Downloading...' : 'Download'}</span>
+                        </button>
+
+                        {/* Edit Metadata Button */}
+                        <button
+                          id={`edit-doc-${doc.id}`}
+                          onClick={() => handleOpenEditModal(doc)}
+                          className="py-1.5 px-2 text-xs font-semibold text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 border border-gray-200 dark:border-gray-700 rounded-lg transition-colors flex items-center justify-center gap-1"
+                          title="Edit title & description"
+                        >
+                          <Edit3 className="w-3 h-3" />
+                          <span>Edit</span>
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {/* Delete Button */}
+                        <button
+                          id={`delete-doc-${doc.id}`}
+                          onClick={() => handleOpenDeleteModal(doc)}
+                          className="flex-1 py-1.5 px-2 text-xs font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 hover:bg-red-100 dark:hover:bg-red-900/50 border border-red-200 dark:border-red-900 rounded-lg transition-colors flex items-center justify-center gap-1"
+                          title="Delete document"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                          <span>Delete</span>
+                        </button>
+
+                        {/* Retry Button if eligible */}
+                        {canRetry && (
+                          <button
+                            id={`retry-doc-${doc.id}`}
+                            onClick={() => handleRetryDocument(doc.id)}
+                            disabled={isRetrying}
+                            className="flex-1 py-1.5 px-2 text-xs font-semibold text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 hover:bg-amber-100 dark:hover:bg-amber-900/50 border border-amber-200 dark:border-amber-800 rounded-lg transition-colors flex items-center justify-center gap-1 disabled:opacity-50"
+                            title="Retry text extraction and vector indexing"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${isRetrying ? 'animate-spin' : ''}`} />
+                            <span>{isRetrying ? 'Retrying...' : 'Retry'}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>
@@ -2684,6 +3523,348 @@ const StudyBuddy = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Upload Personal Document Modal */}
+      {showUploadModal && (
+        <div
+          id="modal-upload-my-doc"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto"
+        >
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl max-w-lg w-full p-6 shadow-xl relative animate-in fade-in duration-200 my-8">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-lg bg-purple-100 dark:bg-purple-950 text-purple-600 dark:text-purple-400">
+                  <UploadCloud className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                    Upload Personal Study Document
+                  </h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Files are private to your account & indexed for personal RAG.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!isUploading) setShowUploadModal(false)
+                }}
+                disabled={isUploading}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg p-1 disabled:opacity-50"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUploadDocument} className="mt-4 space-y-4">
+              {/* File Selector Dropzone */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Select File <span className="text-red-500">*</span>
+                </label>
+                <div className="border-2 border-dashed border-gray-300 dark:border-gray-700 hover:border-purple-400 dark:hover:border-purple-600 rounded-xl p-4 text-center bg-gray-50/50 dark:bg-gray-800/50 transition-colors">
+                  <input
+                    type="file"
+                    id="input-my-doc-file"
+                    accept=".pdf,.png,.docx,.pptx,.txt"
+                    onChange={handleFileSelect}
+                    disabled={isUploading}
+                    className="hidden"
+                  />
+                  {uploadFile ? (
+                    <div className="flex items-center justify-between bg-white dark:bg-gray-850 p-2.5 rounded-lg border border-purple-200 dark:border-purple-900 text-left">
+                      <div className="flex items-center gap-2 truncate">
+                        <FileCheck className="w-4 h-4 text-purple-600 shrink-0" />
+                        <div className="truncate">
+                          <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">
+                            {uploadFile.name}
+                          </p>
+                          <p className="text-[11px] text-gray-500">
+                            {formatFileSize(uploadFile.size)}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUploadFile(null)
+                          setUploadTitle('')
+                        }}
+                        disabled={isUploading}
+                        className="text-gray-400 hover:text-red-500 p-1 text-xs font-bold disabled:opacity-50"
+                        title="Remove file"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor="input-my-doc-file"
+                      className="cursor-pointer flex flex-col items-center justify-center gap-1.5 py-3"
+                    >
+                      <UploadCloud className="w-8 h-8 text-purple-500" />
+                      <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 hover:underline">
+                        Click to browse file
+                      </span>
+                      <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                        PDF, PNG, DOCX, PPTX, TXT (Maximum 50 MiB)
+                      </span>
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* Title Field */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Document Title <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  id="input-doc-title"
+                  value={uploadTitle}
+                  onChange={(e) => setUploadTitle(e.target.value)}
+                  placeholder="e.g. Operating Systems Lecture Notes Unit 2"
+                  disabled={isUploading}
+                  required
+                  maxLength={255}
+                  className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-2.5 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              {/* Description Field (Optional) */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Description (Optional)
+                </label>
+                <textarea
+                  id="input-doc-description"
+                  value={uploadDescription}
+                  onChange={(e) => setUploadDescription(e.target.value)}
+                  placeholder="Add notes about content, professor, or exam context..."
+                  disabled={isUploading}
+                  rows={2}
+                  className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-2.5 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 resize-none"
+                />
+              </div>
+
+              {/* Subject Selector (Optional) */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Associated Subject (Optional)
+                </label>
+                <select
+                  id="select-doc-subject"
+                  value={uploadSubjectId}
+                  onChange={(e) => setUploadSubjectId(e.target.value)}
+                  disabled={isUploading}
+                  className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-2.5 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="">No specific subject / General</option>
+                  {subjects.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                      {sub.code} - {sub.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Upload Progress Bar */}
+              {isUploading && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-[11px] text-gray-600 dark:text-gray-400">
+                    <span>Uploading & processing...</span>
+                    <span>{uploadProgress}%</span>
+                  </div>
+                  <div className="w-full bg-gray-200 dark:bg-gray-700 h-2 rounded-full overflow-hidden">
+                    <div
+                      className="bg-purple-600 h-full transition-all duration-200"
+                      style={{ width: `${uploadProgress}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Error Alert */}
+              {uploadError && (
+                <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 text-xs text-red-700 dark:text-red-300 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-red-500" />
+                  <span>{uploadError}</span>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setShowUploadModal(false)}
+                  disabled={isUploading}
+                  className="px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  id="btn-submit-upload-doc"
+                  disabled={isUploading || !uploadFile || !uploadTitle.trim()}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                >
+                  {isUploading ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Uploading ({uploadProgress}%)...</span>
+                    </>
+                  ) : (
+                    <>
+                      <UploadCloud className="w-3.5 h-3.5" />
+                      <span>Upload & Index</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Personal Document Metadata Modal */}
+      {editingDoc && (
+        <div
+          id="modal-edit-my-doc"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto"
+        >
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl max-w-md w-full p-6 shadow-xl relative animate-in fade-in duration-200">
+            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
+              <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <Edit3 className="w-4 h-4 text-purple-600" />
+                <span>Edit Document Metadata</span>
+              </h3>
+              <button
+                onClick={() => {
+                  if (!isSavingEdit) setEditingDoc(null)
+                }}
+                disabled={isSavingEdit}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-lg p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Title <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  id="input-edit-doc-title"
+                  value={editFormTitle}
+                  onChange={(e) => setEditFormTitle(e.target.value)}
+                  required
+                  maxLength={255}
+                  disabled={isSavingEdit}
+                  className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-2.5 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Description (Optional)
+                </label>
+                <textarea
+                  id="input-edit-doc-description"
+                  value={editFormDescription}
+                  onChange={(e) => setEditFormDescription(e.target.value)}
+                  rows={3}
+                  disabled={isSavingEdit}
+                  className="w-full text-xs bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-2.5 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 resize-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingDoc(null)}
+                  disabled={isSavingEdit}
+                  className="px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  id="btn-submit-edit-doc"
+                  disabled={isSavingEdit || !editFormTitle.trim()}
+                  className="px-4 py-2 text-xs font-semibold text-white bg-purple-600 hover:bg-purple-700 disabled:opacity-50 rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+                >
+                  {isSavingEdit ? 'Saving...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmDoc && (
+        <div
+          id="modal-delete-my-doc"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 overflow-y-auto"
+        >
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl max-w-md w-full p-6 shadow-xl relative animate-in fade-in duration-200">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400 mb-3">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Delete Personal Document
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  This action is permanent and irreversible.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-700 dark:text-gray-300 leading-relaxed mb-4">
+              Are you sure you want to delete <strong className="text-gray-900 dark:text-white">"{deleteConfirmDoc.title}"</strong> ({deleteConfirmDoc.original_filename})?
+              This will immediately revoke it from your personal RAG retrieval, purge all associated vector embeddings from Qdrant, and delete the original binary file from storage.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-800">
+              <button
+                type="button"
+                id="btn-cancel-delete-doc"
+                onClick={() => {
+                  if (!isDeletingDoc) setDeleteConfirmDoc(null)
+                }}
+                disabled={isDeletingDoc}
+                className="px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                id={`confirm-delete-doc-${deleteConfirmDoc.id}`}
+                onClick={handleConfirmDelete}
+                disabled={isDeletingDoc}
+                className="px-4 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-50 rounded-lg shadow-sm transition-all flex items-center gap-1.5"
+              >
+                {isDeletingDoc ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete Document</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

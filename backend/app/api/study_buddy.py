@@ -31,6 +31,9 @@ from ..models.study_buddy import (
     LectureNoteStatus,
     LectureNoteProcessingStatus,
     LectureNoteIndexingStatus,
+    StudentStudyDocument,
+    StudentDocProcessingStatus,
+    StudentDocIndexingStatus,
 )
 from ..schemas.study_buddy import (
     SubjectCreate,
@@ -62,6 +65,10 @@ from ..schemas.study_buddy import (
     LectureNoteDetailResponse,
     LectureNoteUpdateRequest,
     LectureNoteListResponse,
+    StudentStudyDocumentResponse,
+    StudentStudyDocumentDetailResponse,
+    StudentStudyDocumentUpdateRequest,
+    StudentStudyDocumentListResponse,
 )
 from ..services.syllabus_ingestion_service import syllabus_ingestion_service
 from ..services.syllabus_indexing_service import syllabus_indexing_service
@@ -70,6 +77,8 @@ from ..services.study_buddy_content_service import study_buddy_content_service
 from ..services.study_buddy_progress_service import study_buddy_progress_service
 from ..services.lecture_notes_service import lecture_notes_service
 from ..services.lecture_notes_indexing_service import lecture_notes_indexing_service
+from ..services.student_documents_service import student_documents_service
+from ..services.student_documents_indexing_service import student_documents_indexing_service
 from ..services.file_storage.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
@@ -729,14 +738,14 @@ async def get_indexing_status(
 async def search_syllabus_content(
     query: str = Query(..., min_length=2, max_length=500, description="Search query string"),
     subject_id: Optional[int] = Query(None, description="Optional subject ID filter"),
-    source_mode: Optional[StudyBuddySourceMode] = Query(StudyBuddySourceMode.SYLLABUS, description="Source mode: 'syllabus', 'lecture_notes', or 'all'"),
+    source_mode: Optional[StudyBuddySourceMode] = Query(StudyBuddySourceMode.SYLLABUS, description="Source mode: 'syllabus', 'lecture_notes', 'all', 'my_documents', or 'all_my_sources'"),
     limit: int = Query(5, ge=1, le=20, description="Max results to return"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Semantic search across approved and published academic chunks in dedicated Qdrant collection.
-    - Scoped by source_mode: 'syllabus', 'lecture_notes', or 'all'.
+    - Scoped by source_mode: 'syllabus', 'lecture_notes', 'all', 'my_documents', or 'all_my_sources'.
     - Role & department authorization enforced against PostgreSQL before and after Qdrant search.
     - Placement Officer forbidden.
     """
@@ -760,8 +769,8 @@ async def ask_study_buddy(
 ):
     """
     RAG-powered academic Study Buddy QA endpoint.
-    - Scoped strictly to student's authorized department and approved materials.
-    - Supports source modes: 'syllabus', 'lecture_notes', or 'all'.
+    - Scoped strictly to student's authorized department and approved materials (or personal uploads).
+    - Supports source modes: 'syllabus', 'lecture_notes', 'all', 'my_documents', or 'all_my_sources'.
     - Retrieves relevant chunks from dedicated Qdrant collection.
     - Passes bounded context to shared Qwen Instruct singleton.
     - Provides verified source citations with document, unit, topic, and page provenance.
@@ -1481,6 +1490,393 @@ async def get_lecture_note_indexing_status(
         "extraction_metadata": note.extraction_metadata or {},
         "updated_at": note.updated_at.isoformat() if note.updated_at else None
     }
+
+
+# ============================================
+# STUDENT STUDY DOCUMENTS ENDPOINTS
+# ============================================
+
+def _format_student_doc_detail(doc: StudentStudyDocument) -> StudentStudyDocumentDetailResponse:
+    """Format StudentStudyDocument to StudentStudyDocumentDetailResponse with sanitized metadata."""
+    clean_meta = {}
+    if doc.extraction_metadata:
+        for k, v in doc.extraction_metadata.items():
+            if k in ("file_path", "temp_path", "minio_bucket", "minio_object_key"):
+                continue
+            clean_meta[k] = v
+
+    return StudentStudyDocumentDetailResponse(
+        id=doc.id,
+        student_id=doc.student_id,
+        subject_id=doc.subject_id,
+        title=doc.title,
+        description=doc.description,
+        original_filename=doc.original_filename,
+        file_size=doc.file_size,
+        mime_type=doc.mime_type,
+        content_hash=doc.content_hash,
+        is_active=doc.is_active,
+        processing_status=doc.processing_status,
+        indexing_status=doc.indexing_status,
+        indexed_chunk_count=doc.indexed_chunk_count,
+        extraction_error=doc.extraction_error,
+        created_at=doc.created_at,
+        updated_at=doc.updated_at,
+        subject_name=doc.subject.name if doc.subject else None,
+        subject_code=doc.subject.code if doc.subject else None,
+        subject_department=doc.subject.department if doc.subject else None,
+        extraction_metadata=clean_meta,
+    )
+
+
+@router.post(
+    "/my-documents",
+    response_model=StudentStudyDocumentDetailResponse,
+    status_code=status.HTTP_201_CREATED
+)
+async def upload_student_study_document(
+    file: UploadFile = FastAPIFile(...),
+    title: str = Form(..., min_length=1, max_length=255, description="Document title"),
+    description: Optional[str] = Form(None, description="Optional document description"),
+    subject_id: Optional[int] = Form(None, description="Optional academic subject ID"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Upload and ingest a personal study document for the authenticated student.
+    - Owner is strictly derived from the authenticated session (never trusted from body).
+    - Enforces 50 MiB per-file limit, format validation, anti-zip-bomb, and active quotas.
+    - Offloads text extraction to dedicated thread pool.
+    - Automatically indexes extracted text into Qdrant vector collection for personal RAG.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+
+    doc = await student_documents_service.upload_and_ingest_document(
+        db=db,
+        file=file,
+        student=current_user,
+        title=title,
+        description=description,
+        subject_id=subject_id
+    )
+
+    # Auto-index into Qdrant if text extraction was successful
+    if doc.processing_status == StudentDocProcessingStatus.EXTRACTED:
+        try:
+            student_documents_indexing_service.index_student_document(db, doc.id, current_user.id)
+            db.refresh(doc)
+        except Exception as idx_err:
+            logger.warning(f"Auto-indexing for student doc {doc.id} encountered error: {idx_err}")
+
+    return _format_student_doc_detail(doc)
+
+
+@router.get(
+    "/my-documents",
+    response_model=StudentStudyDocumentListResponse
+)
+async def list_my_study_documents(
+    subject_id: Optional[int] = Query(None, description="Filter by subject ID"),
+    search: Optional[str] = Query(None, description="Search by title or filename"),
+    skip: int = Query(0, ge=0, description="Offset for pagination"),
+    limit: int = Query(20, ge=1, le=100, description="Page size limit"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    List active study documents owned by the authenticated student.
+    - Strictly scoped to current_user.id.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+
+    query = db.query(StudentStudyDocument).filter(
+        StudentStudyDocument.student_id == current_user.id,
+        StudentStudyDocument.is_active == True
+    )
+
+    if subject_id is not None:
+        query = query.filter(StudentStudyDocument.subject_id == subject_id)
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(
+            (StudentStudyDocument.title.ilike(term)) |
+            (StudentStudyDocument.original_filename.ilike(term))
+        )
+
+    total = query.count()
+    items = query.order_by(StudentStudyDocument.created_at.desc()).offset(skip).limit(limit).all()
+
+    return StudentStudyDocumentListResponse(
+        items=[StudentStudyDocumentResponse.model_validate(it) for it in items],
+        total=total,
+        skip=skip,
+        limit=limit
+    )
+
+
+@router.get(
+    "/my-documents/{document_id}",
+    response_model=StudentStudyDocumentDetailResponse
+)
+async def get_my_study_document_detail(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get metadata and processing/indexing status for a student study document.
+    - Strictly verifies ownership: returns 404 if not found or owned by another student.
+    - Never leaks MinIO bucket names, object keys, or raw extracted text.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+
+    doc = db.query(StudentStudyDocument).filter(
+        StudentStudyDocument.id == document_id,
+        StudentStudyDocument.student_id == current_user.id,
+        StudentStudyDocument.is_active == True
+    ).first()
+
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student study document with ID {document_id} not found."
+        )
+
+    return _format_student_doc_detail(doc)
+
+
+@router.patch(
+    "/my-documents/{document_id}",
+    response_model=StudentStudyDocumentDetailResponse
+)
+async def update_my_study_document_metadata(
+    document_id: int,
+    request: StudentStudyDocumentUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update permitted metadata (title, description) for an active personal study document.
+    - Strictly verifies student ownership.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+
+    doc = db.query(StudentStudyDocument).filter(
+        StudentStudyDocument.id == document_id,
+        StudentStudyDocument.student_id == current_user.id,
+        StudentStudyDocument.is_active == True
+    ).first()
+
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student study document with ID {document_id} not found."
+        )
+
+    if request.title is not None:
+        clean_title = request.title.strip()
+        if not clean_title:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Title cannot be empty."
+            )
+        doc.title = clean_title
+
+    if request.description is not None:
+        doc.description = request.description.strip() if request.description.strip() else None
+
+    doc.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(doc)
+
+    return _format_student_doc_detail(doc)
+
+
+@router.delete(
+    "/my-documents/{document_id}",
+    response_model=Dict[str, Any]
+)
+async def delete_my_study_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a personal study document using the hardened cleanup flow:
+    1. Verifies ownership.
+    2. Immediately marks inactive to release quotas and block retrieval.
+    3. Purges Qdrant vector chunks.
+    4. Purges binary file from MinIO.
+    5. Permanently deletes database row upon full cleanup completion.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+
+    doc = db.query(StudentStudyDocument).filter(
+        StudentStudyDocument.id == document_id,
+        StudentStudyDocument.student_id == current_user.id
+    ).first()
+
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student study document with ID {document_id} not found."
+        )
+
+    student_documents_service.delete_document(db, document_id, current_user.id)
+    return {
+        "message": "Document successfully deleted.",
+        "document_id": document_id
+    }
+
+
+@router.post(
+    "/my-documents/{document_id}/retry",
+    response_model=StudentStudyDocumentDetailResponse
+)
+async def retry_my_study_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retry text extraction or vector indexing for an eligible failed document.
+    - Verifies ownership and concurrency claim locks.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+
+    doc = db.query(StudentStudyDocument).filter(
+        StudentStudyDocument.id == document_id,
+        StudentStudyDocument.student_id == current_user.id
+    ).first()
+
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student study document with ID {document_id} not found."
+        )
+
+    if not doc.is_active:
+        meta = doc.extraction_metadata or {}
+        if meta.get("cleanup_pending"):
+            student_documents_service.retry_document_cleanup(db, document_id, current_user.id)
+            return _format_student_doc_detail(doc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot retry an inactive or deleted document."
+        )
+
+    if doc.processing_status == StudentDocProcessingStatus.PROCESSING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document {document_id} is currently being processed by another task."
+        )
+
+    if doc.indexing_status == StudentDocIndexingStatus.INDEXING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Document {document_id} is currently being indexed by another task."
+        )
+
+    # 1. Retry text extraction if failed or unextracted
+    if doc.processing_status in (StudentDocProcessingStatus.FAILED, StudentDocProcessingStatus.UPLOADED):
+        doc = await student_documents_service.retry_document_processing(db, document_id, current_user.id)
+        if doc.processing_status == StudentDocProcessingStatus.EXTRACTED:
+            try:
+                student_documents_indexing_service.index_student_document(db, document_id, current_user.id)
+                db.refresh(doc)
+            except Exception as idx_err:
+                logger.warning(f"Indexing error during retry for student doc {document_id}: {idx_err}")
+
+    # 2. If extraction is already successful, retry indexing if not indexed or failed
+    elif doc.processing_status == StudentDocProcessingStatus.EXTRACTED:
+        student_documents_indexing_service.index_student_document(db, document_id, current_user.id)
+        db.refresh(doc)
+
+    return _format_student_doc_detail(doc)
+
+
+@router.get("/my-documents/{document_id}/download")
+async def download_my_study_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Download the authenticated student's original study document binary securely from MinIO.
+    - Owner is strictly verified: returns 404 for missing or foreign-owned documents.
+    - MinIO bucket names and storage keys are never exposed in URLs or responses.
+    - Placement Officers forbidden.
+    """
+    verify_study_buddy_access(current_user)
+
+    doc = db.query(StudentStudyDocument).filter(
+        StudentStudyDocument.id == document_id,
+        StudentStudyDocument.student_id == current_user.id,
+        StudentStudyDocument.is_active == True
+    ).first()
+
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Student study document with ID {document_id} not found."
+        )
+
+    try:
+        response_stream = minio_client.get_object_stream(doc.minio_bucket, doc.minio_object_key)
+    except Exception as e:
+        logger.error(f"Failed to fetch student document from MinIO: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Storage service error while retrieving file."
+        )
+
+    if response_stream is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document binary file not found in storage."
+        )
+
+    def file_iterator():
+        try:
+            if hasattr(response_stream, "stream"):
+                for chunk in response_stream.stream(amt=64 * 1024):
+                    yield chunk
+            else:
+                while True:
+                    chunk = response_stream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+        finally:
+            try:
+                if hasattr(response_stream, "close"):
+                    response_stream.close()
+                if hasattr(response_stream, "release_conn"):
+                    response_stream.release_conn()
+            except Exception as close_err:
+                logger.debug(f"Error releasing MinIO stream connection: {close_err}")
+
+    clean_filename = doc.original_filename.replace('"', '\\"')
+    encoded_filename = urllib.parse.quote(doc.original_filename)
+    headers = {
+        "Content-Disposition": f'attachment; filename="{clean_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+    }
+    if doc.file_size and doc.file_size > 0:
+        headers["Content-Length"] = str(doc.file_size)
+
+    return StreamingResponse(
+        file_iterator(),
+        media_type=doc.mime_type or "application/octet-stream",
+        headers=headers
+    )
+
 
 
 

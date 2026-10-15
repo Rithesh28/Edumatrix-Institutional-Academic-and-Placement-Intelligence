@@ -16,6 +16,8 @@ from ..models.study_buddy import (
     LectureNoteStatus,
     LectureNoteProcessingStatus,
     LectureNoteIndexingStatus,
+    StudentDocProcessingStatus,
+    StudentDocIndexingStatus,
 )
 
 
@@ -162,6 +164,8 @@ class StudyBuddySourceMode(str, enum.Enum):
     SYLLABUS = "syllabus"
     LECTURE_NOTES = "lecture_notes"
     ALL = "all"
+    MY_DOCUMENTS = "my_documents"
+    ALL_MY_SOURCES = "all_my_sources"
 
 
 class StudyBuddyQuestionRequest(BaseModel):
@@ -169,22 +173,23 @@ class StudyBuddyQuestionRequest(BaseModel):
     subject_id: Optional[int] = Field(None, description="Optional subject ID to focus the query")
     source_mode: Optional[StudyBuddySourceMode] = Field(
         default=StudyBuddySourceMode.SYLLABUS,
-        description="Source mode: 'syllabus', 'lecture_notes', or 'all'"
+        description="Source mode: 'syllabus', 'lecture_notes', 'all', 'my_documents', or 'all_my_sources'"
     )
 
 
 class StudyBuddyCitation(BaseModel):
-    source_type: str = "syllabus"  # "syllabus" or "lecture_note"
+    source_type: str = "syllabus"  # "syllabus", "lecture_note", or "student_upload"
     source_id: Optional[int] = None
     source_title: Optional[str] = None
     original_filename: Optional[str] = None
     document_id: Optional[int] = None
     version: Optional[int] = None
     lecture_note_id: Optional[int] = None
-    subject_id: int
-    subject_code: str
-    subject_name: str
-    department: str
+    student_study_document_id: Optional[int] = None
+    subject_id: Optional[int] = None
+    subject_code: Optional[str] = None
+    subject_name: Optional[str] = None
+    department: Optional[str] = None
     unit_number: Optional[int] = None
     unit_title: Optional[str] = None
     topic_title: Optional[str] = None
@@ -525,6 +530,52 @@ class LectureNoteUpdateRequest(BaseModel):
 
 class LectureNoteListResponse(BaseModel):
     items: List[LectureNoteResponse]
+    total: int
+    skip: int
+    limit: int
+
+
+# ============================================
+# STUDENT STUDY DOCUMENT SCHEMAS
+# ============================================
+
+class StudentStudyDocumentResponse(BaseModel):
+    id: int
+    student_id: int
+    subject_id: Optional[int] = None
+    title: str
+    description: Optional[str] = None
+    original_filename: str
+    file_size: int
+    mime_type: str
+    content_hash: str
+    is_active: bool
+    processing_status: StudentDocProcessingStatus
+    indexing_status: StudentDocIndexingStatus
+    indexed_chunk_count: int = 0
+    extraction_error: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudentStudyDocumentDetailResponse(StudentStudyDocumentResponse):
+    subject_name: Optional[str] = None
+    subject_code: Optional[str] = None
+    subject_department: Optional[str] = None
+    extraction_metadata: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class StudentStudyDocumentUpdateRequest(BaseModel):
+    title: Optional[str] = Field(None, min_length=1, max_length=255)
+    description: Optional[str] = None
+
+
+class StudentStudyDocumentListResponse(BaseModel):
+    items: List[StudentStudyDocumentResponse]
     total: int
     skip: int
     limit: int

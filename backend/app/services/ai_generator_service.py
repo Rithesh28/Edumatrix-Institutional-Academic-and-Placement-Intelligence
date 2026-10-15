@@ -627,9 +627,15 @@ class QwenGenerator:
 
         primary = sources[0]
         source_type = primary.get("source_type", "syllabus")
-        source_label = "faculty lecture notes" if source_type == "lecture_note" else "approved syllabus"
+        if source_type == "student_upload":
+            source_label = "your uploaded study document"
+        elif source_type == "lecture_note":
+            source_label = "faculty lecture notes"
+        else:
+            source_label = "approved syllabus"
 
         subj = f"{primary.get('subject_code', '')} {primary.get('subject_name', '')}".strip()
+        doc_title = primary.get("source_title") or primary.get("title") or primary.get("original_filename")
         unit_info = ""
         if primary.get("unit_number"):
             unit_info = f"Unit {primary['unit_number']}"
@@ -640,6 +646,8 @@ class QwenGenerator:
         text = primary.get("text") or primary.get("source_evidence") or ""
 
         header_parts = []
+        if source_type == "student_upload" and doc_title:
+            header_parts.append(f"Document \"{doc_title}\"")
         if subj:
             header_parts.append(subj)
         if unit_info:

@@ -88,6 +88,18 @@ export const studyBuddyAPI = {
   retryNoteProcessing: (noteId) => api.post(`/study-buddy/notes/${noteId}/retry`),
   downloadNote: (noteId) => api.get(`/study-buddy/notes/${noteId}/download`, { responseType: 'blob' }),
   downloadNoteFile: (fileId) => api.get(`/files/${fileId}/download`, { responseType: 'blob' }),
+  // Step 4.6H: Student Personal Study Documents
+  getMyDocuments: (params = {}) => api.get('/study-buddy/my-documents', { params }),
+  getMyDocumentDetail: (documentId) => api.get(`/study-buddy/my-documents/${documentId}`),
+  uploadMyDocument: (formData, onUploadProgress) => api.post('/study-buddy/my-documents', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 0,
+    onUploadProgress,
+  }),
+  updateMyDocument: (documentId, payload) => api.patch(`/study-buddy/my-documents/${documentId}`, payload),
+  deleteMyDocument: (documentId) => api.delete(`/study-buddy/my-documents/${documentId}`),
+  retryMyDocument: (documentId) => api.post(`/study-buddy/my-documents/${documentId}/retry`),
+  downloadMyDocument: (documentId) => api.get(`/study-buddy/my-documents/${documentId}/download`, { responseType: 'blob' }),
 }
 
 // ============================================

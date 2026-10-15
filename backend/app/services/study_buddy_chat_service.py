@@ -33,6 +33,9 @@ from ..models.study_buddy import (
     LectureNoteStatus,
     LectureNoteProcessingStatus,
     LectureNoteIndexingStatus,
+    StudentStudyDocument,
+    StudentDocProcessingStatus,
+    StudentDocIndexingStatus,
 )
 from .embedding_service import embedding_service
 from .file_storage.qdrant_client import qdrant_client
@@ -41,6 +44,7 @@ from .lecture_notes_indexing_service import (
     lecture_notes_indexing_service,
     STUDY_BUDDY_COLLECTION,
 )
+from .student_documents_indexing_service import student_documents_indexing_service
 from .ai_generator_service import ai_generator
 
 logger = logging.getLogger(__name__)
@@ -259,6 +263,148 @@ class StudyBuddyChatService:
 
         return formatted
 
+    def search_student_document_chunks(
+        self,
+        db: Session,
+        query: str,
+        current_user: User,
+        subject_id: Optional[int] = None,
+        limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Retrieve authorized student study document chunks with strict PostgreSQL boundary checks.
+        Filters Qdrant by source_type='student_upload' and student_id=current_user.id,
+        then strictly validates each candidate point against PostgreSQL:
+        - Document exists
+        - student_id == current_user.id
+        - is_active is True
+        - processing_status == EXTRACTED
+        - indexing_status == INDEXED
+        - indexed_chunk_count > 0
+        - If subject_id is linked: Subject.is_active is True and department-accessible
+        """
+        if not query or not query.strip():
+            return []
+
+        if current_user.role == UserRole.PLACEMENT_OFFICER:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Placement Officers do not have study document retrieval access."
+            )
+
+        # Ensure collection
+        if not student_documents_indexing_service.ensure_collection():
+            return []
+
+        # Generate query vector
+        query_vector = embedding_service.embed_text(query)
+        if not query_vector:
+            return []
+
+        # Vector filter: scope strictly to source_type="student_upload" and student_id=current_user.id
+        must_conditions = [
+            models.FieldCondition(
+                key="source_type",
+                match=models.MatchValue(value="student_upload")
+            ),
+            models.FieldCondition(
+                key="student_id",
+                match=models.MatchValue(value=current_user.id)
+            )
+        ]
+
+        if subject_id is not None:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="subject_id",
+                    match=models.MatchValue(value=subject_id)
+                )
+            )
+
+        qdrant_filter = models.Filter(must=must_conditions)
+
+        try:
+            if hasattr(qdrant_client.client, "query_points"):
+                response = qdrant_client.client.query_points(
+                    collection_name=STUDY_BUDDY_COLLECTION,
+                    query=query_vector,
+                    limit=limit,
+                    query_filter=qdrant_filter,
+                    score_threshold=0.2
+                )
+                results = response.points
+            else:
+                results = qdrant_client.client.search(
+                    collection_name=STUDY_BUDDY_COLLECTION,
+                    query_vector=query_vector,
+                    limit=limit,
+                    query_filter=qdrant_filter,
+                    score_threshold=0.2
+                )
+        except Exception as qd_err:
+            logger.error(f"Qdrant query failed for student documents: {qd_err}")
+            return []
+
+        user_dept = _get_user_department(current_user)
+
+        # Authoritative secondary validation against PostgreSQL
+        # NEVER rely on Qdrant filters as the authorization boundary!
+        formatted = []
+        for r in results:
+            doc_id = r.payload.get("student_study_document_id")
+            if not doc_id:
+                continue
+
+            doc = db.query(StudentStudyDocument).filter(
+                StudentStudyDocument.id == doc_id,
+                StudentStudyDocument.student_id == current_user.id,
+                StudentStudyDocument.is_active == True,
+                StudentStudyDocument.processing_status == StudentDocProcessingStatus.EXTRACTED,
+                StudentStudyDocument.indexing_status == StudentDocIndexingStatus.INDEXED,
+                StudentStudyDocument.indexed_chunk_count > 0
+            ).first()
+
+            if not doc:
+                # Discard stale, deleted, deactivated, failed, non-indexed, or foreign-owner chunks
+                continue
+
+            if subject_id is not None and doc.subject_id != subject_id:
+                continue
+
+            # If subject is associated, verify subject is active and department-accessible
+            if doc.subject_id is not None:
+                if not doc.subject or not doc.subject.is_active:
+                    continue
+
+                if current_user.role != UserRole.ADMIN:
+                    if not user_dept or _normalize_dept(user_dept) != _normalize_dept(doc.subject.department):
+                        continue
+
+            formatted.append({
+                "score": r.score,
+                "source_type": "student_upload",
+                "source_id": doc.id,
+                "source_title": doc.title,
+                "original_filename": doc.original_filename,
+                "document_id": None,
+                "version": None,
+                "lecture_note_id": None,
+                "student_study_document_id": doc.id,
+                "subject_id": doc.subject_id,
+                "subject_code": doc.subject.code if doc.subject else None,
+                "subject_name": doc.subject.name if doc.subject else None,
+                "department": doc.subject.department if doc.subject else None,
+                "unit_number": None,
+                "unit_title": None,
+                "topic_title": None,
+                "source_page": r.payload.get("source_page"),
+                "source_evidence": None,
+                "chunk_order": r.payload.get("chunk_index"),
+                "text": r.payload.get("text")
+            })
+
+        return formatted
+
     def search_unified_chunks(
         self,
         db: Session,
@@ -269,26 +415,48 @@ class StudyBuddyChatService:
         limit: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Unified search router dispatching to syllabus, lecture_notes, or both with deduplication.
+        Unified search router dispatching to syllabus, lecture_notes, my_documents, or combinations.
         """
         mode = str(source_mode.value if hasattr(source_mode, "value") else source_mode).lower().strip()
-        if mode not in ("syllabus", "lecture_notes", "all"):
+        valid_modes = ("syllabus", "lecture_notes", "all", "my_documents", "all_my_sources")
+        if mode not in valid_modes:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid source_mode '{source_mode}'. Must be one of: 'syllabus', 'lecture_notes', 'all'."
+                detail=f"Invalid source_mode '{source_mode}'. Must be one of: {', '.join(valid_modes)}."
             )
 
         if mode == "syllabus":
             return self.search_syllabus_chunks(db, query, current_user, subject_id, limit)
         elif mode == "lecture_notes":
             return self.search_lecture_note_chunks(db, query, current_user, subject_id, limit)
+        elif mode == "my_documents":
+            return self.search_student_document_chunks(db, query, current_user, subject_id, limit)
         elif mode == "all":
+            # Existing combined syllabus + lecture_notes behavior, unchanged
             s_chunks = self.search_syllabus_chunks(db, query, current_user, subject_id, limit)
             l_chunks = self.search_lecture_note_chunks(db, query, current_user, subject_id, limit)
             combined = s_chunks + l_chunks
             combined.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
 
             # Deduplicate near-identical chunks based on snippet prefix
+            deduped = []
+            seen_snippets = set()
+            for c in combined:
+                snippet = (c.get("text") or "").strip()[:80].lower()
+                if snippet and snippet in seen_snippets:
+                    continue
+                seen_snippets.add(snippet)
+                deduped.append(c)
+                if len(deduped) >= limit:
+                    break
+            return deduped
+        elif mode == "all_my_sources":
+            s_chunks = self.search_syllabus_chunks(db, query, current_user, subject_id, limit)
+            l_chunks = self.search_lecture_note_chunks(db, query, current_user, subject_id, limit)
+            m_chunks = self.search_student_document_chunks(db, query, current_user, subject_id, limit)
+            combined = s_chunks + l_chunks + m_chunks
+            combined.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
+
             deduped = []
             seen_snippets = set()
             for c in combined:
@@ -324,10 +492,11 @@ class StudyBuddyChatService:
 
         # Validate source_mode
         mode = str(source_mode.value if hasattr(source_mode, "value") else source_mode).lower().strip()
-        if mode not in ("syllabus", "lecture_notes", "all"):
+        valid_modes = ("syllabus", "lecture_notes", "all", "my_documents", "all_my_sources")
+        if mode not in valid_modes:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Invalid source_mode '{source_mode}'. Must be one of: 'syllabus', 'lecture_notes', 'all'."
+                detail=f"Invalid source_mode '{source_mode}'. Must be one of: {', '.join(valid_modes)}."
             )
 
         # 1. Enforce Role & Department Authorization
@@ -338,11 +507,12 @@ class StudyBuddyChatService:
             )
 
         user_dept = _get_user_department(current_user)
-        if current_user.role != UserRole.ADMIN and not user_dept:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User has no assigned academic department."
-            )
+        if mode in ("syllabus", "lecture_notes", "all", "all_my_sources") or subject_id is not None:
+            if current_user.role != UserRole.ADMIN and not user_dept:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User has no assigned academic department."
+                )
 
         # 2. If subject_id is specified, verify existence, active status, and department access
         if subject_id is not None:
@@ -399,9 +569,20 @@ class StudyBuddyChatService:
         # 5. Insufficient Evidence Handling
         if not qualifying_chunks:
             elapsed_ms = (time.time() - start_time) * 1000
-            source_desc = "lecture notes" if mode == "lecture_notes" else ("academic materials" if mode == "all" else "syllabus material")
+            if mode == "my_documents":
+                source_desc = "uploaded personal study documents"
+            elif mode == "lecture_notes":
+                source_desc = "lecture notes"
+            elif mode in ("all", "all_my_sources"):
+                source_desc = "academic materials"
+            else:
+                source_desc = "syllabus material"
+
             return {
                 "answer": (
+                    f"The selected {source_desc} do not provide sufficient information to answer this question. "
+                    "Please check your uploaded files or consult your subject lecturer for clarification."
+                ) if mode == "my_documents" else (
                     f"The approved {source_desc} do not provide sufficient information to answer this question. "
                     "Please consult your subject lecturer or course coordinator for clarification."
                 ),
@@ -419,10 +600,19 @@ class StudyBuddyChatService:
         for i, chunk in enumerate(qualifying_chunks, 1):
             passage_text = chunk.get("text") or chunk.get("source_evidence") or ""
             source_type = chunk.get("source_type", "syllabus")
-            source_label = "Lecture Note" if source_type == "lecture_note" else "Syllabus"
-            title_label = chunk.get("source_title") or ""
+            if source_type == "student_upload":
+                source_label = "Student Document"
+            elif source_type == "lecture_note":
+                source_label = "Lecture Note"
+            else:
+                source_label = "Syllabus"
 
-            header = f"[Passage {i} - {source_label}] {chunk.get('subject_code', '')} {chunk.get('subject_name', '')}"
+            title_label = chunk.get("source_title") or chunk.get("original_filename") or ""
+            subj_desc = f"{chunk.get('subject_code', '')} {chunk.get('subject_name', '')}".strip()
+
+            header = f"[Passage {i} - {source_label}]"
+            if subj_desc:
+                header += f" {subj_desc}"
             if title_label and title_label != chunk.get('subject_name'):
                 header += f" | {title_label}"
             if chunk.get("unit_number"):
@@ -466,16 +656,17 @@ class StudyBuddyChatService:
             for c in supplied_chunks:
                 citations.append({
                     "source_type": c.get("source_type", "syllabus"),
-                    "source_id": c.get("source_id") or c.get("document_id") or c.get("lecture_note_id"),
+                    "source_id": c.get("source_id") or c.get("document_id") or c.get("lecture_note_id") or c.get("student_study_document_id"),
                     "source_title": c.get("source_title"),
                     "original_filename": c.get("original_filename"),
                     "document_id": c.get("document_id"),
                     "version": c.get("version"),
                     "lecture_note_id": c.get("lecture_note_id"),
-                    "subject_id": c["subject_id"],
-                    "subject_code": c["subject_code"],
-                    "subject_name": c["subject_name"],
-                    "department": c["department"],
+                    "student_study_document_id": c.get("student_study_document_id"),
+                    "subject_id": c.get("subject_id"),
+                    "subject_code": c.get("subject_code"),
+                    "subject_name": c.get("subject_name"),
+                    "department": c.get("department"),
                     "unit_number": c.get("unit_number"),
                     "unit_title": c.get("unit_title"),
                     "topic_title": c.get("topic_title"),
