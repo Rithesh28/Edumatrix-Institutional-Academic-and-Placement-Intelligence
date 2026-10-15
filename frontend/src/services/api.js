@@ -58,7 +58,10 @@ export const chatAPI = {
 // STUDY BUDDY RAG API
 // ============================================
 export const studyBuddyAPI = {
-  getSubjects: () => api.get('/study-buddy/subjects'),
+  getSubjects: (params = {}) => api.get('/study-buddy/subjects', { params }),
+  createSubject: (payload) => api.post('/study-buddy/subjects', payload),
+  updateSubject: (subjectId, payload) => api.put(`/study-buddy/subjects/${subjectId}`, payload),
+  deleteSubject: (subjectId) => api.delete(`/study-buddy/subjects/${subjectId}`),
   getSyllabusDetail: (documentId) => api.get(`/study-buddy/syllabi/${documentId}`),
   askQuestion: (question, subjectId = null, sourceMode = 'syllabus') => api.post('/study-buddy/chat', { question, subject_id: subjectId, source_mode: sourceMode }),
   searchSyllabus: (query, subjectId = null, sourceMode = 'syllabus') => api.get('/study-buddy/search', { params: { query, subject_id: subjectId, source_mode: sourceMode } }),

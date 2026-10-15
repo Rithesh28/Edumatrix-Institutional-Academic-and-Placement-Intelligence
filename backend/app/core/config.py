@@ -5,6 +5,10 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+# Ensure local cached models are loaded instantly without network delays
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 class Settings:
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "postgresql://edumatrix:edumatrix123@postgres:5432/edumatrix")

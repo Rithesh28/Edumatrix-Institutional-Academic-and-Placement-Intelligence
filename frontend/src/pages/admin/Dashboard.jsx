@@ -20,6 +20,17 @@ function AdminDashboard() {
         <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3">Active Modules</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div 
+            onClick={() => navigate('/admin/subjects')}
+            className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md transition-shadow cursor-pointer border-l-4 border-l-teal-600"
+          >
+            <h3 className="font-semibold text-lg text-gray-900 dark:text-white mb-1 flex items-center justify-between">
+              <span>📚 Academic Subjects</span>
+              <span className="text-xs bg-green-100 dark:bg-green-900/60 text-green-700 dark:text-green-300 px-2 py-0.5 rounded-full font-normal">Active</span>
+            </h3>
+            <p className="text-gray-500 dark:text-gray-400 text-sm">Manage curriculum subjects, department allocations, and semester mappings.</p>
+          </div>
+
+          <div 
             onClick={() => navigate('/admin/users')}
             className="bg-white dark:bg-gray-900 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md transition-shadow cursor-pointer border-l-4 border-l-blue-600"
           >
