@@ -112,11 +112,11 @@ class TestStudyBuddyStep46A(unittest.TestCase):
         self.assertIsNone(mig_019.branch_labels, "Migration must not introduce branch labels")
         self.assertIsNone(mig_019.depends_on, "Migration must not have depends_on splits")
 
-        # Verify database is currently at revision 019
+        # Verify database is currently at revision 019 or later
         with engine.connect() as conn:
             result = conn.execute(text("SELECT version_num FROM alembic_version;")).fetchone()
             self.assertIsNotNone(result, "Alembic version record must exist")
-            self.assertEqual(result[0], "019", f"Live database Alembic revision must be 019 (found {result[0]})")
+            self.assertIn(result[0], ["019", "020"], f"Live database Alembic revision must be 019 or 020 (found {result[0]})")
 
     # =========================================================================
     # 2. ISOLATED MIGRATION UPGRADE & DOWNGRADE EXECUTION

@@ -485,3 +485,87 @@ class LectureNote(Base):
         return f"<LectureNote id={self.id} subject_id={self.subject_id} title={self.title} status={self.status}>"
 
 
+class StudentDocProcessingStatus(str, enum.Enum):
+    """Extraction processing status for a student study document."""
+    UPLOADED = "UPLOADED"
+    PROCESSING = "PROCESSING"
+    EXTRACTED = "EXTRACTED"
+    FAILED = "FAILED"
+
+
+class StudentDocIndexingStatus(str, enum.Enum):
+    """Qdrant vector indexing status for a student study document."""
+    NOT_INDEXED = "NOT_INDEXED"
+    INDEXING = "INDEXING"
+    INDEXED = "INDEXED"
+    FAILED = "FAILED"
+
+
+class StudentStudyDocument(Base):
+    """
+    Personal study document uploaded by a student for academic grounding.
+    Strictly private to the student owner (student_id).
+    Maintains independent lifecycle and Qdrant vector indexing state.
+    Never exposed as institutional syllabus or shared lecture notes.
+    """
+    __tablename__ = "study_buddy_student_documents"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    student_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    subject_id = Column(Integer, ForeignKey("subjects.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    original_filename = Column(String(255), nullable=False)
+    file_size = Column(Integer, nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    content_hash = Column(String(64), nullable=False, index=True)
+
+    minio_bucket = Column(String(100), nullable=False, default="student-documents")
+    minio_object_key = Column(String(500), nullable=False, unique=True)
+
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+
+    processing_status = Column(
+        Enum(StudentDocProcessingStatus, name="study_buddy_student_doc_processing_status"),
+        default=StudentDocProcessingStatus.UPLOADED,
+        nullable=False,
+        index=True
+    )
+    extracted_text = Column(Text, nullable=True)
+    extraction_error = Column(Text, nullable=True)
+    extraction_metadata = Column(JSONB, nullable=True, default=dict)
+
+    indexing_status = Column(
+        Enum(StudentDocIndexingStatus, name="study_buddy_student_doc_indexing_status"),
+        default=StudentDocIndexingStatus.NOT_INDEXED,
+        nullable=False,
+        index=True
+    )
+    indexed_chunk_count = Column(Integer, default=0, nullable=False)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    student = relationship("User", foreign_keys=[student_id])
+    subject = relationship("Subject", foreign_keys=[subject_id])
+
+    __table_args__ = (
+        Index("ix_study_buddy_student_docs_student_active", "student_id", "is_active"),
+        Index("ix_study_buddy_student_docs_student_subject", "student_id", "subject_id"),
+        Index("ix_study_buddy_student_docs_student_hash", "student_id", "content_hash"),
+        Index(
+            "uq_study_buddy_student_docs_active_hash",
+            "student_id",
+            "content_hash",
+            unique=True,
+            postgresql_where=(Column("is_active") == True)
+        ),
+    )
+
+    def __repr__(self):
+        return f"<StudentStudyDocument id={self.id} student_id={self.student_id} title={self.title} active={self.is_active}>"
+
+
+

@@ -52,6 +52,9 @@ from .study_buddy import (
     LectureNoteProcessingStatus,
     LectureNoteIndexingStatus,
     LectureNote,
+    StudentDocProcessingStatus,
+    StudentDocIndexingStatus,
+    StudentStudyDocument,
 )
 
 __all__ = [
@@ -122,4 +125,7 @@ __all__ = [
     'LectureNoteProcessingStatus',
     'LectureNoteIndexingStatus',
     'LectureNote',
-]
+    'StudentDocProcessingStatus',
+    'StudentDocIndexingStatus',
+    'StudentStudyDocument',
+]
