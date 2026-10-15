@@ -32,7 +32,7 @@ from io import BytesIO
 
 from fastapi import UploadFile, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
 from qdrant_client.http import models
 
 from app.core.database import SessionLocal, engine
@@ -796,6 +796,326 @@ class TestStudyBuddyStep46H1(unittest.TestCase):
 
         self.assertEqual(s_count_before, s_count_after, "Syllabus vector count must remain completely unaffected.")
         self.assertEqual(l_count_before, l_count_after, "Lecture note vector count must remain completely unaffected.")
+
+    # =========================================================================
+    # 16. DELETION REMOVES ONLY OWN VECTORS & MINIO OBJECT
+    # =========================================================================
+    def test_16_delete_document_removes_qdrant_vectors_and_minio_file(self):
+        """Verify delete_document cleans up Qdrant points, MinIO binary, and database record."""
+        import asyncio
+        content = f"Test deletion with full vector and storage purge {self.timestamp}".encode("utf-8")
+        file_obj = self._make_upload_file(content, "to_delete.txt", "text/plain")
+
+        # 1. Ingest document
+        doc = asyncio.run(student_documents_service.upload_and_ingest_document(
+            self.db, file_obj, self.student_aiml, "To Delete Doc"
+        ))
+        self.created_doc_ids.append(doc.id)
+
+        # 2. Index document
+        idx_res = student_documents_indexing_service.index_student_document(self.db, doc.id, self.student_aiml.id)
+        self.assertEqual(idx_res["status"], "SUCCESS")
+
+        # Confirm vector point exists in Qdrant
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"student_study_doc_{doc.id}_chunk_1"))
+        pts = qdrant_client.client.retrieve(collection_name=STUDY_BUDDY_COLLECTION, ids=[point_id])
+        self.assertEqual(len(pts), 1)
+
+        # Confirm MinIO object exists
+        minio_data = minio_client.download_file(doc.minio_bucket, doc.minio_object_key)
+        self.assertEqual(minio_data, content)
+
+        # 3. Call delete_document
+        del_res = student_documents_service.delete_document(self.db, doc.id, self.student_aiml.id)
+        self.assertTrue(del_res)
+
+        # 4. Confirm vector point is deleted from Qdrant
+        pts_after = qdrant_client.client.retrieve(collection_name=STUDY_BUDDY_COLLECTION, ids=[point_id])
+        self.assertEqual(len(pts_after), 0, "Vector points must be pruned from Qdrant on document deletion.")
+
+        # 5. Confirm DB record is deleted
+        db_doc = self.db.query(StudentStudyDocument).filter(StudentStudyDocument.id == doc.id).first()
+        self.assertIsNone(db_doc, "Database record must be permanently removed after successful cleanup.")
+
+    # =========================================================================
+    # 17. QDRANT CLEANUP FAILURE RECOVERY
+    # =========================================================================
+    def test_17_qdrant_cleanup_failure_recovery(self):
+        """Verify that when Qdrant cleanup fails, the record is preserved with cleanup_pending and can be retried."""
+        import asyncio
+        content = f"Qdrant failure recovery test {self.timestamp}".encode("utf-8")
+        file_obj = self._make_upload_file(content, "qdrant_fail.txt", "text/plain")
+
+        doc = asyncio.run(student_documents_service.upload_and_ingest_document(
+            self.db, file_obj, self.student_aiml, "Qdrant Fail Doc"
+        ))
+        self.created_doc_ids.append(doc.id)
+
+        # Simulate Qdrant outage during delete_document_chunks
+        with patch.object(student_documents_indexing_service, "delete_document_chunks", side_effect=RuntimeError("Qdrant connection refused")):
+            with self.assertRaises(HTTPException) as cm:
+                student_documents_service.delete_document(self.db, doc.id, self.student_aiml.id)
+            self.assertEqual(cm.exception.status_code, 500)
+            self.assertIn("Record preserved for cleanup retry", cm.exception.detail)
+
+        # Verify DB row is preserved, deactivated, with cleanup_pending=True
+        preserved = self.db.query(StudentStudyDocument).filter(StudentStudyDocument.id == doc.id).first()
+        self.assertIsNotNone(preserved, "Database record must not be deleted if external vector cleanup fails.")
+        self.assertFalse(preserved.is_active, "Document must be deactivated immediately to cut off retrieval.")
+        self.assertTrue(preserved.extraction_metadata.get("cleanup_pending"))
+        self.assertIn("Qdrant connection refused", str(preserved.extraction_metadata.get("cleanup_errors")))
+        self.assertEqual(preserved.minio_bucket, STUDENT_DOCS_BUCKET)
+        self.assertIsNotNone(preserved.minio_object_key)
+
+        # Now retry cleanup with Qdrant functioning
+        retry_res = student_documents_service.retry_document_cleanup(self.db, doc.id, self.student_aiml.id)
+        self.assertTrue(retry_res)
+
+        # Verify row is now permanently deleted
+        purged = self.db.query(StudentStudyDocument).filter(StudentStudyDocument.id == doc.id).first()
+        self.assertIsNone(purged, "Database row must be purged after retry cleanup succeeds.")
+
+    # =========================================================================
+    # 18. MINIO CLEANUP FAILURE RECOVERY
+    # =========================================================================
+    def test_18_minio_cleanup_failure_recovery(self):
+        """Verify that when MinIO cleanup fails, object key is preserved and retry succeeds."""
+        import asyncio
+        content = f"MinIO failure recovery test {self.timestamp}".encode("utf-8")
+        file_obj = self._make_upload_file(content, "minio_clean_fail.txt", "text/plain")
+
+        doc = asyncio.run(student_documents_service.upload_and_ingest_document(
+            self.db, file_obj, self.student_aiml, "MinIO Fail Doc"
+        ))
+        self.created_doc_ids.append(doc.id)
+
+        # Simulate MinIO deletion outage
+        with patch.object(minio_client, "delete_file", side_effect=RuntimeError("MinIO S3 timeout")):
+            with self.assertRaises(HTTPException) as cm:
+                student_documents_service.delete_document(self.db, doc.id, self.student_aiml.id)
+            self.assertEqual(cm.exception.status_code, 500)
+            self.assertIn("Record preserved for cleanup retry", cm.exception.detail)
+
+        # Verify DB row and object key are preserved
+        preserved = self.db.query(StudentStudyDocument).filter(StudentStudyDocument.id == doc.id).first()
+        self.assertIsNotNone(preserved)
+        self.assertFalse(preserved.is_active)
+        self.assertTrue(preserved.extraction_metadata.get("cleanup_pending"))
+
+        # Retry cleanup with MinIO working
+        retry_res = student_documents_service.retry_document_cleanup(self.db, doc.id, self.student_aiml.id)
+        self.assertTrue(retry_res)
+
+        # Confirm deleted
+        purged = self.db.query(StudentStudyDocument).filter(StudentStudyDocument.id == doc.id).first()
+        self.assertIsNone(purged)
+
+    # =========================================================================
+    # 19. REPEATED DELETION & IDEMPOTENCY
+    # =========================================================================
+    def test_19_repeated_deletion_and_idempotency(self):
+        """Verify calling delete on non-existent or already purged document returns 404, without affecting other data."""
+        with self.assertRaises(HTTPException) as cm:
+            student_documents_service.delete_document(self.db, 9999999, self.student_aiml.id)
+        self.assertEqual(cm.exception.status_code, 404)
+
+        # Repeated delete_document_chunks on Qdrant should be safe and idempotent
+        chunks_del = student_documents_indexing_service.delete_document_chunks(9999999)
+        self.assertIn(chunks_del, [0, 1])
+
+    # =========================================================================
+    # 20. CONCURRENT UPLOADS: SAME STUDENT DOCUMENT COUNT QUOTA
+    # =========================================================================
+    def test_20_concurrent_uploads_same_student_cannot_exceed_15_docs(self):
+        """Verify that concurrent uploads by the same student cannot exceed the 15 active documents limit."""
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        # 1. Bring student up to 14 active documents
+        existing_active = self.db.query(StudentStudyDocument).filter(
+            StudentStudyDocument.student_id == self.student_aiml.id,
+            StudentStudyDocument.is_active == True
+        ).all()
+        for d in existing_active:
+            self.db.delete(d)
+        self.db.commit()
+
+        temp_doc_ids = []
+        for i in range(14):
+            d = StudentStudyDocument(
+                student_id=self.student_aiml.id,
+                title=f"Filler Doc {i} {self.timestamp}",
+                original_filename=f"filler_{i}.txt",
+                file_size=1024,
+                mime_type="text/plain",
+                content_hash=uuid.uuid4().hex,
+                minio_bucket=STUDENT_DOCS_BUCKET,
+                minio_object_key=f"student_{self.student_aiml.id}/filler_{i}_{uuid.uuid4().hex[:6]}.txt",
+                processing_status=StudentDocProcessingStatus.EXTRACTED,
+                is_active=True
+            )
+            self.db.add(d)
+            self.db.commit()
+            self.db.refresh(d)
+            temp_doc_ids.append(d.id)
+            self.created_doc_ids.append(d.id)
+
+        # Current active count is exactly 14
+        count_14 = self.db.query(StudentStudyDocument).filter(
+            StudentStudyDocument.student_id == self.student_aiml.id,
+            StudentStudyDocument.is_active == True
+        ).count()
+        self.assertEqual(count_14, 14)
+
+        # 2. Launch 4 concurrent uploads simultaneously for the same student
+        def upload_worker(idx):
+            worker_db = SessionLocal()
+            try:
+                unique_content = f"Concurrent upload content {idx} {uuid.uuid4().hex}".encode("utf-8")
+                file_obj = self._make_upload_file(unique_content, f"concurrent_{idx}.txt")
+                doc = asyncio.run(student_documents_service.upload_and_ingest_document(
+                    worker_db, file_obj, self.student_aiml, f"Concurrent Note {idx}"
+                ))
+                return ("SUCCESS", doc.id)
+            except HTTPException as e:
+                return ("FAILED", e.status_code, e.detail)
+            except Exception as ex:
+                return ("ERROR", str(ex))
+            finally:
+                worker_db.close()
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(upload_worker, range(4)))
+
+        successes = [r for r in results if r[0] == "SUCCESS"]
+        failures = [r for r in results if r[0] == "FAILED"]
+
+        for s in successes:
+            self.created_doc_ids.append(s[1])
+
+        # Exactly 1 upload could succeed (14 + 1 = 15). The other 3 must fail!
+        self.assertEqual(len(successes), 1, f"Expected exactly 1 concurrent upload to succeed, got: {results}")
+        self.assertEqual(len(failures), 3)
+        for f in failures:
+            self.assertEqual(f[1], 400)
+            self.assertIn("Document quota exceeded", f[2])
+
+        # Total active documents in DB must be exactly 15 (never exceeded)
+        final_count = self.db.query(StudentStudyDocument).filter(
+            StudentStudyDocument.student_id == self.student_aiml.id,
+            StudentStudyDocument.is_active == True
+        ).count()
+        self.assertEqual(final_count, 15)
+
+    # =========================================================================
+    # 21. CONCURRENT UPLOADS: SAME STUDENT STORAGE QUOTA
+    # =========================================================================
+    def test_21_concurrent_uploads_same_student_cannot_exceed_200mb_storage(self):
+        """Verify that concurrent uploads cannot exceed 200 MiB active storage limit."""
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Clear active docs for student_aiml
+        for d in self.db.query(StudentStudyDocument).filter(StudentStudyDocument.student_id == self.student_aiml.id).all():
+            self.db.delete(d)
+        self.db.commit()
+
+        # Create one active document taking 195 MiB
+        filler_size = 195 * 1024 * 1024
+        d = StudentStudyDocument(
+            student_id=self.student_aiml.id,
+            title=f"Large Base Document {self.timestamp}",
+            original_filename="large_base.txt",
+            file_size=filler_size,
+            mime_type="text/plain",
+            content_hash=uuid.uuid4().hex,
+            minio_bucket=STUDENT_DOCS_BUCKET,
+            minio_object_key=f"student_{self.student_aiml.id}/large_{uuid.uuid4().hex[:6]}.txt",
+            processing_status=StudentDocProcessingStatus.EXTRACTED,
+            is_active=True
+        )
+        self.db.add(d)
+        self.db.commit()
+        self.db.refresh(d)
+        self.created_doc_ids.append(d.id)
+
+        # Launch 3 concurrent uploads of 3 MiB each (195 + 3 = 198 <= 200, but 198 + 3 = 201 > 200)
+        chunk_3mb = b"B" * (3 * 1024 * 1024)
+
+        def storage_worker(idx):
+            worker_db = SessionLocal()
+            try:
+                unique_content = chunk_3mb + f"_{idx}_{uuid.uuid4().hex}".encode("utf-8")
+                file_obj = self._make_upload_file(unique_content, f"storage_{idx}.txt")
+                doc = asyncio.run(student_documents_service.upload_and_ingest_document(
+                    worker_db, file_obj, self.student_aiml, f"Storage Note {idx}"
+                ))
+                return ("SUCCESS", doc.id)
+            except HTTPException as e:
+                return ("FAILED", e.status_code, e.detail)
+            except Exception as ex:
+                return ("ERROR", str(ex))
+            finally:
+                worker_db.close()
+
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            results = list(executor.map(storage_worker, range(3)))
+
+        successes = [r for r in results if r[0] == "SUCCESS"]
+        failures = [r for r in results if r[0] == "FAILED"]
+
+        for s in successes:
+            self.created_doc_ids.append(s[1])
+
+        self.assertEqual(len(successes), 1, f"Expected exactly 1 concurrent upload to fit in storage, got: {results}")
+        self.assertEqual(len(failures), 2)
+        for f in failures:
+            self.assertEqual(f[1], 400)
+            self.assertIn("Storage quota exceeded", f[2])
+
+        # Verify total storage in DB does not exceed 200 MiB
+        total_storage = self.db.query(
+            func.coalesce(func.sum(StudentStudyDocument.file_size), 0)
+        ).filter(
+            StudentStudyDocument.student_id == self.student_aiml.id,
+            StudentStudyDocument.is_active == True
+        ).scalar()
+        self.assertLessEqual(total_storage, MAX_STUDENT_TOTAL_STORAGE)
+
+    # =========================================================================
+    # 22. CONCURRENT UPLOADS: DIFFERENT STUDENTS RUN IN PARALLEL
+    # =========================================================================
+    def test_22_concurrent_uploads_different_students_parallel(self):
+        """Verify that uploads from different students execute concurrently without contention."""
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+
+        def student_upload(student, filename, title):
+            worker_db = SessionLocal()
+            try:
+                content = f"Parallel test content for {student.department} {uuid.uuid4().hex}".encode("utf-8")
+                file_obj = self._make_upload_file(content, filename)
+                doc = asyncio.run(student_documents_service.upload_and_ingest_document(
+                    worker_db, file_obj, student, title
+                ))
+                return ("SUCCESS", doc.id, student.id)
+            except Exception as e:
+                return ("ERROR", str(e))
+            finally:
+                worker_db.close()
+
+        tasks = [
+            (self.student_aiml, "aiml_parallel.txt", "Parallel AIML Note"),
+            (self.student_ece, "ece_parallel.txt", "Parallel ECE Note"),
+        ]
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda t: student_upload(*t), tasks))
+
+        self.assertEqual(len(results), 2)
+        for r in results:
+            self.assertEqual(r[0], "SUCCESS")
+            self.created_doc_ids.append(r[1])
 
 
 if __name__ == "__main__":

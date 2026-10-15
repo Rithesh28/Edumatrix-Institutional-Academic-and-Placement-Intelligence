@@ -299,6 +299,8 @@ class StudentDocumentsIndexingService:
         rows_claimed = db.query(StudentStudyDocument).filter(
             StudentStudyDocument.id == document_id,
             StudentStudyDocument.student_id == student_id,
+            StudentStudyDocument.is_active == True,
+            StudentStudyDocument.processing_status == StudentDocProcessingStatus.EXTRACTED,
             StudentStudyDocument.indexing_status != StudentDocIndexingStatus.INDEXING
         ).update({
             StudentStudyDocument.indexing_status: StudentDocIndexingStatus.INDEXING,

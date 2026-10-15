@@ -26,7 +26,7 @@ from datetime import datetime, timezone
 
 from fastapi import UploadFile, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, text
 
 from ..core.config import settings
 from ..models.user import User, UserRole
@@ -56,6 +56,21 @@ MAX_STUDENT_TOTAL_STORAGE = 200 * 1024 * 1024 # 200 MiB total active storage
 ALLOWED_STUDENT_DOC_EXTENSIONS = {".pdf", ".png", ".docx", ".pptx", ".txt"}
 CHUNK_SIZE = 64 * 1024                        # 64 KB streaming buffer
 STUDENT_DOCS_BUCKET = "student-documents"
+STUDENT_LOCK_NAMESPACE = 1398031684  # ASCII 'STUD' namespace for per-student advisory lock
+
+
+def _acquire_student_advisory_lock(db: Session, student_id: int) -> None:
+    """
+    Acquire a PostgreSQL transaction-level advisory lock scoped to the student ID.
+    Serializes quota checks and reservations for the same student while allowing
+    concurrent uploads across different students.
+    Automatically released on commit or rollback.
+    """
+    if db.bind and db.bind.dialect.name == "postgresql":
+        db.execute(
+            text("SELECT pg_advisory_xact_lock(:namespace, :student_id)"),
+            {"namespace": STUDENT_LOCK_NAMESPACE, "student_id": int(student_id)}
+        )
 
 
 def _normalize_dept(dept: Optional[str]) -> str:
@@ -380,8 +395,11 @@ class StudentDocumentsService:
         subject_id: Optional[int] = None
     ) -> StudentStudyDocument:
         """
-        Stream upload, validate, check quotas & duplicates, extract, and persist a private student document.
-        Cleans up temporary disk files and MinIO storage if a failure occurs before DB commit.
+        Stream upload, validate, check quotas & duplicates under advisory lock,
+        extract, and persist a private student document.
+        Uses a short atomic reservation transaction to serialize quota checks for the same student
+        without holding the database transaction open during MinIO I/O or text extraction.
+        Cleans up temporary disk files and MinIO storage if a failure occurs.
         """
         if not title or not title.strip():
             raise HTTPException(
@@ -392,46 +410,20 @@ class StudentDocumentsService:
         # 1. Validate subject association if supplied
         subject = self.validate_subject_association(db, subject_id, student)
 
-        # 2. Stream and validate upload to temporary disk
+        # 2. Stream and validate upload to temporary disk (50 MiB limit, magic bytes, archive safety)
         temp_path, sanitized_filename, file_size, mime_type, content_hash = await self._stream_and_validate_upload(file)
         _, ext = os.path.splitext(sanitized_filename)
 
-        # 3. Check quotas and duplicate for this student
-        try:
-            self.check_student_quotas(db, student.id, file_size)
-            self.check_duplicate(db, student.id, content_hash)
-        except Exception:
-            if os.path.exists(temp_path):
-                os.unlink(temp_path)
-            raise
-
-        # 4. Generate unpredictable object key in dedicated private bucket
         doc_uuid = uuid.uuid4().hex
         object_key = f"student_{student.id}/{doc_uuid}_{sanitized_filename}"
 
-        minio_uploaded = False
+        # 3. Short atomic reservation transaction under per-student advisory lock
+        # Serializes quota checks for the SAME student while different students run concurrently
         try:
-            # 5. Upload to MinIO (streaming multipart from path)
-            self.ensure_bucket()
-            minio_client.upload_file_from_path(
-                bucket=self.bucket,
-                object_key=object_key,
-                file_path=temp_path,
-                content_type=mime_type
-            )
-            minio_uploaded = True
+            _acquire_student_advisory_lock(db, student.id)
+            self.check_student_quotas(db, student.id, file_size)
+            self.check_duplicate(db, student.id, content_hash)
 
-            # 6. Extract text in threadpool
-            extracted_text, metadata, error_msg = await self.extract_content_async(temp_path, ext)
-
-            if error_msg or not extracted_text:
-                processing_status = StudentDocProcessingStatus.FAILED
-                safe_error = (error_msg or "Extraction yielded empty or unparseable text.")[:500]
-            else:
-                processing_status = StudentDocProcessingStatus.EXTRACTED
-                safe_error = None
-
-            # 7. Persist StudentStudyDocument in PostgreSQL
             student_doc = StudentStudyDocument(
                 student_id=student.id,
                 subject_id=subject.id if subject else None,
@@ -444,42 +436,102 @@ class StudentDocumentsService:
                 minio_bucket=self.bucket,
                 minio_object_key=object_key,
                 is_active=True,
-                processing_status=processing_status,
+                processing_status=StudentDocProcessingStatus.PROCESSING,
                 indexing_status=StudentDocIndexingStatus.NOT_INDEXED,
-                extracted_text=extracted_text,
-                extraction_error=safe_error,
-                extraction_metadata=metadata,
+                extracted_text=None,
+                extraction_error=None,
+                extraction_metadata={},
                 indexed_chunk_count=0
             )
             db.add(student_doc)
             db.commit()
             db.refresh(student_doc)
-
-            logger.info(
-                f"✅ Student document {student_doc.id} ('{student_doc.title}') ingested "
-                f"for student {student.id} (status: {processing_status})"
-            )
-            return student_doc
-
-        except HTTPException:
+        except Exception:
             db.rollback()
-            if minio_uploaded:
+            if os.path.exists(temp_path):
                 try:
-                    minio_client.delete_file(self.bucket, object_key)
-                except Exception as del_err:
-                    logger.warning(f"Failed to cleanup MinIO object on upload abort: {del_err}")
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
             raise
-        except Exception as e:
-            db.rollback()
-            if minio_uploaded:
+
+        # 4. External operations executed outside the database transaction:
+        # A. Upload to MinIO
+        minio_uploaded = False
+        try:
+            self.ensure_bucket()
+            minio_client.upload_file_from_path(
+                bucket=self.bucket,
+                object_key=object_key,
+                file_path=temp_path,
+                content_type=mime_type
+            )
+            minio_uploaded = True
+        except Exception as minio_err:
+            logger.error(f"MinIO upload failed for student doc {student_doc.id}: {minio_err}")
+            try:
+                db.delete(student_doc)
+                db.commit()
+            except Exception:
+                db.rollback()
+            if os.path.exists(temp_path):
                 try:
-                    minio_client.delete_file(self.bucket, object_key)
-                except Exception as del_err:
-                    logger.warning(f"Failed to cleanup MinIO object on failure: {del_err}")
-            logger.error(f"Error persisting student document: {e}", exc_info=True)
+                    os.unlink(temp_path)
+                except Exception:
+                    pass
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Storage or database error occurred while creating student study document."
+                detail="Storage error occurred while creating student study document."
+            )
+
+        # B. Text extraction in thread pool (outside event loop)
+        try:
+            extracted_text, metadata, error_msg = await self.extract_content_async(temp_path, ext)
+
+            # Re-fetch fresh doc instance in case session state changed
+            fresh_doc = db.query(StudentStudyDocument).filter(StudentStudyDocument.id == student_doc.id).first()
+            if not fresh_doc:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Document record missing after extraction."
+                )
+
+            if error_msg or not extracted_text:
+                fresh_doc.processing_status = StudentDocProcessingStatus.FAILED
+                fresh_doc.extraction_error = (error_msg or "Extraction yielded empty or unparseable text.")[:500]
+                fresh_doc.extracted_text = None
+                fresh_doc.extraction_metadata = metadata or {}
+            else:
+                fresh_doc.processing_status = StudentDocProcessingStatus.EXTRACTED
+                fresh_doc.extraction_error = None
+                fresh_doc.extracted_text = extracted_text
+                fresh_doc.extraction_metadata = metadata or {}
+
+            fresh_doc.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(fresh_doc)
+
+            logger.info(
+                f"✅ Student document {fresh_doc.id} ('{fresh_doc.title}') ingested "
+                f"for student {student.id} (status: {fresh_doc.processing_status.value})"
+            )
+            return fresh_doc
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error finalizing student document {student_doc.id}: {e}", exc_info=True)
+            try:
+                fresh_doc = db.query(StudentStudyDocument).filter(StudentStudyDocument.id == student_doc.id).first()
+                if fresh_doc:
+                    fresh_doc.processing_status = StudentDocProcessingStatus.FAILED
+                    fresh_doc.extraction_error = f"Finalization error: {str(e)[:400]}"
+                    db.commit()
+            except Exception:
+                db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Database error occurred while finalizing student study document."
             )
         finally:
             if os.path.exists(temp_path):
@@ -596,10 +648,16 @@ class StudentDocumentsService:
         student_id: int
     ) -> bool:
         """
-        Safely delete a private student document:
-        - Verifies ownership (student_id)
-        - Removes binary object from MinIO
-        - Deletes DB row (cascades or hard delete)
+        Safely delete a private student study document:
+        1. Verifies ownership (student_id == student_id).
+        2. Immediately deactivates the document (is_active = False) to block retrieval,
+           free quota, and release duplicate-content partial unique constraint.
+        3. Deletes Qdrant vector chunks (scoped by source_type='student_upload' and student_study_document_id).
+        4. Deletes original binary object from MinIO.
+        5. If BOTH external cleanups succeed, permanently deletes the database record.
+        6. If external cleanup fails (Qdrant or MinIO outage), preserves the database row
+           with is_active=False and records cleanup errors in extraction_metadata so
+           cleanup can be safely retried without losing the storage key or document provenance.
         """
         doc = db.query(StudentStudyDocument).filter(
             StudentStudyDocument.id == document_id,
@@ -612,20 +670,78 @@ class StudentDocumentsService:
                 detail=f"Student study document with ID {document_id} not found."
             )
 
+        # 1. Immediate cut-off: mark inactive to block retrieval and release quota/hash immediately
+        if doc.is_active:
+            doc.is_active = False
+            doc.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(doc)
+
         bucket = doc.minio_bucket
         object_key = doc.minio_object_key
+        qdrant_cleaned = False
+        minio_cleaned = False
+        cleanup_errors = []
 
-        # 1. Delete from MinIO
+        # 2. Delete Qdrant vector chunks (scoped to source_type='student_upload' and student_study_document_id)
+        try:
+            from .student_documents_indexing_service import student_documents_indexing_service
+            student_documents_indexing_service.delete_document_chunks(doc.id)
+            qdrant_cleaned = True
+        except Exception as q_err:
+            logger.error(f"Failed to delete Qdrant points for student doc {doc.id}: {q_err}")
+            cleanup_errors.append(f"Qdrant: {str(q_err)[:200]}")
+
+        # 3. Delete binary object from MinIO
         try:
             minio_client.delete_file(bucket, object_key)
-        except Exception as e:
-            logger.warning(f"Error removing MinIO object {bucket}/{object_key}: {e}")
+            minio_cleaned = True
+        except Exception as m_err:
+            logger.error(f"Failed to delete MinIO object {bucket}/{object_key}: {m_err}")
+            cleanup_errors.append(f"MinIO: {str(m_err)[:200]}")
 
-        # 2. Delete database record
-        db.delete(doc)
-        db.commit()
-        logger.info(f"🗑️ Deleted student study document {document_id} for student {student_id}")
-        return True
+        # 4. Handle cleanup outcome
+        if qdrant_cleaned and minio_cleaned:
+            # Both external resources successfully cleaned up: permanently remove DB row
+            db.delete(doc)
+            db.commit()
+            logger.info(f"🗑️ Fully deleted student study document {document_id} (DB, MinIO, and Qdrant purged)")
+            return True
+        else:
+            # External cleanup failed: preserve DB row with is_active=False and record error details
+            meta = dict(doc.extraction_metadata or {})
+            meta["cleanup_pending"] = True
+            meta["cleanup_errors"] = cleanup_errors
+            meta["cleanup_attempted_at"] = datetime.now(timezone.utc).isoformat()
+            meta["qdrant_cleaned"] = qdrant_cleaned
+            meta["minio_cleaned"] = minio_cleaned
+            doc.extraction_metadata = meta
+            db.commit()
+
+            err_summary = "; ".join(cleanup_errors)
+            logger.warning(
+                f"⚠️ Student doc {document_id} deactivated but external cleanup incomplete ({err_summary}). "
+                f"Record preserved for retry."
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    f"Document {document_id} deactivated, but external resource cleanup failed: "
+                    f"{err_summary}. Record preserved for cleanup retry."
+                )
+            )
+
+    def retry_document_cleanup(
+        self,
+        db: Session,
+        document_id: int,
+        student_id: int
+    ) -> bool:
+        """
+        Retry external cleanup for a deactivated document whose initial cleanup failed.
+        Invokes delete_document to re-attempt Qdrant and MinIO deletion and permanently purge the row.
+        """
+        return self.delete_document(db, document_id, student_id)
 
 
 # Singleton instance
