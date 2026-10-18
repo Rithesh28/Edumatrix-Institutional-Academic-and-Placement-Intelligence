@@ -9,6 +9,7 @@ Provides institutional endpoints for:
 """
 
 import logging
+import time
 import urllib.parse
 from typing import List, Optional, Dict, Any
 from datetime import datetime, timezone
@@ -78,6 +79,7 @@ from ..services.study_buddy_content_service import study_buddy_content_service
 from ..services.study_buddy_progress_service import study_buddy_progress_service
 from ..services.lecture_notes_service import lecture_notes_service
 from ..services.lecture_notes_indexing_service import lecture_notes_indexing_service
+from ..core.study_buddy_timing import record_perf_metric
 from ..services.student_documents_service import student_documents_service
 from ..services.student_documents_indexing_service import student_documents_indexing_service
 from ..services.file_storage.minio_client import minio_client
@@ -1722,6 +1724,7 @@ async def upload_student_study_document(
     - Automatically indexes extracted text into Qdrant vector collection for personal RAG.
     - Placement Officers forbidden.
     """
+    t0_req = time.perf_counter()
     verify_study_buddy_access(current_user)
 
     doc = await student_documents_service.upload_and_ingest_document(
@@ -1741,6 +1744,15 @@ async def upload_student_study_document(
             db.refresh(doc)
         except Exception as idx_err:
             logger.warning(f"Auto-indexing for student doc {doc.id} encountered error: {idx_err}")
+
+    total_req_ms = (time.perf_counter() - t0_req) * 1000.0
+    record_perf_metric(
+        stage="total_request_latency",
+        duration_ms=total_req_ms,
+        request_type="upload_and_index_attachment",
+        doc_id=doc.id,
+        indexing_status=doc.indexing_status.value
+    )
 
     return _format_student_doc_detail(doc)
 

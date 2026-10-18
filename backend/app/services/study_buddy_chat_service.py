@@ -46,6 +46,7 @@ from .lecture_notes_indexing_service import (
 )
 from .student_documents_indexing_service import student_documents_indexing_service
 from .ai_generator_service import ai_generator
+from ..core.study_buddy_timing import record_perf_metric
 
 logger = logging.getLogger(__name__)
 
@@ -147,8 +148,11 @@ class StudyBuddyChatService:
         if not lecture_notes_indexing_service.ensure_collection():
             return []
 
+        t0_retrieval = time.perf_counter()
         # Generate query vector
+        t0_embed = time.perf_counter()
         query_vector = embedding_service.embed_text(query)
+        embed_ms = (time.perf_counter() - t0_embed) * 1000.0
         if not query_vector:
             return []
 
@@ -182,6 +186,7 @@ class StudyBuddyChatService:
 
         qdrant_filter = models.Filter(must=must_conditions)
 
+        t0_qdrant = time.perf_counter()
         try:
             if hasattr(qdrant_client.client, "query_points"):
                 response = qdrant_client.client.query_points(
@@ -203,8 +208,10 @@ class StudyBuddyChatService:
         except Exception as qd_err:
             logger.error(f"Qdrant query failed for lecture notes: {qd_err}")
             return []
+        qdrant_ms = (time.perf_counter() - t0_qdrant) * 1000.0
 
         # Authoritative secondary validation against PostgreSQL
+        t0_db = time.perf_counter()
         formatted = []
         for r in results:
             note_id = r.payload.get("lecture_note_id")
@@ -270,6 +277,18 @@ class StudyBuddyChatService:
                 "chunk_order": r.payload.get("chunk_index"),
                 "text": r.payload.get("text")
             })
+        db_ms = (time.perf_counter() - t0_db) * 1000.0
+        total_retrieval_ms = (time.perf_counter() - t0_retrieval) * 1000.0
+
+        record_perf_metric(
+            stage="retrieval_lecture_notes",
+            duration_ms=total_retrieval_ms,
+            embed_query_ms=round(embed_ms, 2),
+            qdrant_search_ms=round(qdrant_ms, 2),
+            db_validation_ms=round(db_ms, 2),
+            raw_chunks_count=len(results),
+            qualifying_chunks_count=len(formatted)
+        )
 
         return formatted
 
@@ -308,8 +327,11 @@ class StudyBuddyChatService:
         if not student_documents_indexing_service.ensure_collection():
             return []
 
+        t0_retrieval = time.perf_counter()
         # Generate query vector
+        t0_embed = time.perf_counter()
         query_vector = embedding_service.embed_text(query)
+        embed_ms = (time.perf_counter() - t0_embed) * 1000.0
         if not query_vector:
             return []
 
@@ -343,6 +365,7 @@ class StudyBuddyChatService:
 
         qdrant_filter = models.Filter(must=must_conditions)
 
+        t0_qdrant = time.perf_counter()
         try:
             if hasattr(qdrant_client.client, "query_points"):
                 response = qdrant_client.client.query_points(
@@ -364,11 +387,13 @@ class StudyBuddyChatService:
         except Exception as qd_err:
             logger.error(f"Qdrant query failed for student documents: {qd_err}")
             return []
+        qdrant_ms = (time.perf_counter() - t0_qdrant) * 1000.0
 
         user_dept = _get_user_department(current_user)
 
         # Authoritative secondary validation against PostgreSQL
         # NEVER rely on Qdrant filters as the authorization boundary!
+        t0_db = time.perf_counter()
         formatted = []
         for r in results:
             doc_id = r.payload.get("student_study_document_id")
@@ -426,6 +451,19 @@ class StudyBuddyChatService:
                 "chunk_order": r.payload.get("chunk_index"),
                 "text": r.payload.get("text")
             })
+
+        db_ms = (time.perf_counter() - t0_db) * 1000.0
+        total_retrieval_ms = (time.perf_counter() - t0_retrieval) * 1000.0
+
+        record_perf_metric(
+            stage="retrieval_attached_doc",
+            duration_ms=total_retrieval_ms,
+            embed_query_ms=round(embed_ms, 2),
+            qdrant_search_ms=round(qdrant_ms, 2),
+            db_validation_ms=round(db_ms, 2),
+            raw_chunks_count=len(results),
+            qualifying_chunks_count=len(formatted)
+        )
 
         return formatted
 
@@ -526,6 +564,7 @@ class StudyBuddyChatService:
             )
 
         # 1. Enforce Role & Department Authorization
+        t0_auth = time.perf_counter()
         if current_user.role == UserRole.PLACEMENT_OFFICER:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -603,6 +642,7 @@ class StudyBuddyChatService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Attached document '{attached_doc.original_filename}' is not fully indexed yet (status: {attached_doc.indexing_status.value})."
                 )
+        auth_ms = (time.perf_counter() - t0_auth) * 1000.0
 
         # 3. Retrieve relevant chunks according to source_mode
         raw_chunks = self.search_unified_chunks(
@@ -740,6 +780,7 @@ class StudyBuddyChatService:
         model_used = gen_result.get("model_used", settings.AI_MODEL_NAME)
 
         # 8. Build Verified Source Citations
+        t0_cite = time.perf_counter()
         citations = []
         if has_evidence:
             for c in supplied_chunks:
@@ -765,8 +806,26 @@ class StudyBuddyChatService:
                     "chunk_order": c.get("chunk_order"),
                     "relevance_score": round(float(c.get("score", 0.0)), 4)
                 })
+        cite_ms = (time.perf_counter() - t0_cite) * 1000.0
+
+        record_perf_metric(
+            stage="auth_and_citation_validation",
+            duration_ms=auth_ms + cite_ms,
+            auth_check_ms=round(auth_ms, 2),
+            citation_build_ms=round(cite_ms, 2),
+            citations_count=len(citations)
+        )
 
         elapsed_ms = (time.time() - start_time) * 1000
+
+        record_perf_metric(
+            stage="total_request_latency",
+            duration_ms=elapsed_ms,
+            request_type="chat_question_answering",
+            has_attachment=bool(attached_document_id is not None),
+            source_mode=mode,
+            model_used=model_used
+        )
 
         return {
             "answer": answer_text,

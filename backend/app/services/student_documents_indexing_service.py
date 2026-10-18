@@ -23,6 +23,8 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from qdrant_client.http import models
 
+import time
+from ..core.study_buddy_timing import record_perf_metric
 from ..core.config import settings
 from .embedding_service import embedding_service
 from .file_storage.qdrant_client import qdrant_client
@@ -321,12 +323,15 @@ class StudentDocumentsIndexingService:
             )
 
         # 3. Ensure Qdrant collection is ready
+        t0_indexing = time.perf_counter()
+        t0_ensure = time.perf_counter()
         if not self.ensure_collection():
             self._set_failed_status(db, document_id, "Qdrant vector collection unavailable.")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Qdrant vector collection unavailable."
             )
+        ensure_col_ms = (time.perf_counter() - t0_ensure) * 1000.0
 
         dim = embedding_service.get_embedding_dimension()
         if dim != self.vector_size:
@@ -344,7 +349,9 @@ class StudentDocumentsIndexingService:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document removed during indexing.")
 
             # 5. Generate chunks
+            t0_chunk = time.perf_counter()
             chunks = self.create_chunks(fresh_doc)
+            chunk_ms = (time.perf_counter() - t0_chunk) * 1000.0
             if not chunks:
                 err_msg = "No valid text chunks generated for indexing."
                 self._set_failed_status(db, document_id, err_msg)
@@ -354,10 +361,20 @@ class StudentDocumentsIndexingService:
                 )
 
             # 6. Generate embeddings using shared embedding service
+            t0_embed = time.perf_counter()
             texts = [c["text"] for c in chunks]
             embeddings = embedding_service.embed_texts(texts)
+            embed_ms = (time.perf_counter() - t0_embed) * 1000.0
             if not embeddings or len(embeddings) != len(chunks):
                 raise ValueError("Embedding generation returned incomplete or empty vectors.")
+
+            record_perf_metric(
+                stage="chunking_and_embedding",
+                duration_ms=chunk_ms + embed_ms,
+                chunk_count=len(chunks),
+                chunking_ms=round(chunk_ms, 2),
+                embedding_ms=round(embed_ms, 2)
+            )
 
             # 7. Construct Qdrant points
             points = []
@@ -375,12 +392,15 @@ class StudentDocumentsIndexingService:
                 )
 
             # 8. Upsert points into Qdrant
+            t0_upsert = time.perf_counter()
             qdrant_client.client.upsert(
                 collection_name=self.collection_name,
                 points=points
             )
+            upsert_ms = (time.perf_counter() - t0_upsert) * 1000.0
 
             # 9. Update PostgreSQL metadata
+            t0_db = time.perf_counter()
             meta = dict(fresh_doc.extraction_metadata or {})
             meta["indexing_error"] = None
             meta["indexed_at"] = datetime.now(timezone.utc).isoformat()
@@ -390,6 +410,17 @@ class StudentDocumentsIndexingService:
             fresh_doc.extraction_metadata = meta
             db.commit()
             db.refresh(fresh_doc)
+            db_ms = (time.perf_counter() - t0_db) * 1000.0
+
+            total_idx_ms = (time.perf_counter() - t0_indexing) * 1000.0
+            record_perf_metric(
+                stage="qdrant_indexing",
+                duration_ms=total_idx_ms,
+                chunks_indexed=len(points),
+                collection_ensure_ms=round(ensure_col_ms, 2),
+                upsert_ms=round(upsert_ms, 2),
+                db_commit_ms=round(db_ms, 2)
+            )
 
             logger.info(f"✅ Successfully indexed {len(points)} chunks for student document {document_id} in Qdrant")
             return {

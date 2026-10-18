@@ -22,8 +22,10 @@ import logging
 import tempfile
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import time
 from typing import Optional, Tuple, Dict, Any, List
 from datetime import datetime, timezone
+from ..core.study_buddy_timing import record_perf_metric
 from PIL import Image
 import pytesseract
 import pdfplumber
@@ -310,10 +312,12 @@ class LectureNotesService:
                             f"PDF rejected: page count ({page_count}) exceeds limit of {MAX_PDF_PAGES} pages."
                         )
 
+                    total_ocr_ms = 0.0
                     for idx, page in enumerate(pdf.pages):
                         txt = page.extract_text() or ""
                         # OCR fallback on scanned/sparse pages
                         if len(txt.strip()) < 30:
+                            t0_ocr = time.perf_counter()
                             try:
                                 dpi = PDF_RENDER_DPI
                                 if page.width > 2000 or page.height > 2000:
@@ -325,9 +329,13 @@ class LectureNotesService:
                                     metadata["ocr_pages_used"] = metadata.get("ocr_pages_used", 0) + 1
                             except Exception as ocr_err:
                                 logger.debug(f"PDF page {idx + 1} OCR fallback skipped/timed out: {ocr_err}")
+                            finally:
+                                total_ocr_ms += (time.perf_counter() - t0_ocr) * 1000.0
 
                         if txt.strip():
                             pages_parts.append(f"--- Page {idx + 1} ---\n{txt.strip()}")
+
+                    metadata["ocr_duration_ms"] = round(total_ocr_ms, 2)
 
                 full = "\n\n".join(pages_parts).strip()
                 if full and len(full) >= 10:

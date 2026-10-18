@@ -36,6 +36,8 @@ from ..models.study_buddy import (
     StudentDocProcessingStatus,
     StudentDocIndexingStatus,
 )
+import time
+from ..core.study_buddy_timing import record_perf_metric, PerfTimer
 from .file_storage.minio_client import minio_client
 from .lecture_notes_service import (
     inspect_zip_safety,
@@ -138,6 +140,7 @@ class StudentDocumentsService:
         header_bytes = b""
         hasher = hashlib.sha256()
 
+        t0_stream = time.perf_counter()
         try:
             while True:
                 chunk = await file.read(CHUNK_SIZE)
@@ -213,6 +216,16 @@ class StudentDocumentsService:
 
             mime_type = file.content_type or "application/octet-stream"
             content_hash = hasher.hexdigest()
+
+            upload_hash_ms = (time.perf_counter() - t0_stream) * 1000.0
+            record_perf_metric(
+                stage="attachment_upload_and_hash",
+                duration_ms=upload_hash_ms,
+                file_size_bytes=total_bytes,
+                filename_sanitized=sanitized_filename,
+                mime_type=mime_type
+            )
+
             return temp_path, sanitized_filename, total_bytes, mime_type, content_hash
 
         except HTTPException:
@@ -504,7 +517,20 @@ class StudentDocumentsService:
 
         # B. Text extraction in thread pool (outside event loop)
         try:
+            t0_extract = time.perf_counter()
             extracted_text, metadata, error_msg = await self.extract_content_async(temp_path, ext)
+            extract_duration_ms = (time.perf_counter() - t0_extract) * 1000.0
+
+            record_perf_metric(
+                stage="text_extraction",
+                duration_ms=extract_duration_ms,
+                file_ext=ext,
+                extracted_char_count=len(extracted_text or "") if extracted_text else 0,
+                page_count=metadata.get("page_count", 1) if isinstance(metadata, dict) else 1,
+                ocr_triggered=bool(isinstance(metadata, dict) and metadata.get("ocr_pages_used", 0) > 0),
+                ocr_pages_count=metadata.get("ocr_pages_used", 0) if isinstance(metadata, dict) else 0,
+                ocr_duration_ms=metadata.get("ocr_duration_ms", 0.0) if isinstance(metadata, dict) else 0.0
+            )
 
             # Re-fetch fresh doc instance in case session state changed
             fresh_doc = db.query(StudentStudyDocument).filter(StudentStudyDocument.id == student_doc.id).first()
