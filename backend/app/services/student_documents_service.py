@@ -392,11 +392,13 @@ class StudentDocumentsService:
         student: User,
         title: str,
         description: Optional[str] = None,
-        subject_id: Optional[int] = None
+        subject_id: Optional[int] = None,
+        reuse_existing: bool = False
     ) -> StudentStudyDocument:
         """
         Stream upload, validate, check quotas & duplicates under advisory lock,
         extract, and persist a private student document.
+        Supports reuse_existing to avoid duplicate records when attaching existing files.
         Uses a short atomic reservation transaction to serialize quota checks for the same student
         without holding the database transaction open during MinIO I/O or text extraction.
         Cleans up temporary disk files and MinIO storage if a failure occurs.
@@ -421,8 +423,24 @@ class StudentDocumentsService:
         # Serializes quota checks for the SAME student while different students run concurrently
         try:
             _acquire_student_advisory_lock(db, student.id)
+            if reuse_existing:
+                existing = db.query(StudentStudyDocument).filter(
+                    StudentStudyDocument.student_id == student.id,
+                    StudentStudyDocument.content_hash == content_hash,
+                    StudentStudyDocument.is_active == True
+                ).first()
+                if existing:
+                    if os.path.exists(temp_path):
+                        try:
+                            os.unlink(temp_path)
+                        except Exception:
+                            pass
+                    logger.info(f"♻️ Reusing existing active student study document {existing.id} for student {student.id}")
+                    return existing
+            else:
+                self.check_duplicate(db, student.id, content_hash)
+
             self.check_student_quotas(db, student.id, file_size)
-            self.check_duplicate(db, student.id, content_hash)
 
             student_doc = StudentStudyDocument(
                 student_id=student.id,

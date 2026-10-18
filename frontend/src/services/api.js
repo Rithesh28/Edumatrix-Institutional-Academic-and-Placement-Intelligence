@@ -58,9 +58,12 @@ export const chatAPI = {
 // STUDY BUDDY RAG API
 // ============================================
 export const studyBuddyAPI = {
-  getSubjects: () => api.get('/study-buddy/subjects'),
+  getSubjects: (params = {}) => api.get('/study-buddy/subjects', { params }),
+  createSubject: (payload) => api.post('/study-buddy/subjects', payload),
+  updateSubject: (subjectId, payload) => api.put(`/study-buddy/subjects/${subjectId}`, payload),
+  deleteSubject: (subjectId) => api.delete(`/study-buddy/subjects/${subjectId}`),
   getSyllabusDetail: (documentId) => api.get(`/study-buddy/syllabi/${documentId}`),
-  askQuestion: (question, subjectId = null, sourceMode = 'syllabus') => api.post('/study-buddy/chat', { question, subject_id: subjectId, source_mode: sourceMode }),
+  askQuestion: (question, subjectId = null, sourceMode = 'syllabus', attachedDocumentId = null) => api.post('/study-buddy/chat', { question, subject_id: subjectId, source_mode: sourceMode, attached_document_id: attachedDocumentId }),
   searchSyllabus: (query, subjectId = null, sourceMode = 'syllabus') => api.get('/study-buddy/search', { params: { query, subject_id: subjectId, source_mode: sourceMode } }),
   generateSummary: (payload) => api.post('/study-buddy/summaries/generate', payload),
   generateQuiz: (payload) => api.post('/study-buddy/quizzes/generate', payload),
@@ -86,7 +89,7 @@ export const studyBuddyAPI = {
   updateNote: (noteId, payload) => api.patch(`/study-buddy/notes/${noteId}`, payload),
   deleteNote: (noteId) => api.delete(`/study-buddy/notes/${noteId}`),
   retryNoteProcessing: (noteId) => api.post(`/study-buddy/notes/${noteId}/retry`),
-  downloadNote: (noteId) => api.get(`/study-buddy/notes/${noteId}/download`, { responseType: 'blob' }),
+  downloadNote: (noteId, preview = false) => api.get(`/study-buddy/notes/${noteId}/download`, { params: preview ? { preview: true } : {}, responseType: 'blob' }),
   downloadNoteFile: (fileId) => api.get(`/files/${fileId}/download`, { responseType: 'blob' }),
   // Step 4.6H: Student Personal Study Documents
   getMyDocuments: (params = {}) => api.get('/study-buddy/my-documents', { params }),

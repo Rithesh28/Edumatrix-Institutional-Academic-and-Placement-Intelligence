@@ -95,7 +95,7 @@ class TestStudyBuddyStep46H2(unittest.TestCase):
             code=f"H2AIML{cls.timestamp % 10000}",
             name=f"Advanced Neural Networks {cls.timestamp}",
             department="AIML",
-            semester=6,
+            semester=getattr(cls.student_aiml.student_profile, 'semester', 6) or 6,
             academic_year="2026-2027",
             curriculum_version="2026.1",
             description="AIML Test Subject for Step 4.6H.2",

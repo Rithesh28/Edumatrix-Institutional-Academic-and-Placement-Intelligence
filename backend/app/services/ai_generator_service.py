@@ -577,14 +577,21 @@ class QwenGenerator:
                 inputs = self.tokenizer(prompt_text, return_tensors="pt")
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
+                eos_ids = [self.tokenizer.eos_token_id]
+                im_end_id = getattr(self.tokenizer, "convert_tokens_to_ids", lambda x: None)("<|im_end|>")
+                if im_end_id is not None and im_end_id not in eos_ids and im_end_id != getattr(self.tokenizer, "unk_token_id", -1):
+                    eos_ids.append(im_end_id)
+
                 with self._inference_lock:
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         output_ids = self.model.generate(
                             **inputs,
-                            max_new_tokens=settings.AI_MAX_NEW_TOKENS,
-                            temperature=settings.AI_TEMPERATURE,
-                            do_sample=settings.AI_TEMPERATURE > 0,
-                            pad_token_id=self.tokenizer.eos_token_id
+                            max_new_tokens=min(settings.AI_MAX_NEW_TOKENS, 180),
+                            temperature=0.2 if settings.AI_TEMPERATURE > 0 else 0.0,
+                            do_sample=False,
+                            use_cache=True,
+                            pad_token_id=self.tokenizer.eos_token_id,
+                            eos_token_id=eos_ids
                         )
 
                 generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]

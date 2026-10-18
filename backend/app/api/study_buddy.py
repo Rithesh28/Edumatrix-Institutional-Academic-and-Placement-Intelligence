@@ -104,6 +104,13 @@ def _get_user_department(user: User) -> Optional[str]:
     return None
 
 
+def _get_user_semester(user: User) -> Optional[int]:
+    """Resolve semester for student user from student profile."""
+    if user.role == UserRole.STUDENT and user.student_profile and user.student_profile.semester is not None:
+        return user.student_profile.semester
+    return None
+
+
 def verify_study_buddy_access(current_user: User) -> None:
     """Block placement officers from syllabus management by virtue of placement role."""
     if current_user.role == UserRole.PLACEMENT_OFFICER:
@@ -115,12 +122,19 @@ def verify_study_buddy_access(current_user: User) -> None:
 
 def verify_subject_access(subject: Subject, current_user: User, require_write: bool = False) -> None:
     """
-    Enforce institutional role and department scoping on a subject.
+    Enforce institutional role, department, and semester scoping on a subject.
     """
     verify_study_buddy_access(current_user)
 
     if current_user.role == UserRole.ADMIN:
         return
+
+    # Non-admins cannot modify materials for deactivated subjects
+    if require_write and not subject.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot modify or upload materials for inactive subject '{subject.code}'."
+        )
 
     user_dept = _get_user_department(current_user)
     dept_matches = _normalize_dept(user_dept) == _normalize_dept(subject.department)
@@ -168,20 +182,31 @@ def verify_subject_access(subject: Subject, current_user: User, require_write: b
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Subject is not active."
             )
+        user_sem = _get_user_semester(current_user)
+        if user_sem is not None and subject.semester is not None and user_sem != subject.semester:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access restricted to your current semester ({user_sem}). Subject '{subject.code}' is for semester {subject.semester}."
+            )
         return
 
 
 def _build_subject_response(subject: Subject, db: Session, is_student: bool = False) -> SubjectResponse:
-    """Helper to populate syllabus count and active published document."""
-    query = db.query(SyllabusDocument).filter(SyllabusDocument.subject_id == subject.id)
+    """Helper to populate syllabus count, lecture notes count, and active published document."""
+    s_query = db.query(SyllabusDocument).filter(SyllabusDocument.subject_id == subject.id)
+    n_query = db.query(LectureNote).filter(LectureNote.subject_id == subject.id)
     if is_student:
-        query = query.filter(
+        s_query = s_query.filter(
             SyllabusDocument.is_published == True,
             SyllabusDocument.review_status == SyllabusReviewStatus.APPROVED
         )
+        n_query = n_query.filter(
+            LectureNote.is_published == True,
+            LectureNote.status == LectureNoteStatus.PUBLISHED
+        )
 
-    docs = query.all()
-    count = len(docs)
+    s_count = s_query.count()
+    n_count = n_query.count()
 
     published_doc = db.query(SyllabusDocument).filter(
         SyllabusDocument.subject_id == subject.id,
@@ -201,7 +226,8 @@ def _build_subject_response(subject: Subject, db: Session, is_student: bool = Fa
         is_active=subject.is_active,
         created_at=subject.created_at,
         updated_at=subject.updated_at,
-        syllabus_documents_count=count,
+        syllabus_documents_count=s_count,
+        lecture_notes_count=n_count,
         published_document_id=published_doc.id if published_doc else None
     )
 
@@ -220,9 +246,9 @@ async def list_subjects(
 ):
     """
     List subjects within the caller's authorized scope.
-    - Admin: institutional scope.
-    - HOD & Lecturer: scoped to caller's department.
-    - Student: scoped to caller's department and active subjects only.
+    - Admin: institutional scope, can filter by department and semester.
+    - HOD & Lecturer: scoped to caller's department, can filter by semester.
+    - Student: scoped to caller's department, active subjects, and caller's semester.
     - Placement Officer: forbidden.
     """
     verify_study_buddy_access(current_user)
@@ -240,13 +266,20 @@ async def list_subjects(
         else:
             query = query.filter(func.lower(Subject.department) == func.lower(department or ""))
 
-    if current_user.role == UserRole.STUDENT or active_only:
+    if current_user.role == UserRole.STUDENT:
         query = query.filter(Subject.is_active == True)
+        user_sem = _get_user_semester(current_user)
+        if user_sem is not None:
+            query = query.filter(Subject.semester == user_sem)
+        elif semester:
+            query = query.filter(Subject.semester == semester)
+    else:
+        if active_only:
+            query = query.filter(Subject.is_active == True)
+        if semester:
+            query = query.filter(Subject.semester == semester)
 
-    if semester:
-        query = query.filter(Subject.semester == semester)
-
-    subjects = query.order_by(Subject.code.asc()).all()
+    subjects = query.order_by(Subject.semester.asc().nullslast(), Subject.code.asc()).all()
     is_student = current_user.role == UserRole.STUDENT
     return [_build_subject_response(s, db, is_student=is_student) for s in subjects]
 
@@ -285,7 +318,7 @@ async def create_subject(
     code = payload.code.strip().upper()
     existing = db.query(Subject).filter(
         Subject.code == code,
-        Subject.department == dept,
+        func.lower(Subject.department) == func.lower(dept),
         Subject.curriculum_version == payload.curriculum_version
     ).first()
 
@@ -344,8 +377,30 @@ async def update_subject(
 
     verify_subject_access(subject, current_user, require_write=True)
 
+    # Check uniqueness if code, department, or curriculum_version are being changed
+    new_code = payload.code.strip().upper() if payload.code is not None else subject.code
+    new_dept = payload.department.strip() if payload.department is not None else subject.department
+    new_version = payload.curriculum_version if payload.curriculum_version is not None else subject.curriculum_version
+
+    if payload.code is not None or payload.department is not None or payload.curriculum_version is not None:
+        conflict = db.query(Subject).filter(
+            Subject.code == new_code,
+            func.lower(Subject.department) == func.lower(new_dept),
+            Subject.curriculum_version == new_version,
+            Subject.id != subject.id
+        ).first()
+        if conflict:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Subject with code '{new_code}' already exists for department '{new_dept}' (version: {new_version})."
+            )
+
+    if payload.code is not None:
+        subject.code = new_code
     if payload.name is not None:
         subject.name = payload.name.strip()
+    if payload.department is not None:
+        subject.department = new_dept
     if payload.semester is not None:
         subject.semester = payload.semester
     if payload.academic_year is not None:
@@ -357,21 +412,90 @@ async def update_subject(
     if payload.is_active is not None and payload.is_active != subject.is_active:
         subject.is_active = payload.is_active
         if not payload.is_active:
-            # Subject deactivated: delete chunks for all its syllabus documents from Qdrant
+            # Subject deactivated: delete chunks for all its syllabus documents and lecture notes from Qdrant
             for sdoc in subject.syllabus_documents:
                 syllabus_indexing_service.delete_document_chunks(sdoc.id)
+            for ln in subject.lecture_notes:
+                lecture_notes_indexing_service.delete_note_chunks(ln.id)
         else:
-            # Subject reactivated: re-index any approved published syllabus document
+            # Subject reactivated: re-index any approved published syllabus document and lecture notes
             for sdoc in subject.syllabus_documents:
                 if sdoc.is_published and sdoc.review_status == SyllabusReviewStatus.APPROVED:
                     try:
                         syllabus_indexing_service.index_syllabus_document(db, sdoc.id)
                     except Exception as reindex_err:
                         logger.warning(f"Re-indexing failed on subject reactivation for doc {sdoc.id}: {reindex_err}")
+            for ln in subject.lecture_notes:
+                if ln.is_published and ln.status == LectureNoteStatus.PUBLISHED:
+                    try:
+                        lecture_notes_indexing_service.index_lecture_note(db, ln.id)
+                    except Exception as ln_err:
+                        logger.warning(f"Re-indexing failed on subject reactivation for note {ln.id}: {ln_err}")
 
     db.commit()
     db.refresh(subject)
     return _build_subject_response(subject, db)
+
+
+@router.delete("/subjects/{subject_id}", status_code=status.HTTP_200_OK)
+async def delete_subject(
+    subject_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Permanently delete an academic subject and clean up all associated syllabus, notes, vectors, and storage.
+    Preserves private student uploads by setting their subject_id to null.
+    Authorized: Admin only.
+    """
+    verify_study_buddy_access(current_user)
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only Administrators can delete academic subjects."
+        )
+
+    subject = db.query(Subject).filter(Subject.id == subject_id).first()
+    if not subject:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Subject not found.")
+
+    subject_code = subject.code
+
+    # 1. Clean up lecture notes (Qdrant vectors & MinIO files)
+    for note in subject.lecture_notes:
+        try:
+            lecture_notes_indexing_service.delete_note_chunks(note.id)
+        except Exception as qd_err:
+            logger.warning(f"Error deleting Qdrant points for note {note.id}: {qd_err}")
+        try:
+            minio_client.delete_file(note.minio_bucket, note.minio_object_key)
+        except Exception as minio_err:
+            logger.warning(f"Error deleting MinIO object for note {note.id}: {minio_err}")
+
+    # 2. Clean up syllabus documents (Qdrant vectors & MinIO files)
+    for sdoc in subject.syllabus_documents:
+        try:
+            syllabus_indexing_service.delete_document_chunks(sdoc.id)
+        except Exception as qd_err:
+            logger.warning(f"Error deleting Qdrant points for syllabus {sdoc.id}: {qd_err}")
+        try:
+            minio_client.delete_file(sdoc.minio_bucket, sdoc.minio_object_key)
+        except Exception as minio_err:
+            logger.warning(f"Error deleting MinIO object for syllabus {sdoc.id}: {minio_err}")
+
+    # 3. Preserve student personal documents by nullifying subject_id
+    db.query(StudentStudyDocument).filter(
+        StudentStudyDocument.subject_id == subject.id
+    ).update({StudentStudyDocument.subject_id: None}, synchronize_session=False)
+
+    # 4. Delete subject from PostgreSQL
+    db.delete(subject)
+    db.commit()
+
+    return {
+        "status": "SUCCESS",
+        "message": f"Subject '{subject_code}' and all associated materials deleted successfully."
+    }
 
 
 # ============================================
@@ -782,7 +906,8 @@ async def ask_study_buddy(
         current_user=current_user,
         question=request.question,
         subject_id=request.subject_id,
-        source_mode=request.source_mode
+        source_mode=request.source_mode,
+        attached_document_id=request.attached_document_id
     )
 
 
@@ -1322,11 +1447,13 @@ async def retry_lecture_note_processing(
 )
 async def download_lecture_note(
     note_id: int,
+    preview: bool = Query(False, description="If true, inline disposition for in-browser preview"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     """
     Securely stream the original binary of an authorized lecture note.
+    - Supports in-browser preview mode (preview=True) or download attachment mode (default).
     - Students: restricted to published notes of active subjects in their department (resolved via _get_user_department).
     - Lecturers: scoped to department or assigned subjects.
     - HOD: scoped to department.
@@ -1405,8 +1532,9 @@ async def download_lecture_note(
             except Exception as close_err:
                 logger.debug(f"Error releasing MinIO stream connection: {close_err}")
 
+    disposition_type = "inline" if preview else "attachment"
     headers = {
-        "Content-Disposition": f'attachment; filename="{clean_filename}"; filename*=UTF-8\'\'{encoded_filename}'
+        "Content-Disposition": f'{disposition_type}; filename="{clean_filename}"; filename*=UTF-8\'\'{encoded_filename}'
     }
     if note.file_size and note.file_size > 0:
         headers["Content-Length"] = str(note.file_size)
@@ -1539,6 +1667,7 @@ async def upload_student_study_document(
     title: str = Form(..., min_length=1, max_length=255, description="Document title"),
     description: Optional[str] = Form(None, description="Optional document description"),
     subject_id: Optional[int] = Form(None, description="Optional academic subject ID"),
+    reuse_existing: bool = Form(False, description="Reuse existing identical active document if already uploaded"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -1558,7 +1687,8 @@ async def upload_student_study_document(
         student=current_user,
         title=title,
         description=description,
-        subject_id=subject_id
+        subject_id=subject_id,
+        reuse_existing=reuse_existing
     )
 
     # Auto-index into Qdrant if text extraction was successful

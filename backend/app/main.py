@@ -54,6 +54,22 @@ async def lifespan(app: FastAPI):
         logger.info("✅ Database tables created/verified successfully with all schema migrations")
     except Exception as e:
         logger.warning(f"⚠️ Database table creation/migration: {e}")
+
+    # Background pre-warming of shared AI models to eliminate first-query cold start latency
+    def _warmup_ai_models():
+        try:
+            from .services.embedding_service import embedding_service
+            from .services.ai_generator_service import ai_generator
+            logger.info("🔥 Starting background pre-warming of AI models...")
+            embedding_service._ensure_model()
+            ai_generator._ensure_model()
+            logger.info("✅ AI models pre-warmed and ready for inference")
+        except Exception as warmup_err:
+            logger.warning(f"⚠️ AI model pre-warming encountered an issue: {warmup_err}")
+
+    import threading
+    threading.Thread(target=_warmup_ai_models, daemon=True).start()
+
     yield
 
 # Initialize FastAPI app

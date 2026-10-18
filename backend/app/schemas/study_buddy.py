@@ -47,7 +47,9 @@ class SubjectCreate(BaseModel):
 
 
 class SubjectUpdate(BaseModel):
+    code: Optional[str] = Field(None, min_length=2, max_length=50)
     name: Optional[str] = Field(None, min_length=2, max_length=255)
+    department: Optional[str] = Field(None, max_length=100)
     semester: Optional[int] = Field(None, ge=1, le=8)
     academic_year: Optional[str] = Field(None, max_length=50)
     curriculum_version: Optional[str] = Field(None, max_length=50)
@@ -68,6 +70,7 @@ class SubjectResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     syllabus_documents_count: Optional[int] = 0
+    lecture_notes_count: Optional[int] = 0
     published_document_id: Optional[int] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -175,6 +178,10 @@ class StudyBuddyQuestionRequest(BaseModel):
         default=StudyBuddySourceMode.SYLLABUS,
         description="Source mode: 'syllabus', 'lecture_notes', 'all', 'my_documents', or 'all_my_sources'"
     )
+    attached_document_id: Optional[int] = Field(
+        default=None,
+        description="Optional student study document ID attached to this specific query"
+    )
 
 
 class StudyBuddyCitation(BaseModel):
@@ -186,6 +193,7 @@ class StudyBuddyCitation(BaseModel):
     version: Optional[int] = None
     lecture_note_id: Optional[int] = None
     student_study_document_id: Optional[int] = None
+    is_attached_file: Optional[bool] = False
     subject_id: Optional[int] = None
     subject_code: Optional[str] = None
     subject_name: Optional[str] = None

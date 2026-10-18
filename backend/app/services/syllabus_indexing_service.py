@@ -544,6 +544,11 @@ class SyllabusIndexingService:
             if current_user.role != UserRole.ADMIN and user_dept:
                 doc_query = doc_query.filter(Subject.department.ilike(user_dept))
 
+            if current_user.role == UserRole.STUDENT:
+                user_sem = current_user.student_profile.semester if current_user.student_profile else getattr(current_user, "semester", None)
+                if user_sem is not None:
+                    doc_query = doc_query.filter(Subject.semester == user_sem)
+
             doc = doc_query.first()
 
             if doc:

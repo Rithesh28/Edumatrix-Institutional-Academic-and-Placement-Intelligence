@@ -104,10 +104,27 @@ export function getFileFormatInfo(filename) {
 export default function LecturerCourseMaterials() {
   const { user, token } = useAuthStore()
 
+  const SEMESTERS = [1, 2, 3, 4, 5, 6, 7, 8]
+
   // State
   const [subjects, setSubjects] = useState([])
+  const [selectedSemester, setSelectedSemester] = useState('')
   const [selectedSubjectId, setSelectedSubjectId] = useState('')
   const [loadingSubjects, setLoadingSubjects] = useState(true)
+
+  // Filter subjects strictly for the selected semester
+  const availableSubjectsForSemester = useMemo(() => {
+    if (!selectedSemester) return []
+    return subjects.filter((s) => String(s.semester) === String(selectedSemester) && s.is_active)
+  }, [subjects, selectedSemester])
+
+  const handleSemesterChange = (newSemester) => {
+    setSelectedSemester(newSemester)
+    // Rule 3: Changing the semester clears the previous subject selection.
+    setSelectedSubjectId('')
+    setNotes([])
+    setSyllabusDoc(null)
+  }
 
   // Syllabus info (units/topics) for the selected subject
   const [syllabusDoc, setSyllabusDoc] = useState(null)
@@ -164,6 +181,7 @@ export default function LecturerCourseMaterials() {
       const data = res.data || []
       setSubjects(data)
       if (data.length > 0) {
+        setSelectedSemester(String(data[0].semester))
         setSelectedSubjectId(String(data[0].id))
       }
     } catch (err) {
@@ -294,7 +312,8 @@ export default function LecturerCourseMaterials() {
   // Upload Logic
   // ---------------------------------------------------------------------------
   const handleOpenUploadModal = () => {
-    setUploadSubjectId(selectedSubjectId)
+    const defaultSubId = selectedSubjectId || (availableSubjectsForSemester.length > 0 ? String(availableSubjectsForSemester[0].id) : '')
+    setUploadSubjectId(defaultSubId)
     setUploadFile(null)
     setUploadTitle('')
     setUploadDescription('')
@@ -600,33 +619,61 @@ export default function LecturerCourseMaterials() {
         </div>
       </div>
 
-      {/* Subject Selector & Scope Banner */}
+      {/* Semester & Subject Selector & Scope Banner */}
       <div className="bg-white dark:bg-gray-900 rounded-xl p-5 border border-gray-200 dark:border-gray-800 shadow-sm space-y-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="w-full md:w-96">
-            <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
-              Select Authorized Subject
-            </label>
-            {loadingSubjects ? (
-              <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" />
-            ) : subjects.length === 0 ? (
-              <p className="text-sm text-amber-600 dark:text-amber-400">
-                No active subjects found in your authorized department.
-              </p>
-            ) : (
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full md:w-auto">
+            {/* Step 1: Semester Selector */}
+            <div className="w-full sm:w-48">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+                1. Select Semester
+              </label>
               <select
-                id="subject-selector"
-                value={selectedSubjectId}
-                onChange={(e) => setSelectedSubjectId(e.target.value)}
+                id="semester-selector"
+                value={selectedSemester}
+                onChange={(e) => handleSemesterChange(e.target.value)}
                 className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-medium text-sm transition-colors"
               >
-                {subjects.map((sub) => (
-                  <option key={sub.id} value={sub.id}>
-                    {sub.code} — {sub.name} (Sem {sub.semester})
+                <option value="">-- Select Semester --</option>
+                {SEMESTERS.map((sem) => (
+                  <option key={sem} value={sem}>
+                    Semester {sem}
                   </option>
                 ))}
               </select>
-            )}
+            </div>
+
+            {/* Step 2: Subject Selector (Filtered to active authorized subjects for selected semester) */}
+            <div className="w-full sm:w-80">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+                2. Select Subject
+              </label>
+              {loadingSubjects ? (
+                <div className="h-10 bg-gray-100 dark:bg-gray-800 rounded-lg animate-pulse" />
+              ) : !selectedSemester ? (
+                <div className="px-3.5 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-400 text-sm">
+                  Please select a semester first
+                </div>
+              ) : availableSubjectsForSemester.length === 0 ? (
+                <div className="px-3.5 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-sm">
+                  No active subjects for Sem {selectedSemester}
+                </div>
+              ) : (
+                <select
+                  id="subject-selector"
+                  value={selectedSubjectId}
+                  onChange={(e) => setSelectedSubjectId(e.target.value)}
+                  className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-medium text-sm transition-colors"
+                >
+                  <option value="">-- Select Subject --</option>
+                  {availableSubjectsForSemester.map((sub) => (
+                    <option key={sub.id} value={sub.id}>
+                      {sub.code} — {sub.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
           </div>
 
           {activeSubject && (
@@ -748,7 +795,23 @@ export default function LecturerCourseMaterials() {
       </div>
 
       {/* Notes List / Empty / Loading State */}
-      {loadingNotes ? (
+      {!selectedSubjectId ? (
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-dashed border-gray-300 dark:border-gray-800 p-12 text-center space-y-4">
+          <div className="w-16 h-16 bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 rounded-full flex items-center justify-center mx-auto text-2xl">
+            📖
+          </div>
+          <div className="space-y-1">
+            <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
+              {!selectedSemester ? 'Select a Semester to Begin' : 'Select a Subject to View Course Materials'}
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto">
+              {!selectedSemester
+                ? 'Choose a semester above to filter and display active subjects authorized for your department.'
+                : `Select one of the active subjects for Semester ${selectedSemester} above to view notes or upload materials.`}
+            </p>
+          </div>
+        </div>
+      ) : loadingNotes ? (
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
             <div
@@ -1036,23 +1099,31 @@ export default function LecturerCourseMaterials() {
                 </div>
               )}
 
-              {/* Subject selector in modal */}
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 mb-1.5">
-                  Subject *
-                </label>
-                <select
-                  value={uploadSubjectId}
-                  onChange={(e) => setUploadSubjectId(e.target.value)}
-                  disabled={isUploading}
-                  className="w-full px-3.5 py-2 text-sm rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-medium"
-                >
-                  {subjects.map((sub) => (
-                    <option key={sub.id} value={sub.id}>
-                      {sub.code} — {sub.name}
-                    </option>
-                  ))}
-                </select>
+              {/* Target Semester & Subject selector in modal */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800/60 p-2.5 rounded-lg border border-gray-200 dark:border-gray-700">
+                  <span>Target Semester: <strong className="text-gray-900 dark:text-white">Semester {selectedSemester || (activeSubject ? activeSubject.semester : '—')}</strong></span>
+                  <span>Department: <strong className="text-gray-900 dark:text-white">{activeSubject?.department || user?.department || 'Authorized'}</strong></span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-600 dark:text-gray-300 mb-1.5">
+                    Subject *
+                  </label>
+                  <select
+                    value={uploadSubjectId}
+                    onChange={(e) => setUploadSubjectId(e.target.value)}
+                    disabled={isUploading || availableSubjectsForSemester.length === 0}
+                    className="w-full px-3.5 py-2 text-sm rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-medium"
+                  >
+                    <option value="">-- Select Subject --</option>
+                    {availableSubjectsForSemester.map((sub) => (
+                      <option key={sub.id} value={sub.id}>
+                        {sub.code} — {sub.name} (Sem {sub.semester})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* File Dropzone / Picker */}

@@ -66,6 +66,13 @@ def _get_user_department(user: User) -> Optional[str]:
     return None
 
 
+def _get_user_semester(user: User) -> Optional[int]:
+    """Resolve semester for student across user and student profile."""
+    if user.student_profile and user.student_profile.semester is not None:
+        return user.student_profile.semester
+    return getattr(user, "semester", None)
+
+
 class StudyBuddyChatService:
     """
     Unified RAG Academic Assistant question answering service.
@@ -221,9 +228,12 @@ class StudyBuddyChatService:
             if subject_id is not None and note.subject_id != subject_id:
                 continue
 
-            # Check role-based department and subject permissions
+            # Check role-based department, semester, and subject permissions
             if current_user.role == UserRole.STUDENT:
                 if _normalize_dept(user_dept) != _normalize_dept(note.subject.department):
+                    continue
+                user_sem = _get_user_semester(current_user)
+                if user_sem is not None and note.subject.semester != user_sem:
                     continue
             elif current_user.role == UserRole.LECTURER:
                 if _normalize_dept(user_dept) != _normalize_dept(note.subject.department):
@@ -269,7 +279,8 @@ class StudyBuddyChatService:
         query: str,
         current_user: User,
         subject_id: Optional[int] = None,
-        limit: int = 5
+        limit: int = 5,
+        student_study_document_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Retrieve authorized student study document chunks with strict PostgreSQL boundary checks.
@@ -281,6 +292,7 @@ class StudyBuddyChatService:
         - processing_status == EXTRACTED
         - indexing_status == INDEXED
         - indexed_chunk_count > 0
+        - If student_study_document_id is provided: matches document ID
         - If subject_id is linked: Subject.is_active is True and department-accessible
         """
         if not query or not query.strip():
@@ -312,6 +324,14 @@ class StudyBuddyChatService:
                 match=models.MatchValue(value=current_user.id)
             )
         ]
+
+        if student_study_document_id is not None:
+            must_conditions.append(
+                models.FieldCondition(
+                    key="student_study_document_id",
+                    match=models.MatchValue(value=student_study_document_id)
+                )
+            )
 
         if subject_id is not None:
             must_conditions.append(
@@ -355,6 +375,9 @@ class StudyBuddyChatService:
             if not doc_id:
                 continue
 
+            if student_study_document_id is not None and doc_id != student_study_document_id:
+                continue
+
             doc = db.query(StudentStudyDocument).filter(
                 StudentStudyDocument.id == doc_id,
                 StudentStudyDocument.student_id == current_user.id,
@@ -390,6 +413,7 @@ class StudyBuddyChatService:
                 "version": None,
                 "lecture_note_id": None,
                 "student_study_document_id": doc.id,
+                "is_attached_file": (student_study_document_id is not None and doc.id == student_study_document_id),
                 "subject_id": doc.subject_id,
                 "subject_code": doc.subject.code if doc.subject else None,
                 "subject_name": doc.subject.name if doc.subject else None,
@@ -477,10 +501,12 @@ class StudyBuddyChatService:
         current_user: User,
         question: str,
         subject_id: Optional[int] = None,
-        source_mode: str = "syllabus"
+        source_mode: str = "syllabus",
+        attached_document_id: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Process student academic query with strict RAG grounding across requested knowledge sources.
+        Supports attaching a personal student document (attached_document_id) for request-level grounding.
         """
         start_time = time.time()
         clean_query = (question or "").strip()
@@ -538,12 +564,45 @@ class StudyBuddyChatService:
                             status_code=status.HTTP_403_FORBIDDEN,
                             detail=f"Access denied: Subject belongs to department '{target_subject.department}'."
                         )
+            elif current_user.role == UserRole.STUDENT:
+                if _normalize_dept(user_dept) != _normalize_dept(target_subject.department):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Access denied: Subject belongs to department '{target_subject.department}'."
+                    )
+                user_sem = _get_user_semester(current_user)
+                if user_sem is not None and target_subject.semester != user_sem:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Access denied: Subject '{target_subject.name}' is for semester {target_subject.semester}, but your profile is semester {user_sem}."
+                    )
             elif current_user.role != UserRole.ADMIN:
                 if _normalize_dept(user_dept) != _normalize_dept(target_subject.department):
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
                         detail=f"Access denied: Subject belongs to department '{target_subject.department}'."
                     )
+
+        # 2b. Validate attached_document_id if supplied
+        attached_doc = None
+        if attached_document_id is not None:
+            attached_doc = db.query(StudentStudyDocument).filter(
+                StudentStudyDocument.id == attached_document_id,
+                StudentStudyDocument.student_id == current_user.id,
+                StudentStudyDocument.is_active == True
+            ).first()
+
+            if not attached_doc:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Attached document with ID {attached_document_id} not found, inactive, or access denied."
+                )
+
+            if attached_doc.indexing_status != StudentDocIndexingStatus.INDEXED:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Attached document '{attached_doc.original_filename}' is not fully indexed yet (status: {attached_doc.indexing_status.value})."
+                )
 
         # 3. Retrieve relevant chunks according to source_mode
         raw_chunks = self.search_unified_chunks(
@@ -555,6 +614,34 @@ class StudyBuddyChatService:
             limit=self.top_k
         )
 
+        # 3b. Retrieve chunks specifically from the attached document if provided
+        if attached_document_id is not None:
+            attached_chunks = self.search_student_document_chunks(
+                db=db,
+                query=clean_query,
+                current_user=current_user,
+                subject_id=None,
+                limit=self.top_k,
+                student_study_document_id=attached_document_id
+            )
+            for ac in attached_chunks:
+                ac["is_attached_file"] = True
+
+            # Merge attached chunks with raw_chunks, deduplicating by snippet prefix
+            seen_snippets = set()
+            merged = []
+            all_candidates = attached_chunks + raw_chunks
+            all_candidates.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
+            for c in all_candidates:
+                snippet = (c.get("text") or "").strip()[:80].lower()
+                if snippet and snippet in seen_snippets:
+                    continue
+                seen_snippets.add(snippet)
+                merged.append(c)
+                if len(merged) >= self.top_k * 2:
+                    break
+            raw_chunks = merged
+
         # 4. Filter by Minimum Relevance Score Threshold
         qualifying_chunks = [
             c for c in raw_chunks
@@ -562,14 +649,16 @@ class StudyBuddyChatService:
         ]
 
         logger.info(
-            f"🔍 [STUDY-BUDDY] Mode: '{mode}' | Query: '{clean_query[:50]}...' | "
+            f"🔍 [STUDY-BUDDY] Mode: '{mode}' | Query: '{clean_query[:50]}...' | Attached: {attached_document_id} | "
             f"Raw: {len(raw_chunks)} | Qualifying (>= {self.min_relevance_score}): {len(qualifying_chunks)}"
         )
 
         # 5. Insufficient Evidence Handling
         if not qualifying_chunks:
             elapsed_ms = (time.time() - start_time) * 1000
-            if mode == "my_documents":
+            if attached_doc:
+                source_desc = f"attached document '{attached_doc.original_filename}' and selected academic sources"
+            elif mode == "my_documents":
                 source_desc = "uploaded personal study documents"
             elif mode == "lecture_notes":
                 source_desc = "lecture notes"
@@ -580,11 +669,8 @@ class StudyBuddyChatService:
 
             return {
                 "answer": (
-                    f"The selected {source_desc} do not provide sufficient information to answer this question. "
-                    "Please check your uploaded files or consult your subject lecturer for clarification."
-                ) if mode == "my_documents" else (
-                    f"The approved {source_desc} do not provide sufficient information to answer this question. "
-                    "Please consult your subject lecturer or course coordinator for clarification."
+                    f"The {source_desc} do not provide sufficient information to answer this question. "
+                    "Please check your question or consult your course lecturer for clarification."
                 ),
                 "has_sufficient_evidence": False,
                 "citations": [],
@@ -601,7 +687,10 @@ class StudyBuddyChatService:
             passage_text = chunk.get("text") or chunk.get("source_evidence") or ""
             source_type = chunk.get("source_type", "syllabus")
             if source_type == "student_upload":
-                source_label = "Student Document"
+                if chunk.get("is_attached_file"):
+                    source_label = "Attached Student Document"
+                else:
+                    source_label = "Student Document"
             elif source_type == "lecture_note":
                 source_label = "Lecture Note"
             else:
@@ -663,6 +752,7 @@ class StudyBuddyChatService:
                     "version": c.get("version"),
                     "lecture_note_id": c.get("lecture_note_id"),
                     "student_study_document_id": c.get("student_study_document_id"),
+                    "is_attached_file": c.get("is_attached_file", False),
                     "subject_id": c.get("subject_id"),
                     "subject_code": c.get("subject_code"),
                     "subject_name": c.get("subject_name"),

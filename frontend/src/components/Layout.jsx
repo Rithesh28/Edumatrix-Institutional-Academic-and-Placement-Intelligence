@@ -78,6 +78,7 @@ function Layout() {
       return [
         { name: 'Dashboard', path: '/admin/dashboard', icon: '📊' },
         { name: 'Users', path: '/admin/users', icon: '👥' },
+        { name: 'Subjects', path: '/admin/subjects', icon: '📚' },
         { name: 'Audit Logs', path: '/admin/logs', icon: '📋' },
         { name: 'Resume Analyzer', path: '/placement/resume-analyzer', icon: '📄' },
         { name: 'Placement', path: '/placement/dashboard', icon: '💼' },
