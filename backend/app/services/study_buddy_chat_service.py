@@ -225,9 +225,6 @@ class StudyBuddyChatService:
             if current_user.role == UserRole.STUDENT:
                 if _normalize_dept(user_dept) != _normalize_dept(note.subject.department):
                     continue
-                student_sem = current_user.student_profile.semester if current_user.student_profile else None
-                if student_sem is not None and note.subject.semester is not None and note.subject.semester != student_sem:
-                    continue
             elif current_user.role == UserRole.LECTURER:
                 if _normalize_dept(user_dept) != _normalize_dept(note.subject.department):
                     assigned = []
@@ -541,18 +538,6 @@ class StudyBuddyChatService:
                             status_code=status.HTTP_403_FORBIDDEN,
                             detail=f"Access denied: Subject belongs to department '{target_subject.department}'."
                         )
-            elif current_user.role == UserRole.STUDENT:
-                if _normalize_dept(user_dept) != _normalize_dept(target_subject.department):
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Access denied: Subject belongs to department '{target_subject.department}'."
-                    )
-                student_sem = current_user.student_profile.semester if current_user.student_profile else None
-                if student_sem is not None and target_subject.semester is not None and target_subject.semester != student_sem:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail=f"Access denied: Subject is for Semester {target_subject.semester}, but you are in Semester {student_sem}."
-                    )
             elif current_user.role != UserRole.ADMIN:
                 if _normalize_dept(user_dept) != _normalize_dept(target_subject.department):
                     raise HTTPException(

@@ -77,7 +77,6 @@ function Layout() {
     if (role === 'admin') {
       return [
         { name: 'Dashboard', path: '/admin/dashboard', icon: '📊' },
-        { name: 'Academic Subjects', path: '/admin/subjects', icon: '📚' },
         { name: 'Users', path: '/admin/users', icon: '👥' },
         { name: 'Audit Logs', path: '/admin/logs', icon: '📋' },
         { name: 'Resume Analyzer', path: '/placement/resume-analyzer', icon: '📄' },

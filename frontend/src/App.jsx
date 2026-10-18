@@ -11,7 +11,6 @@ import HODDashboard from './pages/hod/Dashboard'
 import AdminDashboard from './pages/admin/Dashboard'
 import AdminUsers from './pages/admin/Users'
 import AdminAuditLogs from './pages/admin/AuditLogs'
-import AdminSubjects from './pages/admin/Subjects'
 import StudentChat from './pages/student/Chat'
 import StudentStudyBuddy from './pages/student/StudyBuddy'
 import LecturerChat from './pages/lecturer/Chat'
@@ -145,7 +144,6 @@ function App() {
             {/* Admin Routes (admin only) */}
             <Route element={<ProtectedRoute allowedRoles={['admin']} />}>
               <Route path="/admin/dashboard" element={<AdminDashboard />} />
-              <Route path="/admin/subjects" element={<AdminSubjects />} />
               <Route path="/admin/users" element={<AdminUsers />} />
               <Route path="/admin/logs" element={<AdminAuditLogs />} />
             </Route>

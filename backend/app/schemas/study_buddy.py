@@ -47,9 +47,7 @@ class SubjectCreate(BaseModel):
 
 
 class SubjectUpdate(BaseModel):
-    code: Optional[str] = Field(None, min_length=2, max_length=50)
     name: Optional[str] = Field(None, min_length=2, max_length=255)
-    department: Optional[str] = Field(None, max_length=100)
     semester: Optional[int] = Field(None, ge=1, le=8)
     academic_year: Optional[str] = Field(None, max_length=50)
     curriculum_version: Optional[str] = Field(None, max_length=50)

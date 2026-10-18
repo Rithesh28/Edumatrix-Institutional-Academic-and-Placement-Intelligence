@@ -26,10 +26,7 @@ class EmbeddingService:
         """Lazy load the SBERT model on first use."""
         if self.model is None:
             try:
-                try:
-                    self.model = SentenceTransformer(self.model_name, local_files_only=True)
-                except Exception:
-                    self.model = SentenceTransformer(self.model_name)
+                self.model = SentenceTransformer(self.model_name)
                 self.is_loaded = True
                 logger.info(f"✅ Loaded embedding model: {self.model_name}")
                 logger.info(f"   Vector dimension: {self.model.get_sentence_embedding_dimension()}")

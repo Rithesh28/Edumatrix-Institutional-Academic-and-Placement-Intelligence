@@ -14,7 +14,6 @@ import logging
 import uuid
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 from qdrant_client.http import models
@@ -544,11 +543,6 @@ class SyllabusIndexingService:
 
             if current_user.role != UserRole.ADMIN and user_dept:
                 doc_query = doc_query.filter(Subject.department.ilike(user_dept))
-
-            if current_user.role == UserRole.STUDENT:
-                student_sem = current_user.student_profile.semester if current_user.student_profile else None
-                if student_sem is not None:
-                    doc_query = doc_query.filter(or_(Subject.semester == student_sem, Subject.semester == None))
 
             doc = doc_query.first()
 
