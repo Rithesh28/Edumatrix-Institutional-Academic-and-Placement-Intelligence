@@ -27,7 +27,9 @@ import {
   FolderOpen,
   HardDrive,
   Info,
-  Lock
+  Lock,
+  Paperclip,
+  Eye
 } from 'lucide-react'
 
 // Helper utilities for formatting and citation handling
@@ -140,7 +142,13 @@ const StudyBuddy = () => {
   const messagesEndRef = useRef(null)
 
   // ----------------------------------------------------
-  // LECTURE NOTES LIBRARY STATE
+  // ASK BUDDY ATTACHMENT STATE (Part A)
+  // ----------------------------------------------------
+  const [chatAttachment, setChatAttachment] = useState(null)
+  const attachmentFileInputRef = useRef(null)
+
+  // ----------------------------------------------------
+  // LECTURE NOTES LIBRARY & PREVIEW STATE (Part B)
   // ----------------------------------------------------
   const [lectureNotes, setLectureNotes] = useState([])
   const [loadingNotes, setLoadingNotes] = useState(false)
@@ -148,6 +156,12 @@ const StudyBuddy = () => {
   const [noteSearchQuery, setNoteSearchQuery] = useState('')
   const [selectedNotesUnitId, setSelectedNotesUnitId] = useState('')
   const [downloadingNoteId, setDownloadingNoteId] = useState(null)
+
+  // Note Preview Modal State
+  const [previewNote, setPreviewNote] = useState(null)
+  const [previewBlobUrl, setPreviewBlobUrl] = useState(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
+  const [previewError, setPreviewError] = useState(null)
 
   const samplePromptsByMode = {
     syllabus: [
@@ -490,6 +504,166 @@ const StudyBuddy = () => {
     }
   }
 
+  // Cleanup preview object URL when changing or unmounting
+  useEffect(() => {
+    return () => {
+      if (previewBlobUrl) {
+        URL.revokeObjectURL(previewBlobUrl)
+      }
+    }
+  }, [previewBlobUrl])
+
+  // Redirect to chat if activeTab is ever set to legacy 'my_documents'
+  useEffect(() => {
+    if (activeTab === 'my_documents') {
+      setActiveTab('chat')
+    }
+  }, [activeTab])
+
+  const handlePreviewNote = async (note) => {
+    if (!note) return
+    setPreviewNote(note)
+    setLoadingPreview(true)
+    setPreviewError(null)
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl)
+      setPreviewBlobUrl(null)
+    }
+
+    try {
+      const res = await studyBuddyAPI.downloadNote(note.id, true)
+      const ext = (note.original_filename || '').split('.').pop().toLowerCase()
+      const mimeType = ext === 'png' ? 'image/png' : 'application/pdf'
+      const blob = new Blob([res.data], { type: mimeType })
+      const url = URL.createObjectURL(blob)
+      setPreviewBlobUrl(url)
+    } catch (err) {
+      console.error('Note preview error:', err)
+      const errMsg = err.response?.data?.detail || 'Failed to load preview for this note. Please try downloading the file directly.'
+      setPreviewError(errMsg)
+    } finally {
+      setLoadingPreview(false)
+    }
+  }
+
+  const handleClosePreview = () => {
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl)
+      setPreviewBlobUrl(null)
+    }
+    setPreviewNote(null)
+    setPreviewError(null)
+  }
+
+  // ----------------------------------------------------
+  // ASK BUDDY ATTACHMENT HANDLERS (Part A)
+  // ----------------------------------------------------
+  const handleAttachmentFileSelect = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // 1. Format validation
+    const ext = (file.name || '').split('.').pop().toLowerCase()
+    const supportedExts = ['pdf', 'png', 'docx', 'pptx', 'txt']
+    if (!supportedExts.includes(ext)) {
+      toast.error(`Unsupported format: .${ext}. Please attach a PDF, PNG, DOCX, PPTX, or TXT file.`)
+      if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = ''
+      return
+    }
+
+    // 2. Size validation (50 MB limit)
+    const MAX_SIZE = 50 * 1024 * 1024
+    if (file.size > MAX_SIZE) {
+      toast.error(`File size (${formatFileSize(file.size)}) exceeds the maximum allowed limit of 50 MB.`)
+      if (attachmentFileInputRef.current) attachmentFileInputRef.current.value = ''
+      return
+    }
+
+    // 3. Set uploading state
+    setChatAttachment({
+      file,
+      name: file.name,
+      size: file.size,
+      status: 'uploading',
+      progress: 0,
+      docId: null,
+      error: null
+    })
+
+    // 4. Ingest and index
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      formData.append('title', file.name)
+      if (selectedSubjectId) {
+        formData.append('subject_id', selectedSubjectId)
+      }
+      formData.append('reuse_existing', 'true')
+
+      const res = await studyBuddyAPI.uploadMyDocument(formData, (progressEvent) => {
+        if (progressEvent.total) {
+          const pct = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          setChatAttachment((prev) => (prev ? { ...prev, progress: Math.min(pct, 95) } : null))
+        }
+      })
+
+      const doc = res.data
+      if (doc.indexing_status === 'indexed') {
+        setChatAttachment({
+          file,
+          name: doc.original_filename || file.name,
+          size: doc.file_size || file.size,
+          status: 'ready',
+          progress: 100,
+          docId: doc.id,
+          error: null
+        })
+        toast.success(`Attached '${doc.original_filename || file.name}' ready for Ask Buddy!`)
+      } else if (doc.indexing_status === 'failed') {
+        setChatAttachment({
+          file,
+          name: doc.original_filename || file.name,
+          size: doc.file_size || file.size,
+          status: 'error',
+          progress: 100,
+          docId: doc.id,
+          error: doc.error_message || 'Document indexing failed'
+        })
+        toast.error(`Indexing failed: ${doc.error_message || 'Unknown processing error'}`)
+      } else {
+        setChatAttachment({
+          file,
+          name: doc.original_filename || file.name,
+          size: doc.file_size || file.size,
+          status: 'indexing',
+          progress: 98,
+          docId: doc.id,
+          error: null
+        })
+      }
+    } catch (err) {
+      console.error('Attachment upload failed:', err)
+      const detail = err.response?.data?.detail || 'Failed to upload and index attachment.'
+      setChatAttachment({
+        file,
+        name: file.name,
+        size: file.size,
+        status: 'error',
+        progress: 0,
+        docId: null,
+        error: detail
+      })
+      toast.error(detail)
+    }
+  }
+
+  const handleRemoveAttachment = () => {
+    setChatAttachment(null)
+    if (attachmentFileInputRef.current) {
+      attachmentFileInputRef.current.value = ''
+    }
+  }
+
   // ----------------------------------------------------
   // PERSONAL STUDY DOCUMENTS HANDLERS (Step 4.6H)
   // ----------------------------------------------------
@@ -708,22 +882,43 @@ const StudyBuddy = () => {
     const text = (questionText || '').trim()
     if (!text || isChatLoading) return
 
+    // Prevent send if attachment is currently uploading or indexing
+    if (chatAttachment && (chatAttachment.status === 'uploading' || chatAttachment.status === 'indexing')) {
+      toast.error('Please wait for the attached document to finish indexing before sending your question.')
+      return
+    }
+
+    // If attachment has an error, alert student
+    if (chatAttachment && chatAttachment.status === 'error') {
+      toast.error('The attached file could not be indexed. Please remove it or attach a valid file.')
+      return
+    }
+
+    const attachedDocId = chatAttachment?.status === 'ready' ? chatAttachment.docId : null
+    const attachedDocMeta = chatAttachment?.status === 'ready' ? {
+      name: chatAttachment.name,
+      size: chatAttachment.size,
+      docId: chatAttachment.docId
+    } : null
+
     const studentMessage = {
       id: Date.now(),
       sender: 'student',
       text: text,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       subjectId: selectedSubjectId ? Number(selectedSubjectId) : null,
-      sourceMode: sourceMode
+      sourceMode: sourceMode,
+      attachment: attachedDocMeta
     }
 
     setMessages((prev) => [...prev, studentMessage])
     setInputQuestion('')
+    handleRemoveAttachment()
     setIsChatLoading(true)
 
     try {
       const subjectFilter = selectedSubjectId ? Number(selectedSubjectId) : null
-      const res = await studyBuddyAPI.askQuestion(text, subjectFilter, sourceMode)
+      const res = await studyBuddyAPI.askQuestion(text, subjectFilter, sourceMode, attachedDocId)
       const data = res.data
 
       const aiMessage = {
@@ -735,7 +930,8 @@ const StudyBuddy = () => {
         citations: deduplicateCitations(data.citations || []),
         modelUsed: data.model_used,
         latencyMs: data.latency_ms,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        attachedDocMeta: attachedDocMeta
       }
 
       setMessages((prev) => [...prev, aiMessage])
@@ -1094,23 +1290,6 @@ const StudyBuddy = () => {
               )}
             </button>
             <button
-              id="tab-btn-my-docs"
-              onClick={() => setActiveTab('my_documents')}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
-                activeTab === 'my_documents'
-                  ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-sm'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-              }`}
-            >
-              <span>📁</span>
-              <span>My Documents</span>
-              {myDocuments.length > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.2 text-[10px] rounded-full bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-semibold">
-                  {myDocuments.length}
-                </span>
-              )}
-            </button>
-            <button
               id="tab-btn-summaries"
               onClick={() => setActiveTab('summaries')}
               className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all whitespace-nowrap ${
@@ -1427,6 +1606,18 @@ const StudyBuddy = () => {
                       {msg.text}
                     </div>
 
+                    {msg.sender === 'student' && msg.attachment && (
+                      <div className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-700/80 border border-blue-400/40 text-blue-50 text-xs">
+                        <Paperclip className="w-3.5 h-3.5 text-blue-200 shrink-0" />
+                        <span className="font-medium truncate max-w-[220px]" title={msg.attachment.name}>
+                          {msg.attachment.name}
+                        </span>
+                        <span className="text-[10px] text-blue-200">
+                          ({formatFileSize(msg.attachment.size)})
+                        </span>
+                      </div>
+                    )}
+
                     {msg.citations && msg.citations.length > 0 && (
                       <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
                         <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 mb-2">
@@ -1436,6 +1627,7 @@ const StudyBuddy = () => {
 
                         <div className="space-y-2">
                           {deduplicateCitations(msg.citations).map((cit, cIdx) => {
+                            const isAttachedFile = Boolean(cit.is_attached_file)
                             const isLectureNote = cit.source_type === 'lecture_note'
                             const isStudentDoc = cit.source_type === 'student_upload'
                             const isExpanded = !!expandedChatCitations[`${msg.id}-${cIdx}`]
@@ -1444,7 +1636,9 @@ const StudyBuddy = () => {
                               <div
                                 key={cIdx}
                                 className={`border rounded-lg p-2.5 text-xs transition-colors ${
-                                  isStudentDoc
+                                  isAttachedFile
+                                    ? 'bg-violet-50/50 dark:bg-violet-950/25 border-violet-200 dark:border-violet-900/60'
+                                    : isStudentDoc
                                     ? 'bg-purple-50/40 dark:bg-purple-950/20 border-purple-200 dark:border-purple-900/60'
                                     : isLectureNote
                                     ? 'bg-indigo-50/40 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-900/60'
@@ -1453,7 +1647,12 @@ const StudyBuddy = () => {
                               >
                                 <div className="flex flex-wrap items-center justify-between gap-1">
                                   <div className="flex items-center gap-1.5 flex-wrap">
-                                    {isStudentDoc ? (
+                                    {isAttachedFile ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300 border border-violet-200 dark:border-violet-800 flex items-center gap-1">
+                                        <Paperclip className="w-3 h-3 text-violet-600 dark:text-violet-400" />
+                                        <span>Attached Document</span>
+                                      </span>
+                                    ) : isStudentDoc ? (
                                       <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-200 dark:border-purple-800 flex items-center gap-1">
                                         <span>📁</span>
                                         <span>My Document</span>
@@ -1498,7 +1697,7 @@ const StudyBuddy = () => {
 
                                 {(cit.source_title || cit.original_filename) && (
                                   <div className="mt-1 font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1">
-                                    <span>{isStudentDoc ? '📁' : '📄'}</span>
+                                    <span>{isAttachedFile ? '📎' : isStudentDoc ? '📁' : isLectureNote ? '📄' : '🏛️'}</span>
                                     <span>{cit.source_title || cit.original_filename}</span>
                                     {cit.original_filename && cit.source_title && cit.original_filename !== cit.source_title && (
                                       <span className="text-[11px] text-gray-400 font-normal">
@@ -1586,7 +1785,90 @@ const StudyBuddy = () => {
 
           {/* Chat Input Bar */}
           <div className="p-3 bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800">
+            {/* Active Attachment Chip (if student selected a file) */}
+            {chatAttachment && (
+              <div className="mb-2 px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 flex items-center justify-between gap-3 text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/60 text-blue-600 dark:text-blue-300 shrink-0">
+                    <Paperclip className="w-4 h-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-800 dark:text-gray-200 truncate" title={chatAttachment.name}>
+                        {chatAttachment.name}
+                      </span>
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                        ({formatFileSize(chatAttachment.size)})
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      {chatAttachment.status === 'uploading' && (
+                        <span className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium">
+                          <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
+                          Uploading... ({chatAttachment.progress}%)
+                        </span>
+                      )}
+                      {chatAttachment.status === 'indexing' && (
+                        <span className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1 font-medium">
+                          <span className="w-2 h-2 rounded-full bg-amber-600 animate-pulse" />
+                          Processing & indexing for Ask Buddy...
+                        </span>
+                      )}
+                      {chatAttachment.status === 'ready' && (
+                        <span className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 font-medium">
+                          <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+                          Ready for Ask Buddy
+                        </span>
+                      )}
+                      {chatAttachment.status === 'error' && (
+                        <span className="text-[11px] text-red-600 dark:text-red-400 flex items-center gap-1 font-medium" title={chatAttachment.error}>
+                          <AlertCircle className="w-3.5 h-3.5 text-red-500" />
+                          {chatAttachment.error || 'Processing failed'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Remove Attachment Action */}
+                <button
+                  id="btn-remove-attachment"
+                  onClick={handleRemoveAttachment}
+                  className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                  title="Remove attachment"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
+              {/* Hidden file input for question attachment */}
+              <input
+                type="file"
+                ref={attachmentFileInputRef}
+                onChange={handleAttachmentFileSelect}
+                accept=".pdf,.png,.docx,.pptx,.txt"
+                className="hidden"
+                id="attachment-file-input"
+              />
+
+              {/* Plus / Attachment button directly beside message input */}
+              <button
+                id="btn-attach-document"
+                type="button"
+                onClick={() => attachmentFileInputRef.current?.click()}
+                disabled={isChatLoading || chatAttachment?.status === 'uploading' || chatAttachment?.status === 'indexing'}
+                className={`p-3 rounded-xl border transition-all flex items-center justify-center shrink-0 ${
+                  chatAttachment
+                    ? 'bg-blue-50 dark:bg-blue-950/60 border-blue-400 dark:border-blue-600 text-blue-600 dark:text-blue-300'
+                    : 'bg-gray-50 dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50/50 dark:hover:bg-blue-950/30'
+                }`}
+                title="Attach study document (.pdf, .png, .docx, .pptx, .txt)"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+
               <input
                 type="text"
                 value={inputQuestion}
@@ -1598,7 +1880,9 @@ const StudyBuddy = () => {
                   }
                 }}
                 placeholder={
-                  sourceMode === 'lecture_notes'
+                  chatAttachment?.status === 'ready'
+                    ? `Ask a question about ${chatAttachment.name}...`
+                    : sourceMode === 'lecture_notes'
                     ? selectedSubjectId
                       ? "Ask a question about this subject's lecturer notes..."
                       : "Ask about any lecturer notes in your department..."
@@ -1614,8 +1898,13 @@ const StudyBuddy = () => {
                 className="flex-1 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               />
               <button
+                id="btn-send-chat"
                 onClick={() => handleSendChat()}
-                disabled={!inputQuestion.trim() || isChatLoading}
+                disabled={
+                  !inputQuestion.trim() ||
+                  isChatLoading ||
+                  (chatAttachment && (chatAttachment.status === 'uploading' || chatAttachment.status === 'indexing' || chatAttachment.status === 'error'))
+                }
                 className="px-5 py-3 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-sm transition-all flex items-center gap-1.5"
               >
                 <span>Send</span>
@@ -1860,24 +2149,54 @@ const StudyBuddy = () => {
                               </span>
                             </div>
 
-                            <button
-                              id={`download-note-${note.id}`}
-                              onClick={() => handleDownloadNote(note)}
-                              disabled={isDownloading}
-                              className="w-full py-2 px-3 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
-                            >
-                              {isDownloading ? (
-                                <>
-                                  <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                  <span>Downloading...</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Download className="w-3.5 h-3.5" />
-                                  <span>Download Note</span>
-                                </>
+                            {/* Actions Row */}
+                            <div className="flex items-center gap-2">
+                              {/* Preview Action (Browser-previewable formats: PDF, PNG) */}
+                              {['pdf', 'png'].includes((note.original_filename || '').split('.').pop().toLowerCase()) && (
+                                <button
+                                  id={`preview-note-${note.id}`}
+                                  onClick={() => handlePreviewNote(note)}
+                                  disabled={loadingPreview && previewNote?.id === note.id}
+                                  className="flex-1 py-2 px-3 text-xs font-semibold text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900 border border-blue-200 dark:border-blue-800 rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5"
+                                  title="Preview lecture note in browser"
+                                >
+                                  {loadingPreview && previewNote?.id === note.id ? (
+                                    <>
+                                      <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                      <span>Opening...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Eye className="w-3.5 h-3.5" />
+                                      <span>Preview</span>
+                                    </>
+                                  )}
+                                </button>
                               )}
-                            </button>
+
+                              {/* Download Action (Always available, authenticated endpoint) */}
+                              <button
+                                id={`download-note-${note.id}`}
+                                onClick={() => handleDownloadNote(note)}
+                                disabled={isDownloading}
+                                className={`py-2 px-3 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5 ${
+                                  ['pdf', 'png'].includes((note.original_filename || '').split('.').pop().toLowerCase()) ? 'flex-1' : 'w-full'
+                                }`}
+                                title="Download original file"
+                              >
+                                {isDownloading ? (
+                                  <>
+                                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    <span>Downloading...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download className="w-3.5 h-3.5" />
+                                    <span>{['pdf', 'png'].includes((note.original_filename || '').split('.').pop().toLowerCase()) ? 'Download' : 'Download Note'}</span>
+                                  </>
+                                )}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       )
@@ -3862,6 +4181,137 @@ const StudyBuddy = () => {
                     <span>Delete Document</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          DOCUMENT PREVIEW MODAL (PDF / PNG) (Part B)
+      ======================================================== */}
+      {previewNote && (
+        <div
+          id="lecture-note-preview-modal"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-3 sm:p-5 overflow-y-auto"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-4 bg-gray-50/90 dark:bg-gray-850">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2 rounded-xl bg-blue-100 dark:bg-blue-950 text-blue-600 dark:text-blue-300 shrink-0">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white truncate max-w-md">
+                      {previewNote.title}
+                    </h3>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 uppercase">
+                      {(previewNote.original_filename || '').split('.').pop()}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate mt-0.5">
+                    {previewNote.subject_code ? `${previewNote.subject_code} - ${previewNote.subject_name} | ` : ''}
+                    {previewNote.original_filename} ({formatFileSize(previewNote.file_size_bytes)})
+                  </p>
+                </div>
+              </div>
+
+              {/* Header Actions */}
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  id="preview-modal-download-btn"
+                  onClick={() => handleDownloadNote(previewNote)}
+                  disabled={downloadingNoteId === previewNote.id}
+                  className="px-3 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                  title="Download original file"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download</span>
+                </button>
+                <button
+                  id="preview-modal-close-btn"
+                  onClick={handleClosePreview}
+                  className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                  title="Close preview"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body / Viewer */}
+            <div className="flex-1 bg-gray-100 dark:bg-gray-950 relative overflow-hidden flex items-center justify-center">
+              {loadingPreview ? (
+                <div className="text-center p-8 space-y-3">
+                  <div className="w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    Loading note preview securely...
+                  </p>
+                </div>
+              ) : previewError ? (
+                <div className="max-w-md p-6 bg-white dark:bg-gray-900 border border-red-200 dark:border-red-900/60 rounded-xl shadow-sm text-center space-y-3 m-4">
+                  <AlertTriangle className="w-10 h-10 text-red-500 mx-auto" />
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white">
+                    Unable to load preview
+                  </h4>
+                  <p className="text-xs text-red-600 dark:text-red-400">
+                    {previewError}
+                  </p>
+                  <div className="pt-2 flex items-center justify-center gap-2">
+                    <button
+                      id="preview-modal-retry-btn"
+                      onClick={() => handlePreviewNote(previewNote)}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                    >
+                      Retry
+                    </button>
+                    <button
+                      onClick={() => {
+                        handleDownloadNote(previewNote)
+                        handleClosePreview()
+                      }}
+                      className="px-3.5 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors flex items-center gap-1.5"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download Instead</span>
+                    </button>
+                  </div>
+                </div>
+              ) : previewBlobUrl ? (
+                (previewNote.original_filename || '').toLowerCase().endsWith('.png') ? (
+                  <div className="w-full h-full overflow-auto flex items-center justify-center p-4">
+                    <img
+                      src={previewBlobUrl}
+                      alt={previewNote.title}
+                      className="max-w-full max-h-full object-contain rounded shadow-lg border border-gray-300 dark:border-gray-800"
+                    />
+                  </div>
+                ) : (
+                  <iframe
+                    src={previewBlobUrl}
+                    title={previewNote.title}
+                    className="w-full h-full border-0"
+                  />
+                )
+              ) : null}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="px-5 py-2.5 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+              <div className="flex items-center gap-4">
+                <span>Uploaded: {formatDate(previewNote.created_at)}</span>
+                {previewNote.unit_id && <span>Unit: {previewNote.unit_id}</span>}
+                <span>Downloads: {previewNote.download_count || 0}</span>
+              </div>
+              <button
+                onClick={handleClosePreview}
+                className="px-3 py-1 text-xs font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white"
+              >
+                Close
               </button>
             </div>
           </div>

@@ -1445,6 +1445,10 @@ async def retry_lecture_note_processing(
     "/notes/{note_id}/download",
     status_code=status.HTTP_200_OK
 )
+@router.get(
+    "/lecture-notes/{note_id}/download",
+    status_code=status.HTTP_200_OK
+)
 async def download_lecture_note(
     note_id: int,
     preview: bool = Query(False, description="If true, inline disposition for in-browser preview"),

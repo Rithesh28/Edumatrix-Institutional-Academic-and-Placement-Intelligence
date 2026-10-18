@@ -659,13 +659,13 @@ class StudyBuddyChatService:
             if attached_doc:
                 source_desc = f"attached document '{attached_doc.original_filename}' and selected academic sources"
             elif mode == "my_documents":
-                source_desc = "uploaded personal study documents"
+                source_desc = "selected uploaded personal study documents"
             elif mode == "lecture_notes":
-                source_desc = "lecture notes"
+                source_desc = "approved lecture notes"
             elif mode in ("all", "all_my_sources"):
-                source_desc = "academic materials"
+                source_desc = "approved academic materials"
             else:
-                source_desc = "syllabus material"
+                source_desc = "approved syllabus material"
 
             return {
                 "answer": (
