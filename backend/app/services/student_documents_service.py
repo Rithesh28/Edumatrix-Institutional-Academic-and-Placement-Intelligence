@@ -22,7 +22,7 @@ import logging
 import tempfile
 import asyncio
 from typing import Optional, Tuple, Dict, Any, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import UploadFile, HTTPException, status
 from sqlalchemy.orm import Session
@@ -606,20 +606,29 @@ class StudentDocumentsService:
                 detail=f"Student study document with ID {document_id} not found."
             )
 
-        if doc.processing_status == StudentDocProcessingStatus.PROCESSING:
+        now = datetime.now(timezone.utc)
+        stale_cutoff = now - timedelta(seconds=60)
+        is_stale = (doc.updated_at is None) or (
+            doc.updated_at.replace(tzinfo=timezone.utc) if doc.updated_at.tzinfo is None else doc.updated_at
+        ) < stale_cutoff
+
+        if doc.processing_status == StudentDocProcessingStatus.PROCESSING and not is_stale:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"Document {document_id} is currently being processed by another task."
             )
 
-        # Atomic claim
-        rows_claimed = db.query(StudentStudyDocument).filter(
+        # Atomic claim (allow claiming if not PROCESSING or if stale)
+        claim_filter = [
             StudentStudyDocument.id == document_id,
             StudentStudyDocument.student_id == student_id,
-            StudentStudyDocument.processing_status != StudentDocProcessingStatus.PROCESSING
-        ).update({
+        ]
+        if not is_stale:
+            claim_filter.append(StudentStudyDocument.processing_status != StudentDocProcessingStatus.PROCESSING)
+
+        rows_claimed = db.query(StudentStudyDocument).filter(*claim_filter).update({
             StudentStudyDocument.processing_status: StudentDocProcessingStatus.PROCESSING,
-            StudentStudyDocument.updated_at: datetime.now(timezone.utc)
+            StudentStudyDocument.updated_at: now
         }, synchronize_session=False)
         db.commit()
 

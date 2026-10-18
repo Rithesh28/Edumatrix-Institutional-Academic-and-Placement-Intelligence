@@ -562,6 +562,7 @@ class StudentStudyDocumentResponse(BaseModel):
     indexing_status: StudentDocIndexingStatus
     indexed_chunk_count: int = 0
     extraction_error: Optional[str] = None
+    error_message: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

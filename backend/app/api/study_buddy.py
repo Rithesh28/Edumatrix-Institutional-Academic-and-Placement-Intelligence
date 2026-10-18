@@ -12,7 +12,7 @@ import logging
 import time
 import urllib.parse
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile, Query, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -1693,6 +1693,7 @@ def _format_student_doc_detail(doc: StudentStudyDocument) -> StudentStudyDocumen
         indexing_status=doc.indexing_status,
         indexed_chunk_count=doc.indexed_chunk_count,
         extraction_error=doc.extraction_error,
+        error_message=doc.extraction_error,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         subject_name=doc.subject.name if doc.subject else None,
@@ -1957,20 +1958,28 @@ async def retry_my_study_document(
             detail="Cannot retry an inactive or deleted document."
         )
 
-    if doc.processing_status == StudentDocProcessingStatus.PROCESSING:
+    now = datetime.now(timezone.utc)
+    stale_cutoff = now - timedelta(seconds=60)
+    is_updated_stale = (doc.updated_at is None) or (
+        doc.updated_at.replace(tzinfo=timezone.utc) if doc.updated_at.tzinfo is None else doc.updated_at
+    ) < stale_cutoff
+
+    if doc.processing_status == StudentDocProcessingStatus.PROCESSING and not is_updated_stale:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Document {document_id} is currently being processed by another task."
         )
 
-    if doc.indexing_status == StudentDocIndexingStatus.INDEXING:
+    if doc.indexing_status == StudentDocIndexingStatus.INDEXING and not is_updated_stale:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Document {document_id} is currently being indexed by another task."
         )
 
-    # 1. Retry text extraction if failed or unextracted
-    if doc.processing_status in (StudentDocProcessingStatus.FAILED, StudentDocProcessingStatus.UPLOADED):
+    # 1. Retry text extraction if failed, unextracted, or stale processing
+    if doc.processing_status in (StudentDocProcessingStatus.FAILED, StudentDocProcessingStatus.UPLOADED) or (
+        doc.processing_status == StudentDocProcessingStatus.PROCESSING and is_updated_stale
+    ):
         doc = await student_documents_service.retry_document_processing(db, document_id, current_user.id)
         if doc.processing_status == StudentDocProcessingStatus.EXTRACTED:
             try:
@@ -1979,7 +1988,7 @@ async def retry_my_study_document(
             except Exception as idx_err:
                 logger.warning(f"Indexing error during retry for student doc {document_id}: {idx_err}")
 
-    # 2. If extraction is already successful, retry indexing if not indexed or failed
+    # 2. If extraction is already successful, retry indexing if not indexed, failed, or stale indexing
     elif doc.processing_status == StudentDocProcessingStatus.EXTRACTED:
         student_documents_indexing_service.index_student_document(db, document_id, current_user.id)
         db.refresh(doc)

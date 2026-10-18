@@ -545,14 +545,20 @@ const StudyBuddy = () => {
     }
 
     let pollAttempts = 0
+    let consecutiveErrors = 0
     const maxAttempts = 60 // 60 * 1.5s = 90 seconds timeout
 
     attachmentPollRef.current = setInterval(async () => {
       pollAttempts += 1
       try {
         const res = await studyBuddyAPI.getMyDocumentDetail(docId)
+        consecutiveErrors = 0
         const doc = res.data
-        if (doc.indexing_status === 'indexed') {
+        const indexingStatus = String(doc.indexing_status || '').toLowerCase()
+        const processingStatus = String(doc.processing_status || '').toLowerCase()
+        const errorMessage = doc.extraction_error || doc.error_message || doc.extraction_metadata?.indexing_error
+
+        if (indexingStatus === 'indexed') {
           if (attachmentPollRef.current) {
             clearInterval(attachmentPollRef.current)
             attachmentPollRef.current = null
@@ -567,7 +573,7 @@ const StudyBuddy = () => {
             error: null
           })
           toast.success(`Attached '${doc.original_filename || file.name}' ready for Ask Buddy!`)
-        } else if (doc.indexing_status === 'failed') {
+        } else if (indexingStatus === 'failed' || processingStatus === 'failed') {
           if (attachmentPollRef.current) {
             clearInterval(attachmentPollRef.current)
             attachmentPollRef.current = null
@@ -579,23 +585,46 @@ const StudyBuddy = () => {
             status: 'error',
             progress: 100,
             docId: doc.id,
-            error: doc.error_message || 'Document indexing failed'
+            error: errorMessage || 'Document indexing failed'
           })
-          toast.error(`Indexing failed: ${doc.error_message || 'Unknown processing error'}`)
+          toast.error(`Indexing failed: ${errorMessage || 'Unknown processing error'}`)
         } else if (pollAttempts >= maxAttempts) {
           if (attachmentPollRef.current) {
             clearInterval(attachmentPollRef.current)
             attachmentPollRef.current = null
           }
+          setChatAttachment({
+            file,
+            name: doc.original_filename || file.name,
+            size: doc.file_size || file.size,
+            status: 'error',
+            progress: 100,
+            docId: doc.id,
+            error: 'Attachment processing timed out. Please retry attaching the file.'
+          })
           toast.error('Attachment processing timed out. You may retry attaching the file.')
         }
       } catch (pollErr) {
         console.error('Polling attachment status failed:', pollErr)
-        if (pollAttempts >= maxAttempts) {
+        consecutiveErrors += 1
+        const statusCode = pollErr.response?.status
+        const isTerminalError = statusCode === 401 || statusCode === 403 || statusCode === 404
+        if (isTerminalError || consecutiveErrors >= 3 || pollAttempts >= maxAttempts) {
           if (attachmentPollRef.current) {
             clearInterval(attachmentPollRef.current)
             attachmentPollRef.current = null
           }
+          const errMsg = pollErr.response?.data?.detail || 'Failed to verify attachment status.'
+          setChatAttachment({
+            file,
+            name: file.name,
+            size: file.size,
+            status: 'error',
+            progress: 100,
+            docId,
+            error: errMsg
+          })
+          toast.error(`Attachment polling error: ${errMsg}`)
         }
       }
     }, 1500)
@@ -651,7 +680,11 @@ const StudyBuddy = () => {
       })
 
       const doc = res.data
-      if (doc.indexing_status === 'indexed') {
+      const indexingStatus = String(doc.indexing_status || '').toLowerCase()
+      const processingStatus = String(doc.processing_status || '').toLowerCase()
+      const errorMessage = doc.extraction_error || doc.error_message || doc.extraction_metadata?.indexing_error
+
+      if (indexingStatus === 'indexed') {
         setChatAttachment({
           file,
           name: doc.original_filename || file.name,
@@ -662,7 +695,7 @@ const StudyBuddy = () => {
           error: null
         })
         toast.success(`Attached '${doc.original_filename || file.name}' ready for Ask Buddy!`)
-      } else if (doc.indexing_status === 'failed') {
+      } else if (indexingStatus === 'failed' || processingStatus === 'failed') {
         setChatAttachment({
           file,
           name: doc.original_filename || file.name,
@@ -670,9 +703,9 @@ const StudyBuddy = () => {
           status: 'error',
           progress: 100,
           docId: doc.id,
-          error: doc.error_message || 'Document indexing failed'
+          error: errorMessage || 'Document indexing failed'
         })
-        toast.error(`Indexing failed: ${doc.error_message || 'Unknown processing error'}`)
+        toast.error(`Indexing failed: ${errorMessage || 'Unknown processing error'}`)
       } else {
         setChatAttachment({
           file,
@@ -1748,7 +1781,7 @@ const StudyBuddy = () => {
                       {chatAttachment.status === 'uploading' && (
                         <span className="text-[11px] text-blue-600 dark:text-blue-400 flex items-center gap-1 font-medium">
                           <span className="w-2 h-2 rounded-full bg-blue-600 animate-pulse" />
-                          Uploading... ({chatAttachment.progress}%)
+                          {chatAttachment.progress >= 95 ? 'Extracting text & vector indexing...' : `Uploading... (${chatAttachment.progress}%)`}
                         </span>
                       )}
                       {chatAttachment.status === 'indexing' && (
@@ -2398,10 +2431,12 @@ const StudyBuddy = () => {
                 const isDownloading = downloadingDocId === doc.id
                 const isRetrying = retryingDocId === doc.id
                 const subject = subjects.find((s) => String(s.id) === String(doc.subject_id))
+                const pStatus = String(doc.processing_status || '').toLowerCase()
+                const iStatus = String(doc.indexing_status || '').toLowerCase()
                 const canRetry =
-                  (doc.processing_status === 'failed' || doc.indexing_status === 'failed') &&
-                  doc.processing_status !== 'processing' &&
-                  doc.indexing_status !== 'indexing'
+                  (pStatus === 'failed' || iStatus === 'failed') &&
+                  pStatus !== 'processing' &&
+                  iStatus !== 'indexing'
 
                 return (
                   <div
@@ -2462,17 +2497,17 @@ const StudyBuddy = () => {
                         {/* Text Extraction Status */}
                         <div className="flex items-center justify-between">
                           <span className="text-gray-500 dark:text-gray-400">Extraction:</span>
-                          {doc.processing_status === 'extracted' ? (
+                          {pStatus === 'extracted' ? (
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
                               <CheckCircle className="w-3 h-3" />
                               <span>Extracted</span>
                             </span>
-                          ) : doc.processing_status === 'processing' ? (
+                          ) : pStatus === 'processing' ? (
                             <span className="text-amber-600 dark:text-amber-400 font-medium flex items-center gap-1">
                               <RefreshCw className="w-3 h-3 animate-spin" />
                               <span>Processing...</span>
                             </span>
-                          ) : doc.processing_status === 'failed' ? (
+                          ) : pStatus === 'failed' ? (
                             <span className="text-red-600 dark:text-red-400 font-medium flex items-center gap-1">
                               <AlertCircle className="w-3 h-3" />
                               <span>Failed</span>
@@ -2487,17 +2522,17 @@ const StudyBuddy = () => {
                         {/* Qdrant Indexing Status */}
                         <div className="flex items-center justify-between">
                           <span className="text-gray-500 dark:text-gray-400">Vector Index:</span>
-                          {doc.indexing_status === 'indexed' ? (
+                          {iStatus === 'indexed' ? (
                             <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
                               <Sparkles className="w-3 h-3 text-purple-500" />
                               <span>{doc.indexed_chunk_count || 0} chunks</span>
                             </span>
-                          ) : doc.indexing_status === 'indexing' ? (
+                          ) : iStatus === 'indexing' ? (
                             <span className="text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1">
                               <RefreshCw className="w-3 h-3 animate-spin" />
                               <span>Indexing...</span>
                             </span>
-                          ) : doc.indexing_status === 'failed' ? (
+                          ) : iStatus === 'failed' ? (
                             <span className="text-red-600 dark:text-red-400 font-medium flex items-center gap-1">
                               <AlertCircle className="w-3 h-3" />
                               <span>Indexing Failed</span>

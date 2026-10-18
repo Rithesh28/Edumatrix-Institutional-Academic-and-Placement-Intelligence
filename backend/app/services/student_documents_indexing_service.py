@@ -18,8 +18,9 @@ import hashlib
 import logging
 import uuid
 from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from fastapi import HTTPException, status
 from qdrant_client.http import models
 
@@ -300,13 +301,18 @@ class StudentDocumentsIndexingService:
                 detail=f"Document {document_id} is not eligible for indexing: {reason}"
             )
 
-        # 2. Concurrency protection: conditional update to claim document
+        # 2. Concurrency protection: conditional update to claim document with stale lock recovery
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
         rows_claimed = db.query(StudentStudyDocument).filter(
             StudentStudyDocument.id == document_id,
             StudentStudyDocument.student_id == student_id,
             StudentStudyDocument.is_active == True,
             StudentStudyDocument.processing_status == StudentDocProcessingStatus.EXTRACTED,
-            StudentStudyDocument.indexing_status != StudentDocIndexingStatus.INDEXING
+            or_(
+                StudentStudyDocument.indexing_status != StudentDocIndexingStatus.INDEXING,
+                StudentStudyDocument.updated_at < stale_cutoff,
+                StudentStudyDocument.updated_at.is_(None)
+            )
         ).update({
             StudentStudyDocument.indexing_status: StudentDocIndexingStatus.INDEXING,
             StudentStudyDocument.updated_at: datetime.now(timezone.utc)
@@ -315,7 +321,7 @@ class StudentDocumentsIndexingService:
 
         if rows_claimed == 0:
             current = db.query(StudentStudyDocument).filter(StudentStudyDocument.id == document_id).first()
-            if current and current.indexing_status == StudentDocIndexingStatus.INDEXING:
+            if current and current.indexing_status == StudentDocIndexingStatus.INDEXING and current.updated_at and current.updated_at >= stale_cutoff:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail=f"Document {document_id} is currently being indexed by another process."
@@ -462,6 +468,9 @@ class StudentDocumentsIndexingService:
                 doc.indexing_status = StudentDocIndexingStatus.FAILED
                 doc.indexed_chunk_count = 0
                 doc.extraction_metadata = meta
+                if not doc.extraction_error:
+                    doc.extraction_error = f"Indexing failed: {error_message[:400]}"
+                doc.updated_at = datetime.now(timezone.utc)
                 db.commit()
         except Exception as err:
             logger.error(f"Failed to persist FAILED indexing status for student doc {document_id}: {err}")
