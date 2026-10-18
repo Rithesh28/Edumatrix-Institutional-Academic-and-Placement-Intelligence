@@ -133,8 +133,8 @@ const StudyBuddy = () => {
   // ----------------------------------------------------
   // CHAT STATE & SOURCE MODE
   // ----------------------------------------------------
-  // Source Mode: 'syllabus' (default) | 'lecture_notes' | 'all'
-  const [sourceMode, setSourceMode] = useState('syllabus')
+  // Source Mode: 'lecture_notes' (only student-facing option)
+  const [sourceMode, setSourceMode] = useState('lecture_notes')
   const [messages, setMessages] = useState([])
   const [inputQuestion, setInputQuestion] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
@@ -163,38 +163,12 @@ const StudyBuddy = () => {
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [previewError, setPreviewError] = useState(null)
 
-  const samplePromptsByMode = {
-    syllabus: [
-      'What are the core units covered in this syllabus?',
-      'Explain the fundamental concepts in Unit 1.',
-      'What topics should I prepare for our upcoming assessments?',
-      'Summarize the prerequisites and learning objectives.'
-    ],
-    lecture_notes: [
-      'What key concepts are covered in the lecturer slides?',
-      'Summarize the faculty notes for Unit 1.',
-      'What formulas and examples are detailed in the class materials?',
-      'Explain the practical demonstrations in the lecture notes.'
-    ],
-    all: [
-      'Synthesize the syllabus objectives with the lecturer slides.',
-      'How do the lecturer notes expand on Unit 1 syllabus topics?',
-      'Provide a comprehensive revision guide using syllabus and notes.',
-      'Summarize core curriculum requirements and faculty examples.'
-    ],
-    my_documents: [
-      'Summarize key topics from my uploaded study documents.',
-      'What formulas and definitions are in my personal notes?',
-      'Explain the core concepts highlighted in my uploaded files.',
-      'What practice questions or exercises are in my documents?'
-    ],
-    all_my_sources: [
-      'Synthesize my personal study notes with syllabus and faculty slides.',
-      'Compare what my lecturer presented with my uploaded notes.',
-      'Create an all-inclusive revision plan across all my materials.',
-      'Where do my personal notes complement the official syllabus?'
-    ]
-  }
+  const samplePrompts = [
+    'What key concepts are covered in the lecturer slides?',
+    'Summarize the faculty notes for Unit 1.',
+    'What formulas and examples are detailed in the class materials?',
+    'Explain the practical demonstrations in the lecture notes.'
+  ]
 
   // ----------------------------------------------------
   // PERSONAL STUDY DOCUMENTS STATE (Step 4.6H)
@@ -1404,97 +1378,23 @@ const StudyBuddy = () => {
                 <span>🎯</span>
                 <span>Grounding Source:</span>
               </span>
-              {/* 5-way Segmented Control */}
-              <div className="inline-flex p-0.5 rounded-lg bg-gray-200/80 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs overflow-x-auto max-w-full">
-                <button
-                  type="button"
-                  id="source-mode-syllabus"
-                  onClick={() => setSourceMode('syllabus')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                    sourceMode === 'syllabus'
-                      ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                  }`}
-                >
-                  <span>🏛️</span>
-                  <span>Official Syllabus</span>
-                </button>
-
-                <button
-                  type="button"
+              {/* Single visible option: Lecturer Notes */}
+              <div className="inline-flex p-0.5 rounded-lg bg-gray-200/80 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs">
+                <span
                   id="source-mode-lecture-notes"
-                  onClick={() => setSourceMode('lecture_notes')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                    sourceMode === 'lecture_notes'
-                      ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                  }`}
+                  className="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm flex items-center gap-1.5 cursor-default"
                 >
                   <span>📝</span>
                   <span>Lecturer Notes</span>
-                </button>
-
-                <button
-                  type="button"
-                  id="source-mode-all"
-                  onClick={() => setSourceMode('all')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                    sourceMode === 'all'
-                      ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-semibold'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                  }`}
-                >
-                  <span>🌐</span>
-                  <span>Syllabus + Notes</span>
-                </button>
-
-                <button
-                  type="button"
-                  id="source-mode-my-documents"
-                  onClick={() => setSourceMode('my_documents')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                    sourceMode === 'my_documents'
-                      ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-sm font-semibold'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                  }`}
-                >
-                  <span>📁</span>
-                  <span>My Documents</span>
-                </button>
-
-                <button
-                  type="button"
-                  id="source-mode-all-my-sources"
-                  onClick={() => setSourceMode('all_my_sources')}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 whitespace-nowrap ${
-                    sourceMode === 'all_my_sources'
-                      ? 'bg-white dark:bg-gray-900 text-indigo-600 dark:text-indigo-400 shadow-sm font-semibold'
-                      : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
-                  }`}
-                >
-                  <span>🚀</span>
-                  <span>All My Sources</span>
-                </button>
+                </span>
               </div>
             </div>
 
             {/* Explanatory subtext explaining what is searched */}
             <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
-              {sourceMode === 'syllabus' && (
-                <span>Searches university-approved curriculum, units, and learning objectives.</span>
-              )}
-              {sourceMode === 'lecture_notes' && (
-                <span>Searches published & indexed lecture materials uploaded by your course faculty.</span>
-              )}
-              {sourceMode === 'all' && (
-                <span>Synthesizes across both official syllabus requirements and published lecturer materials.</span>
-              )}
-              {sourceMode === 'my_documents' && (
-                <span>Searches your private uploaded study documents, lecture slides, and notes.</span>
-              )}
-              {sourceMode === 'all_my_sources' && (
-                <span>Comprehensive search synthesizing university syllabus, lecturer course notes, and your personal documents.</span>
-              )}
+              <span>
+                Answers are grounded in published lecturer notes for your course{chatAttachment ? ' and your attached document' : ''}.
+              </span>
             </div>
           </div>
 
@@ -1509,15 +1409,11 @@ const StudyBuddy = () => {
                   How can I help you study today?
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 max-w-md mb-6">
-                  {sourceMode === 'lecture_notes'
-                    ? 'Ask questions about faculty lecture notes, presentation slides, code examples, or exam preparations.'
-                    : sourceMode === 'all'
-                    ? 'Ask questions grounded across both university syllabus guidelines and lecturer course materials.'
-                    : 'Ask questions about course definitions, unit syllabus topics, learning objectives, or exam expectations.'}
+                  Ask questions about faculty lecture notes, presentation slides, code examples, or exam preparations.
                 </p>
 
                 <div className="w-full max-w-lg grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-                  {(samplePromptsByMode[sourceMode] || samplePromptsByMode.syllabus).map((prompt, idx) => (
+                  {samplePrompts.map((prompt, idx) => (
                     <button
                       key={idx}
                       onClick={() => handleSendChat(prompt)}
@@ -1577,27 +1473,7 @@ const StudyBuddy = () => {
                       <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
                         <span className="text-base">⚠️</span>
                         <span>
-                          {msg.sourceMode === 'lecture_notes' ? (
-                            <>
-                              <strong>Notice:</strong> This query is not covered in the published lecturer notes.
-                            </>
-                          ) : msg.sourceMode === 'all' ? (
-                            <>
-                              <strong>Notice:</strong> Insufficient evidence found in both the official syllabus and published lecturer notes.
-                            </>
-                          ) : msg.sourceMode === 'my_documents' ? (
-                            <>
-                              <strong>Notice:</strong> Insufficient evidence found in your uploaded personal study documents.
-                            </>
-                          ) : msg.sourceMode === 'all_my_sources' ? (
-                            <>
-                              <strong>Notice:</strong> Insufficient evidence found across official syllabus, lecturer notes, and personal documents.
-                            </>
-                          ) : (
-                            <>
-                              <strong>Notice:</strong> This query is not covered in the approved syllabus material.
-                            </>
-                          )}
+                          <strong>Notice:</strong> This query is not covered in the published lecturer notes{msg.attachedDocMeta ? ' or your attached document' : ''}.
                         </span>
                       </div>
                     )}
@@ -1766,15 +1642,7 @@ const StudyBuddy = () => {
                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse delay-75" />
                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse delay-150" />
                     <span className="ml-1 text-xs font-medium">
-                      {sourceMode === 'lecture_notes'
-                        ? 'Retrieving published lecturer notes & synthesizing answer...'
-                        : sourceMode === 'all'
-                        ? 'Retrieving syllabus & lecturer notes evidence...'
-                        : sourceMode === 'my_documents'
-                        ? 'Searching your personal documents & synthesizing answer...'
-                        : sourceMode === 'all_my_sources'
-                        ? 'Synthesizing syllabus, lecturer materials, and your documents...'
-                        : 'Retrieving syllabus evidence & synthesizing answer...'}
+                      Retrieving published lecturer notes & synthesizing answer...
                     </span>
                   </div>
                 </div>
@@ -1881,18 +1749,10 @@ const StudyBuddy = () => {
                 }}
                 placeholder={
                   chatAttachment?.status === 'ready'
-                    ? `Ask a question about ${chatAttachment.name}...`
-                    : sourceMode === 'lecture_notes'
-                    ? selectedSubjectId
-                      ? "Ask a question about this subject's lecturer notes..."
-                      : "Ask about any lecturer notes in your department..."
-                    : sourceMode === 'all'
-                    ? selectedSubjectId
-                      ? "Ask across syllabus & lecturer notes for this subject..."
-                      : "Ask across syllabus & lecturer notes in your department..."
+                    ? `Ask a question about ${chatAttachment.name} & lecturer notes...`
                     : selectedSubjectId
-                    ? "Ask a question about this subject's syllabus..."
-                    : "Ask about any syllabus topic in your department..."
+                    ? "Ask a question about this subject's lecturer notes..."
+                    : "Ask about any lecturer notes in your department..."
                 }
                 disabled={isChatLoading}
                 className="flex-1 text-sm bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"

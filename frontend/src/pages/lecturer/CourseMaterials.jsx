@@ -28,7 +28,8 @@ import {
   AlertCircle,
   FileCheck,
   FileClock,
-  FileWarning
+  FileWarning,
+  Plus
 } from 'lucide-react'
 
 // Constants matching backend Step 4.6B / 4.6B.1
@@ -167,6 +168,19 @@ export default function LecturerCourseMaterials() {
   const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
 
+  // Add Subject Modal State (Part B)
+  const [isAddSubjectModalOpen, setIsAddSubjectModalOpen] = useState(false)
+  const [subjectFormData, setSubjectFormData] = useState({
+    code: '',
+    name: '',
+    semester: '',
+    curriculum_version: '2024.1',
+    academic_year: '2026-2027',
+    description: ''
+  })
+  const [isCreatingSubject, setIsCreatingSubject] = useState(false)
+  const [subjectFormError, setSubjectFormError] = useState('')
+
   const fileInputRef = useRef(null)
 
   // 1. Fetch authorized subjects on mount
@@ -174,13 +188,13 @@ export default function LecturerCourseMaterials() {
     fetchSubjects()
   }, [])
 
-  const fetchSubjects = async () => {
+  const fetchSubjects = async (preserveSelection = false) => {
     setLoadingSubjects(true)
     try {
       const res = await studyBuddyAPI.getSubjects()
       const data = res.data || []
       setSubjects(data)
-      if (data.length > 0) {
+      if (data.length > 0 && !preserveSelection) {
         setSelectedSemester(String(data[0].semester))
         setSelectedSubjectId(String(data[0].id))
       }
@@ -189,6 +203,68 @@ export default function LecturerCourseMaterials() {
       toast.error('Failed to load authorized subjects.')
     } finally {
       setLoadingSubjects(false)
+    }
+  }
+
+  const handleOpenAddSubjectModal = () => {
+    setSubjectFormData({
+      code: '',
+      name: '',
+      semester: selectedSemester || '1',
+      curriculum_version: '2024.1',
+      academic_year: '2026-2027',
+      description: ''
+    })
+    setSubjectFormError('')
+    setIsAddSubjectModalOpen(true)
+  }
+
+  const handleCreateSubject = async (e) => {
+    e.preventDefault()
+    setSubjectFormError('')
+
+    const code = (subjectFormData.code || '').trim().toUpperCase()
+    const name = (subjectFormData.name || '').trim()
+    const sem = Number(subjectFormData.semester)
+
+    if (!code || !name) {
+      setSubjectFormError('Subject code and subject name are required.')
+      return
+    }
+
+    if (!sem || sem < 1 || sem > 8) {
+      setSubjectFormError('Please select a valid semester between 1 and 8.')
+      return
+    }
+
+    setIsCreatingSubject(true)
+    try {
+      const payload = {
+        code,
+        name,
+        department: user?.department || undefined,
+        semester: sem,
+        curriculum_version: (subjectFormData.curriculum_version || '').trim() || '2024.1',
+        academic_year: (subjectFormData.academic_year || '').trim() || '2026-2027',
+        description: (subjectFormData.description || '').trim() || undefined
+      }
+
+      const res = await studyBuddyAPI.createSubject(payload)
+      const created = res.data
+      toast.success(`Subject ${created.code} — ${created.name} created successfully!`)
+      setIsAddSubjectModalOpen(false)
+
+      // Refresh subjects and auto-select newly created subject
+      await fetchSubjects(true)
+      setSelectedSemester(String(created.semester))
+      setSelectedSubjectId(String(created.id))
+    } catch (err) {
+      console.error('Failed to create subject:', err)
+      const detail = err.response?.data?.detail || 'Failed to create subject.'
+      setSubjectFormError(detail)
+      toast.error(detail)
+    } finally {
+      setIsCreatingSubject(false)
     }
   }
 
@@ -608,6 +684,16 @@ export default function LecturerCourseMaterials() {
           </button>
 
           <button
+            id="btn-open-add-subject"
+            onClick={handleOpenAddSubjectModal}
+            className="flex items-center space-x-2 px-3.5 py-2.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-750 font-medium text-sm shadow-sm transition-colors cursor-pointer"
+            title="Add a new academic subject"
+          >
+            <Plus className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+            <span>Add Subject</span>
+          </button>
+
+          <button
             id="upload-note-btn"
             onClick={handleOpenUploadModal}
             disabled={!activeSubject}
@@ -655,23 +741,43 @@ export default function LecturerCourseMaterials() {
                   Please select a semester first
                 </div>
               ) : availableSubjectsForSemester.length === 0 ? (
-                <div className="px-3.5 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-sm">
-                  No active subjects for Sem {selectedSemester}
+                <div className="flex items-center justify-between gap-2 px-3.5 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-400 text-sm">
+                  <span className="truncate">No active subjects for Sem {selectedSemester}</span>
+                  <button
+                    id="btn-add-subject-empty"
+                    type="button"
+                    onClick={handleOpenAddSubjectModal}
+                    className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 shrink-0 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add</span>
+                  </button>
                 </div>
               ) : (
-                <select
-                  id="subject-selector"
-                  value={selectedSubjectId}
-                  onChange={(e) => setSelectedSubjectId(e.target.value)}
-                  className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-medium text-sm transition-colors"
-                >
-                  <option value="">-- Select Subject --</option>
-                  {availableSubjectsForSemester.map((sub) => (
-                    <option key={sub.id} value={sub.id}>
-                      {sub.code} — {sub.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    id="subject-selector"
+                    value={selectedSubjectId}
+                    onChange={(e) => setSelectedSubjectId(e.target.value)}
+                    className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 font-medium text-sm transition-colors"
+                  >
+                    <option value="">-- Select Subject --</option>
+                    {availableSubjectsForSemester.map((sub) => (
+                      <option key={sub.id} value={sub.id}>
+                        {sub.code} — {sub.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    id="btn-quick-add-subject"
+                    type="button"
+                    onClick={handleOpenAddSubjectModal}
+                    title="Add new subject"
+                    className="p-2.5 rounded-lg border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 transition-colors shrink-0 cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -1466,6 +1572,182 @@ export default function LecturerCourseMaterials() {
                 <span>{isDeleting ? 'Deleting...' : 'Delete Permanently'}</span>
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* --------------------------------------------------------------------- */}
+      {/* Add Subject Modal (Part B)                                            */}
+      {/* --------------------------------------------------------------------- */}
+      {isAddSubjectModalOpen && (
+        <div
+          id="add-subject-modal"
+          className="fixed inset-0 z-50 overflow-y-auto bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 max-w-lg w-full shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900 dark:text-white">Add Academic Subject</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    Create a new subject for {user?.department || 'your department'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddSubjectModalOpen(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {subjectFormError && (
+              <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900/60 text-xs text-red-700 dark:text-red-300 flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{subjectFormError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleCreateSubject} className="space-y-3.5">
+              {/* Department (Read-only / Authorized Scope) */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Department
+                </label>
+                <input
+                  type="text"
+                  value={user?.department || 'AIML'}
+                  disabled
+                  className="w-full px-3.5 py-2 rounded-lg bg-gray-100 dark:bg-gray-800/60 border border-gray-300 dark:border-gray-700 text-gray-500 dark:text-gray-400 text-sm font-semibold cursor-not-allowed"
+                />
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Locked to your authorized faculty department.
+                </p>
+              </div>
+
+              {/* Semester Selector */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Semester <span className="text-red-500">*</span>
+                </label>
+                <select
+                  id="create-subject-semester"
+                  value={subjectFormData.semester}
+                  onChange={(e) => setSubjectFormData((prev) => ({ ...prev, semester: e.target.value }))}
+                  required
+                  className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500"
+                >
+                  {SEMESTERS.map((sem) => (
+                    <option key={sem} value={sem}>
+                      Semester {sem}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Subject Code */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Subject Code <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="create-subject-code"
+                  type="text"
+                  placeholder="e.g., CS601, AIML602"
+                  value={subjectFormData.code}
+                  onChange={(e) => setSubjectFormData((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))}
+                  required
+                  className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white text-sm uppercase focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Subject Name */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Subject Name <span className="text-red-500">*</span>
+                </label>
+                <input
+                  id="create-subject-name"
+                  type="text"
+                  placeholder="e.g., Deep Learning Architecture"
+                  value={subjectFormData.name}
+                  onChange={(e) => setSubjectFormData((prev) => ({ ...prev, name: e.target.value }))}
+                  required
+                  className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {/* Curriculum Version & Academic Year */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Curriculum Version
+                  </label>
+                  <input
+                    id="create-subject-curriculum"
+                    type="text"
+                    placeholder="2024.1"
+                    value={subjectFormData.curriculum_version}
+                    onChange={(e) => setSubjectFormData((prev) => ({ ...prev, curriculum_version: e.target.value }))}
+                    className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    Academic Year
+                  </label>
+                  <input
+                    id="create-subject-academic-year"
+                    type="text"
+                    placeholder="2026-2027"
+                    value={subjectFormData.academic_year}
+                    onChange={(e) => setSubjectFormData((prev) => ({ ...prev, academic_year: e.target.value }))}
+                    className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                  Description (Optional)
+                </label>
+                <textarea
+                  id="create-subject-description"
+                  rows={2}
+                  placeholder="Brief course objectives..."
+                  value={subjectFormData.description}
+                  onChange={(e) => setSubjectFormData((prev) => ({ ...prev, description: e.target.value }))}
+                  className="w-full px-3.5 py-2 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-white text-sm focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAddSubjectModalOpen(false)}
+                  disabled={isCreatingSubject}
+                  className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  id="btn-submit-create-subject"
+                  type="submit"
+                  disabled={isCreatingSubject}
+                  className="flex items-center space-x-2 px-5 py-2 text-sm font-semibold rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {isCreatingSubject && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  <span>{isCreatingSubject ? 'Creating...' : 'Create Subject'}</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

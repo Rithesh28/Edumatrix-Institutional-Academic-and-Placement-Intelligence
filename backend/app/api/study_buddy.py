@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File 
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 
 from ..core.database import get_db
 from ..api.auth import get_current_user
@@ -292,40 +293,62 @@ async def create_subject(
 ):
     """
     Create a new academic subject.
-    Authorized: Admin, HOD (for own department only).
+    Authorized: Admin, HOD, and Lecturer (for own department only).
     """
     verify_study_buddy_access(current_user)
 
-    if current_user.role not in [UserRole.ADMIN, UserRole.HOD]:
+    if current_user.role not in [UserRole.ADMIN, UserRole.HOD, UserRole.LECTURER]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only Administrators and HODs can create subjects."
+            detail="Only Administrators, HODs, and Lecturers can create subjects."
         )
 
-    dept = payload.department or current_user.department
-    if not dept:
+    # Resolve and validate department scoping
+    if current_user.role in [UserRole.HOD, UserRole.LECTURER]:
+        user_dept = _get_user_department(current_user)
+        if not user_dept:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User has no assigned academic department."
+            )
+        if payload.department and _normalize_dept(payload.department) != _normalize_dept(user_dept):
+            role_title = "Lecturers" if current_user.role == UserRole.LECTURER else "HODs"
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"{role_title} cannot create subjects for another department."
+            )
+        dept = user_dept
+    else:
+        dept = payload.department or current_user.department
+        if not dept:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Department is required to create a subject."
+            )
+
+    # Validate semester (must be an integer between 1 and 8)
+    if payload.semester is None or not (1 <= payload.semester <= 8):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Department is required to create a subject."
-        )
-
-    if current_user.role == UserRole.HOD and _normalize_dept(dept) != _normalize_dept(current_user.department):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="HOD cannot create subjects for another department."
+            detail="Semester must be an integer between 1 and 8."
         )
 
     code = payload.code.strip().upper()
-    existing = db.query(Subject).filter(
+    curriculum_ver = payload.curriculum_version.strip() if payload.curriculum_version else None
+
+    # Uniqueness check: duplicate subject code within department and curriculum version
+    existing_query = db.query(Subject).filter(
         Subject.code == code,
-        func.lower(Subject.department) == func.lower(dept),
-        Subject.curriculum_version == payload.curriculum_version
-    ).first()
+        func.lower(Subject.department) == func.lower(dept)
+    )
+    if curriculum_ver:
+        existing_query = existing_query.filter(Subject.curriculum_version == curriculum_ver)
+    existing = existing_query.first()
 
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Subject with code '{code}' already exists for department '{dept}' (curriculum version: {payload.curriculum_version})."
+            detail=f"Subject with code '{code}' already exists for department '{dept}'."
         )
 
     new_subject = Subject(
@@ -333,14 +356,30 @@ async def create_subject(
         name=payload.name.strip(),
         department=dept,
         semester=payload.semester,
-        academic_year=payload.academic_year,
-        curriculum_version=payload.curriculum_version,
-        description=payload.description,
+        academic_year=payload.academic_year.strip() if payload.academic_year else None,
+        curriculum_version=curriculum_ver,
+        description=payload.description.strip() if payload.description else None,
         is_active=True
     )
-    db.add(new_subject)
-    db.commit()
-    db.refresh(new_subject)
+
+    try:
+        db.add(new_subject)
+        db.commit()
+        db.refresh(new_subject)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Subject with code '{code}' already exists for department '{dept}'."
+        )
+
+    # If lecturer created the subject, assign it to their lecturer profile so they can upload notes immediately
+    if current_user.role == UserRole.LECTURER and current_user.lecturer_profile:
+        current_assigned = list(current_user.lecturer_profile.subjects or [])
+        if code not in [str(c).strip().upper() for c in current_assigned]:
+            current_assigned.append(code)
+            current_user.lecturer_profile.subjects = current_assigned
+            db.commit()
 
     return _build_subject_response(new_subject, db)
 
