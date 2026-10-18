@@ -5,7 +5,7 @@ Job Posting Model for Placement Management
 from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Enum, JSON
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from ..core.database import Base
 import enum
@@ -26,6 +26,7 @@ class JobPosting(Base):
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
+    file_id = Column(UUID(as_uuid=True), ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True)
     required_skills = Column(JSONB, nullable=True, default=[])  # List of skills
     preferred_skills = Column(JSONB, nullable=True, default=[])  # List of preferred skills
     experience_level = Column(String(50), nullable=True)
@@ -43,6 +44,7 @@ class JobPosting(Base):
     
     # Relationships
     company = relationship("Company", back_populates="job_postings")
+    file = relationship("File", foreign_keys=[file_id], lazy="joined")
     applications = relationship("Application", back_populates="job_posting", cascade="all, delete-orphan")
     shortlists = relationship("Shortlist", back_populates="job_posting")
     rounds = relationship("RecruitmentRound", back_populates="job_posting", cascade="all, delete-orphan", order_by="RecruitmentRound.round_number")
@@ -57,6 +59,8 @@ class JobPosting(Base):
             "company_name": self.company.name if self.company else None,
             "title": self.title,
             "description": self.description,
+            "file_id": str(self.file_id) if self.file_id else None,
+            "file_name": self.file.filename if self.file else None,
             "application_url": self.application_url,
             "required_skills": self.required_skills or [],
             "preferred_skills": self.preferred_skills or [],

@@ -83,7 +83,7 @@ class TestRecruitmentNotifications(unittest.TestCase):
             new_comp = requests.post(
                 f"{BASE_URL}/placement/companies",
                 headers=cls.po_headers,
-                json={"name": "Recruitment Notification Labs", "industry": "Technology"}
+                json={"name": "Recruitment Notification Labs", "industry": "Technology", "location": "Bangalore"}
             )
             cls.company_id = new_comp.json()["id"]
             cls.company_name = "Recruitment Notification Labs"

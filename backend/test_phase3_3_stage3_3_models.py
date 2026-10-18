@@ -447,10 +447,32 @@ class TestStage331ModelsAndMigration(unittest.TestCase):
     # Test 13: Migration head and unchanged legacy statuses
     # -------------------------------------------------------------------------
     def test_13_migration_head_and_legacy_status_preservation(self):
-        """Verify Alembic current revision is 015 and existing application/profile statuses were untouched."""
+        """Verify Alembic database revision matches current configured script head and existing application/profile statuses were untouched."""
+        import os
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
         result = self.db.execute(sa.text("SELECT version_num FROM alembic_version")).fetchone()
-        self.assertIsNotNone(result)
-        self.assertEqual(result[0], "015", "Alembic head revision must be 015")
+        self.assertIsNotNone(result, "alembic_version table must have an active revision record")
+
+        # Dynamically discover configured Alembic script heads
+        alembic_ini_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alembic.ini")
+        if not os.path.exists(alembic_ini_path):
+            alembic_ini_path = "alembic.ini"
+
+        alembic_cfg = Config(alembic_ini_path)
+        script_dir = ScriptDirectory.from_config(alembic_cfg)
+        script_heads = script_dir.get_heads()
+
+        # Enforce project's single-head migration policy
+        self.assertEqual(len(script_heads), 1, f"Expected single migration head, found multiple: {script_heads}")
+        expected_head = script_heads[0]
+
+        self.assertEqual(
+            result[0],
+            expected_head,
+            f"Database revision ({result[0]}) must match Alembic script head ({expected_head})"
+        )
 
         # Verify that applications exist and retain valid status
         app_count = self.db.query(Application).count()

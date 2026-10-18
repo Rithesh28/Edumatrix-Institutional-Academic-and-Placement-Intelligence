@@ -51,7 +51,7 @@ class TestExternalApplicationUrl(unittest.TestCase):
             new_comp = requests.post(
                 f"{BASE_URL}/placement/companies",
                 headers=cls.po_headers,
-                json={"name": "External URL Test Corp", "industry": "Technology"}
+                json={"name": "External URL Test Corp", "industry": "Technology", "location": "Bangalore"}
             )
             cls.company_id = new_comp.json()["id"]
 

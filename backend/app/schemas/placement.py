@@ -39,15 +39,25 @@ class ApplicationStatus(str, Enum):
 
 class CompanyBase(BaseModel):
     """Base company schema."""
-    name: str = Field(..., max_length=255, description="Company name")
+    name: str = Field(..., min_length=1, max_length=255, description="Company name")
     description: Optional[str] = Field(None, description="Company description")
     website: Optional[str] = Field(None, max_length=255, description="Company website")
-    industry: Optional[str] = Field(None, max_length=100, description="Industry type")
-    location: Optional[str] = Field(None, max_length=255, description="Company location")
+    industry: str = Field(..., min_length=1, max_length=100, description="Industry type")
+    location: str = Field(..., min_length=1, max_length=255, description="Company location")
     contact_email: Optional[str] = Field(None, max_length=255, description="Contact email")
     contact_phone: Optional[str] = Field(None, max_length=50, description="Contact phone")
     logo_url: Optional[str] = Field(None, max_length=500, description="Company logo URL")
     is_active: bool = Field(True, description="Whether company is active")
+
+    @field_validator("name", "industry", "location")
+    @classmethod
+    def validate_non_blank_string(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v_clean = v.strip()
+        if not v_clean:
+            raise ValueError("Field cannot be blank or whitespace-only")
+        return v_clean
 
 
 class CompanyCreate(CompanyBase):
@@ -67,10 +77,22 @@ class CompanyUpdate(BaseModel):
     logo_url: Optional[str] = Field(None, max_length=500)
     is_active: Optional[bool] = None
 
+    @field_validator("name", "industry", "location")
+    @classmethod
+    def validate_optional_non_blank_string(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            v_clean = v.strip()
+            if not v_clean:
+                raise ValueError("Field cannot be blank or whitespace-only")
+            return v_clean
+        return v
+
 
 class CompanyResponse(CompanyBase):
     """Schema for company response."""
     id: int
+    industry: Optional[str] = Field(None, description="Industry type")
+    location: Optional[str] = Field(None, description="Company location")
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -107,6 +129,7 @@ class JobPostingBase(BaseModel):
     company_id: int = Field(..., description="Company ID")
     title: str = Field(..., max_length=255, description="Job title")
     description: Optional[str] = Field(None, description="Job description")
+    file_id: Optional[UUID] = Field(None, description="Optional attached document file ID (UUID from files table)")
     required_skills: List[str] = Field(default=[], description="Required skills")
     preferred_skills: List[str] = Field(default=[], description="Preferred skills")
     experience_level: Optional[str] = Field(None, max_length=50, description="Experience level required")
@@ -135,6 +158,7 @@ class JobPostingUpdate(BaseModel):
     company_id: Optional[int] = None
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
+    file_id: Optional[UUID] = Field(None, description="Optional attached document file ID (UUID from files table)")
     required_skills: Optional[List[str]] = None
     preferred_skills: Optional[List[str]] = None
     experience_level: Optional[str] = Field(None, max_length=50)
@@ -161,6 +185,7 @@ class JobPostingResponse(JobPostingBase):
     
     # Additional fields from relationships
     company_name: Optional[str] = None  # Make sure this exists
+    file_name: Optional[str] = Field(None, description="Filename of attached document if present")
     applications_count: Optional[int] = Field(0, description="Number of applications")
     shortlisted_count: Optional[int] = Field(0, description="Number of shortlisted students")
     

@@ -52,12 +52,31 @@ const CompanyForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!formData.name.trim()) {
+      toast.error('Company name is required');
+      return;
+    }
+    if (!formData.industry.trim()) {
+      toast.error('Industry is required');
+      return;
+    }
+    if (!formData.location.trim()) {
+      toast.error('Location is required');
+      return;
+    }
+
     try {
+      const payload = {
+        ...formData,
+        name: formData.name.trim(),
+        industry: formData.industry.trim(),
+        location: formData.location.trim(),
+      };
       if (isEditing) {
-        await updateCompany(id, formData);
+        await updateCompany(id, payload);
         toast.success('Company updated successfully');
       } else {
-        await createCompany(formData);
+        await createCompany(payload);
         toast.success('Company created successfully');
       }
       navigate('/placement/companies');
@@ -145,11 +164,12 @@ const CompanyForm = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Industry
+                Industry <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 name="industry"
+                required
                 value={formData.industry}
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
@@ -160,11 +180,12 @@ const CompanyForm = () => {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Location
+              Location <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
               name="location"
+              required
               value={formData.location}
               onChange={handleChange}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"

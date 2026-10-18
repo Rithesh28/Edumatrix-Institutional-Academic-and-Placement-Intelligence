@@ -25,6 +25,7 @@ from ..models.user import User, UserRole
 from ..models.profile import StudentProfile, Skill, StudentProfileExtended, PlacementStatus
 from ..models.resume import Resume
 from ..models.notification import Notification
+from ..models.file import File, FileStatus
 from ..schemas.placement import (
     CompanyCreate, CompanyUpdate,
     JobPostingCreate, JobPostingUpdate,
@@ -109,10 +110,19 @@ class PlacementService:
     
     def create_job_posting(self, db: Session, job_data: JobPostingCreate, created_by: int) -> JobPosting:
         """Create a new job posting (defaults to DRAFT status)."""
+        # Validate attached file if specified
+        if getattr(job_data, "file_id", None) is not None:
+            file_rec = db.query(File).filter(File.id == job_data.file_id).first()
+            if not file_rec:
+                raise ValueError(f"Attached file with ID {job_data.file_id} not found")
+            if file_rec.status == FileStatus.DELETED:
+                raise ValueError(f"Attached file with ID {job_data.file_id} has been deleted")
+
         job = JobPosting(
             company_id=job_data.company_id,
             title=job_data.title,
             description=job_data.description,
+            file_id=getattr(job_data, 'file_id', None),
             required_skills=job_data.required_skills,
             preferred_skills=getattr(job_data, 'preferred_skills', []),
             experience_level=job_data.experience_level,
@@ -242,17 +252,20 @@ class PlacementService:
         return notif_count
     
     def get_job_posting(self, db: Session, job_id: int) -> Optional[JobPosting]:
-        """Get a job posting by ID with company data."""
+        """Get a job posting by ID with company and file data."""
         return db.query(JobPosting).options(
-            joinedload(JobPosting.company)  # Make sure company is joined
+            joinedload(JobPosting.company),
+            joinedload(JobPosting.file)
         ).filter(JobPosting.id == job_id).first()
 
     def get_job_postings(self, db: Session, skip: int = 0, limit: int = 100, 
                         company_id: Optional[int] = None, 
                         status: Optional[JobStatus] = None) -> List[JobPosting]:
         """Get all job postings with filters."""
-        query = db.query(JobPosting).options(joinedload(JobPosting.company))  # Join company
-        # ... rest of the code
+        query = db.query(JobPosting).options(
+            joinedload(JobPosting.company),
+            joinedload(JobPosting.file)
+        )
         
         if company_id:
             query = query.filter(JobPosting.company_id == company_id)
@@ -269,6 +282,15 @@ class PlacementService:
         
         old_status = job.status
         update_dict = job_data.model_dump(exclude_unset=True)
+
+        # Validate attached file if being updated
+        if "file_id" in update_dict and update_dict["file_id"] is not None:
+            file_rec = db.query(File).filter(File.id == update_dict["file_id"]).first()
+            if not file_rec:
+                raise ValueError(f"Attached file with ID {update_dict['file_id']} not found")
+            if file_rec.status == FileStatus.DELETED:
+                raise ValueError(f"Attached file with ID {update_dict['file_id']} has been deleted")
+
         for key, value in update_dict.items():
             setattr(job, key, value)
         

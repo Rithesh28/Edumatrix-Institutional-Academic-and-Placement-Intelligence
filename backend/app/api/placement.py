@@ -156,10 +156,15 @@ async def create_job_posting(
     db: Session = Depends(get_db)
 ):
     """Create a new job posting."""
-    job = placement_service.create_job_posting(db, job_data, current_user.id)
+    try:
+        job = placement_service.create_job_posting(db, job_data, current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     response = JobPostingResponse.model_validate(job)
     if job.company:
         response.company_name = job.company.name
+    if job.file:
+        response.file_name = job.file.filename
     return response
 
 
@@ -183,6 +188,8 @@ async def get_job_postings(
         response = JobPostingResponse.model_validate(job)
         if job.company:
             response.company_name = job.company.name
+        if job.file:
+            response.file_name = job.file.filename
         responses.append(response)
     return responses
 
@@ -205,6 +212,8 @@ async def get_job_posting(
     response = JobPostingResponse.model_validate(job)
     if job.company:
         response.company_name = job.company.name
+    if job.file:
+        response.file_name = job.file.filename
     return response
 
 
@@ -216,12 +225,17 @@ async def update_job_posting(
     db: Session = Depends(get_db)
 ):
     """Update a job posting."""
-    job = placement_service.update_job_posting(db, job_id, job_data)
+    try:
+        job = placement_service.update_job_posting(db, job_id, job_data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not job:
         raise HTTPException(status_code=404, detail="Job posting not found")
     response = JobPostingResponse.model_validate(job)
     if job.company:
         response.company_name = job.company.name
+    if job.file:
+        response.file_name = job.file.filename
     return response
 
 

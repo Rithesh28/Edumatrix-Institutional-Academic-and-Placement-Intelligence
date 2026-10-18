@@ -82,7 +82,7 @@ class TestExternalApplicationConfirmation(unittest.TestCase):
             new_comp = requests.post(
                 f"{BASE_URL}/placement/companies",
                 headers=cls.po_headers,
-                json={"name": "Step 2.2 Confirmation Corp", "industry": "Technology"}
+                json={"name": "Step 2.2 Confirmation Corp", "industry": "Technology", "location": "Bangalore"}
             )
             cls.company_id = new_comp.json()["id"]
 
