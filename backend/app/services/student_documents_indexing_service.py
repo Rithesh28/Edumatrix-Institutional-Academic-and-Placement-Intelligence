@@ -56,6 +56,9 @@ class StudentDocumentsIndexingService:
         Idempotently verify or initialize the dedicated 'study_buddy_chunks' collection.
         Creates payload indexes needed for private student document filtering.
         """
+        if self._collection_verified:
+            return True
+
         if not qdrant_client.client:
             logger.error("Qdrant client is not available")
             return False

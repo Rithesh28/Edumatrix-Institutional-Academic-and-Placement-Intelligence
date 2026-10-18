@@ -1737,8 +1737,8 @@ async def upload_student_study_document(
         reuse_existing=reuse_existing
     )
 
-    # Auto-index into Qdrant if text extraction was successful
-    if doc.processing_status == StudentDocProcessingStatus.EXTRACTED:
+    # Auto-index into Qdrant if text extraction was successful and not already indexed
+    if doc.processing_status == StudentDocProcessingStatus.EXTRACTED and doc.indexing_status != StudentDocIndexingStatus.INDEXED:
         try:
             student_documents_indexing_service.index_student_document(db, doc.id, current_user.id)
             db.refresh(doc)

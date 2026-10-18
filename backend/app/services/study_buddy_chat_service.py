@@ -46,7 +46,7 @@ from .lecture_notes_indexing_service import (
 )
 from .student_documents_indexing_service import student_documents_indexing_service
 from .ai_generator_service import ai_generator
-from ..core.study_buddy_timing import record_perf_metric
+from ..core.study_buddy_timing import record_perf_metric, PerfTimer
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +127,8 @@ class StudyBuddyChatService:
         query: str,
         current_user: User,
         subject_id: Optional[int] = None,
-        limit: int = 5
+        limit: int = 5,
+        precomputed_vector: Optional[List[float]] = None
     ) -> List[Dict[str, Any]]:
         """
         Retrieve authorized lecture note chunks with strict PostgreSQL boundary checks.
@@ -149,10 +150,15 @@ class StudyBuddyChatService:
             return []
 
         t0_retrieval = time.perf_counter()
-        # Generate query vector
-        t0_embed = time.perf_counter()
-        query_vector = embedding_service.embed_text(query)
-        embed_ms = (time.perf_counter() - t0_embed) * 1000.0
+        # Generate or reuse query vector
+        if precomputed_vector:
+            query_vector = precomputed_vector
+            embed_ms = 0.0
+        else:
+            t0_embed = time.perf_counter()
+            query_vector = embedding_service.embed_text(query)
+            embed_ms = (time.perf_counter() - t0_embed) * 1000.0
+
         if not query_vector:
             return []
 
@@ -210,24 +216,29 @@ class StudyBuddyChatService:
             return []
         qdrant_ms = (time.perf_counter() - t0_qdrant) * 1000.0
 
-        # Authoritative secondary validation against PostgreSQL
+        # Authoritative secondary validation against PostgreSQL (batched to eliminate N+1 queries)
         t0_db = time.perf_counter()
         formatted = []
-        for r in results:
-            note_id = r.payload.get("lecture_note_id")
-            if not note_id:
-                continue
-
-            note = db.query(LectureNote).join(Subject).filter(
-                LectureNote.id == note_id,
+        candidate_note_ids = list({r.payload.get("lecture_note_id") for r in results if r.payload.get("lecture_note_id")})
+        notes_by_id = {}
+        if candidate_note_ids:
+            matching_notes = db.query(LectureNote).join(Subject).filter(
+                LectureNote.id.in_(candidate_note_ids),
                 LectureNote.is_published == True,
                 LectureNote.status == LectureNoteStatus.PUBLISHED,
                 LectureNote.processing_status == LectureNoteProcessingStatus.EXTRACTED,
                 LectureNote.indexing_status == LectureNoteIndexingStatus.INDEXED,
                 LectureNote.indexed_chunk_count > 0,
                 Subject.is_active == True
-            ).first()
+            ).all()
+            notes_by_id = {n.id: n for n in matching_notes}
 
+        for r in results:
+            note_id = r.payload.get("lecture_note_id")
+            if not note_id:
+                continue
+
+            note = notes_by_id.get(note_id)
             if not note:
                 # Discard stale or invalidated Qdrant point
                 continue
@@ -299,7 +310,8 @@ class StudyBuddyChatService:
         current_user: User,
         subject_id: Optional[int] = None,
         limit: int = 5,
-        student_study_document_id: Optional[int] = None
+        student_study_document_id: Optional[int] = None,
+        precomputed_vector: Optional[List[float]] = None
     ) -> List[Dict[str, Any]]:
         """
         Retrieve authorized student study document chunks with strict PostgreSQL boundary checks.
@@ -328,10 +340,15 @@ class StudyBuddyChatService:
             return []
 
         t0_retrieval = time.perf_counter()
-        # Generate query vector
-        t0_embed = time.perf_counter()
-        query_vector = embedding_service.embed_text(query)
-        embed_ms = (time.perf_counter() - t0_embed) * 1000.0
+        # Generate or reuse query vector
+        if precomputed_vector:
+            query_vector = precomputed_vector
+            embed_ms = 0.0
+        else:
+            t0_embed = time.perf_counter()
+            query_vector = embedding_service.embed_text(query)
+            embed_ms = (time.perf_counter() - t0_embed) * 1000.0
+
         if not query_vector:
             return []
 
@@ -391,10 +408,23 @@ class StudyBuddyChatService:
 
         user_dept = _get_user_department(current_user)
 
-        # Authoritative secondary validation against PostgreSQL
+        # Authoritative secondary validation against PostgreSQL (batched to eliminate N+1 queries)
         # NEVER rely on Qdrant filters as the authorization boundary!
         t0_db = time.perf_counter()
         formatted = []
+        candidate_doc_ids = list({r.payload.get("student_study_document_id") for r in results if r.payload.get("student_study_document_id")})
+        docs_by_id = {}
+        if candidate_doc_ids:
+            matching_docs = db.query(StudentStudyDocument).filter(
+                StudentStudyDocument.id.in_(candidate_doc_ids),
+                StudentStudyDocument.student_id == current_user.id,
+                StudentStudyDocument.is_active == True,
+                StudentStudyDocument.processing_status == StudentDocProcessingStatus.EXTRACTED,
+                StudentStudyDocument.indexing_status == StudentDocIndexingStatus.INDEXED,
+                StudentStudyDocument.indexed_chunk_count > 0
+            ).all()
+            docs_by_id = {d.id: d for d in matching_docs}
+
         for r in results:
             doc_id = r.payload.get("student_study_document_id")
             if not doc_id:
@@ -403,15 +433,7 @@ class StudyBuddyChatService:
             if student_study_document_id is not None and doc_id != student_study_document_id:
                 continue
 
-            doc = db.query(StudentStudyDocument).filter(
-                StudentStudyDocument.id == doc_id,
-                StudentStudyDocument.student_id == current_user.id,
-                StudentStudyDocument.is_active == True,
-                StudentStudyDocument.processing_status == StudentDocProcessingStatus.EXTRACTED,
-                StudentStudyDocument.indexing_status == StudentDocIndexingStatus.INDEXED,
-                StudentStudyDocument.indexed_chunk_count > 0
-            ).first()
-
+            doc = docs_by_id.get(doc_id)
             if not doc:
                 # Discard stale, deleted, deactivated, failed, non-indexed, or foreign-owner chunks
                 continue
@@ -474,7 +496,8 @@ class StudyBuddyChatService:
         current_user: User,
         subject_id: Optional[int] = None,
         source_mode: str = "syllabus",
-        limit: int = 5
+        limit: int = 5,
+        precomputed_vector: Optional[List[float]] = None
     ) -> List[Dict[str, Any]]:
         """
         Unified search router dispatching to syllabus, lecture_notes, my_documents, or combinations.
@@ -490,13 +513,13 @@ class StudyBuddyChatService:
         if mode == "syllabus":
             return self.search_syllabus_chunks(db, query, current_user, subject_id, limit)
         elif mode == "lecture_notes":
-            return self.search_lecture_note_chunks(db, query, current_user, subject_id, limit)
+            return self.search_lecture_note_chunks(db, query, current_user, subject_id, limit, precomputed_vector=precomputed_vector)
         elif mode == "my_documents":
-            return self.search_student_document_chunks(db, query, current_user, subject_id, limit)
+            return self.search_student_document_chunks(db, query, current_user, subject_id, limit, precomputed_vector=precomputed_vector)
         elif mode == "all":
             # Existing combined syllabus + lecture_notes behavior, unchanged
             s_chunks = self.search_syllabus_chunks(db, query, current_user, subject_id, limit)
-            l_chunks = self.search_lecture_note_chunks(db, query, current_user, subject_id, limit)
+            l_chunks = self.search_lecture_note_chunks(db, query, current_user, subject_id, limit, precomputed_vector=precomputed_vector)
             combined = s_chunks + l_chunks
             combined.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
 
@@ -514,8 +537,8 @@ class StudyBuddyChatService:
             return deduped
         elif mode == "all_my_sources":
             s_chunks = self.search_syllabus_chunks(db, query, current_user, subject_id, limit)
-            l_chunks = self.search_lecture_note_chunks(db, query, current_user, subject_id, limit)
-            m_chunks = self.search_student_document_chunks(db, query, current_user, subject_id, limit)
+            l_chunks = self.search_lecture_note_chunks(db, query, current_user, subject_id, limit, precomputed_vector=precomputed_vector)
+            m_chunks = self.search_student_document_chunks(db, query, current_user, subject_id, limit, precomputed_vector=precomputed_vector)
             combined = s_chunks + l_chunks + m_chunks
             combined.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
 
@@ -645,13 +668,19 @@ class StudyBuddyChatService:
         auth_ms = (time.perf_counter() - t0_auth) * 1000.0
 
         # 3. Retrieve relevant chunks according to source_mode
+        # Precompute query embedding once to share across both retrieval passes
+        with PerfTimer("query_embedding") as t_qembed:
+            query_vector = embedding_service.embed_text(clean_query)
+        record_perf_metric("query_embedding", t_qembed.elapsed_ms, query_len=len(clean_query))
+
         raw_chunks = self.search_unified_chunks(
             db=db,
             query=clean_query,
             current_user=current_user,
             subject_id=subject_id,
             source_mode=mode,
-            limit=self.top_k
+            limit=self.top_k,
+            precomputed_vector=query_vector
         )
 
         # 3b. Retrieve chunks specifically from the attached document if provided
@@ -662,7 +691,8 @@ class StudyBuddyChatService:
                 current_user=current_user,
                 subject_id=None,
                 limit=self.top_k,
-                student_study_document_id=attached_document_id
+                student_study_document_id=attached_document_id,
+                precomputed_vector=query_vector
             )
             for ac in attached_chunks:
                 ac["is_attached_file"] = True

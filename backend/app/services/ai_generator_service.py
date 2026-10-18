@@ -104,6 +104,14 @@ class QwenGenerator:
 
         model_target = candidate_paths[0] if candidate_paths else None
 
+        # Optimize PyTorch CPU inference threads to avoid thread contention
+        cpu_threads = min(4, os.cpu_count() or 4)
+        try:
+            torch.set_num_threads(cpu_threads)
+            logger.info(f"⚡ PyTorch CPU intra-op threads set to {cpu_threads}")
+        except Exception:
+            pass
+
         if not model_target:
             # Check if cached locally in HF cache
             try:
@@ -115,7 +123,7 @@ class QwenGenerator:
                 self.model = AutoModelForCausalLM.from_pretrained(
                     self.model_name,
                     local_files_only=True,
-                    torch_dtype=torch.float32,
+                    dtype=torch.float32,
                     device_map="cpu",
                     low_cpu_mem_usage=True,
                     trust_remote_code=True
@@ -140,7 +148,7 @@ class QwenGenerator:
             )
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_target,
-                torch_dtype=torch.float32,
+                dtype=torch.float32,
                 device_map="cpu",
                 low_cpu_mem_usage=True,
                 trust_remote_code=True
@@ -597,7 +605,6 @@ class QwenGenerator:
                         output_ids = self.model.generate(
                             **inputs,
                             max_new_tokens=min(settings.AI_MAX_NEW_TOKENS, 180),
-                            temperature=0.2 if settings.AI_TEMPERATURE > 0 else 0.0,
                             do_sample=False,
                             use_cache=True,
                             pad_token_id=self.tokenizer.eos_token_id,

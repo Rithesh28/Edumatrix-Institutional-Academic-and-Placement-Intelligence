@@ -53,6 +53,9 @@ class LectureNotesIndexingService:
         Idempotently verify or initialize the dedicated 'study_buddy_chunks' collection.
         Never modifies, recreates, or touches the generic 'files' collection.
         """
+        if self._collection_verified:
+            return True
+
         if not qdrant_client.client:
             logger.error("Qdrant client is not available")
             return False

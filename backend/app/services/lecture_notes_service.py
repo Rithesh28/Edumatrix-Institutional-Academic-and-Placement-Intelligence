@@ -312,11 +312,20 @@ class LectureNotesService:
                             f"PDF rejected: page count ({page_count}) exceeds limit of {MAX_PDF_PAGES} pages."
                         )
 
+                    # Fast digital text extraction pass
+                    raw_page_texts = []
+                    for page in pdf.pages:
+                        raw_page_texts.append(page.extract_text() or "")
+
+                    total_digital_chars = sum(len(t.strip()) for t in raw_page_texts)
                     total_ocr_ms = 0.0
+
+                    # Only invoke expensive OCR if the PDF is scanned / has insufficient digital text
+                    is_scanned_pdf = total_digital_chars < 50
+
                     for idx, page in enumerate(pdf.pages):
-                        txt = page.extract_text() or ""
-                        # OCR fallback on scanned/sparse pages
-                        if len(txt.strip()) < 30:
+                        txt = raw_page_texts[idx]
+                        if is_scanned_pdf and len(txt.strip()) < 30:
                             t0_ocr = time.perf_counter()
                             try:
                                 dpi = PDF_RENDER_DPI

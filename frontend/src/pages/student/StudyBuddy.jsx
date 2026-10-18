@@ -146,6 +146,7 @@ const StudyBuddy = () => {
   // ----------------------------------------------------
   const [chatAttachment, setChatAttachment] = useState(null)
   const attachmentFileInputRef = useRef(null)
+  const attachmentPollRef = useRef(null)
 
   // ----------------------------------------------------
   // LECTURE NOTES LIBRARY & PREVIEW STATE (Part B)
@@ -283,6 +284,11 @@ const StudyBuddy = () => {
   // Initial load
   useEffect(() => {
     fetchSubjects()
+    return () => {
+      if (attachmentPollRef.current) {
+        clearInterval(attachmentPollRef.current)
+      }
+    }
   }, [])
 
   // Auto-scroll chat
@@ -530,8 +536,71 @@ const StudyBuddy = () => {
   }
 
   // ----------------------------------------------------
-  // ASK BUDDY ATTACHMENT HANDLERS (Part A)
+  // ASK BUDDY ATTACHMENT HANDLERS (Part A & Phase 2 Polling)
   // ----------------------------------------------------
+  const pollAttachmentStatus = (docId, file) => {
+    if (attachmentPollRef.current) {
+      clearInterval(attachmentPollRef.current)
+      attachmentPollRef.current = null
+    }
+
+    let pollAttempts = 0
+    const maxAttempts = 60 // 60 * 1.5s = 90 seconds timeout
+
+    attachmentPollRef.current = setInterval(async () => {
+      pollAttempts += 1
+      try {
+        const res = await studyBuddyAPI.getMyDocumentDetail(docId)
+        const doc = res.data
+        if (doc.indexing_status === 'indexed') {
+          if (attachmentPollRef.current) {
+            clearInterval(attachmentPollRef.current)
+            attachmentPollRef.current = null
+          }
+          setChatAttachment({
+            file,
+            name: doc.original_filename || file.name,
+            size: doc.file_size || file.size,
+            status: 'ready',
+            progress: 100,
+            docId: doc.id,
+            error: null
+          })
+          toast.success(`Attached '${doc.original_filename || file.name}' ready for Ask Buddy!`)
+        } else if (doc.indexing_status === 'failed') {
+          if (attachmentPollRef.current) {
+            clearInterval(attachmentPollRef.current)
+            attachmentPollRef.current = null
+          }
+          setChatAttachment({
+            file,
+            name: doc.original_filename || file.name,
+            size: doc.file_size || file.size,
+            status: 'error',
+            progress: 100,
+            docId: doc.id,
+            error: doc.error_message || 'Document indexing failed'
+          })
+          toast.error(`Indexing failed: ${doc.error_message || 'Unknown processing error'}`)
+        } else if (pollAttempts >= maxAttempts) {
+          if (attachmentPollRef.current) {
+            clearInterval(attachmentPollRef.current)
+            attachmentPollRef.current = null
+          }
+          toast.error('Attachment processing timed out. You may retry attaching the file.')
+        }
+      } catch (pollErr) {
+        console.error('Polling attachment status failed:', pollErr)
+        if (pollAttempts >= maxAttempts) {
+          if (attachmentPollRef.current) {
+            clearInterval(attachmentPollRef.current)
+            attachmentPollRef.current = null
+          }
+        }
+      }
+    }, 1500)
+  }
+
   const handleAttachmentFileSelect = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -614,6 +683,8 @@ const StudyBuddy = () => {
           docId: doc.id,
           error: null
         })
+        // Poll status until indexing completes or fails
+        pollAttachmentStatus(doc.id, file)
       }
     } catch (err) {
       console.error('Attachment upload failed:', err)
@@ -632,6 +703,10 @@ const StudyBuddy = () => {
   }
 
   const handleRemoveAttachment = () => {
+    if (attachmentPollRef.current) {
+      clearInterval(attachmentPollRef.current)
+      attachmentPollRef.current = null
+    }
     setChatAttachment(null)
     if (attachmentFileInputRef.current) {
       attachmentFileInputRef.current.value = ''
