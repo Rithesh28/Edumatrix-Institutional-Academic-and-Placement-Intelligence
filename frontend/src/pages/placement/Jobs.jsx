@@ -15,15 +15,25 @@ import {
   CheckCircle2,
   Calendar,
   Sparkles,
+  Paperclip,
+  ListChecks,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import toast from 'react-hot-toast';
+import BulkJobDeleteModal from './BulkJobDeleteModal';
 
 const Jobs = () => {
   const navigate = useNavigate();
   const { jobs, isLoading, fetchJobPostings, deleteJobPosting, publishJobPosting } = usePlacementStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+
+  // Bulk Selection & Deletion State
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [selectedJobIds, setSelectedJobIds] = useState([]);
+  const [bulkDeleteModalOpen, setBulkDeleteModalOpen] = useState(false);
 
   // Publish confirmation modal state
   const [publishModal, setPublishModal] = useState({
@@ -36,6 +46,39 @@ const Jobs = () => {
   useEffect(() => {
     fetchJobPostings();
   }, []);
+
+  const handleToggleSelectJob = (id) => {
+    setSelectedJobIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
+  const handleSelectAllFiltered = () => {
+    const visibleIds = filteredJobs.map((j) => j.id);
+    const allSelected =
+      visibleIds.length > 0 && visibleIds.every((id) => selectedJobIds.includes(id));
+    if (allSelected) {
+      setSelectedJobIds((prev) => prev.filter((id) => !visibleIds.includes(id)));
+    } else {
+      setSelectedJobIds((prev) => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  };
+
+  const handleSelectByStatus = (status) => {
+    const matchingIds = filteredJobs
+      .filter((j) => j.status === status)
+      .map((j) => j.id);
+    setSelectedJobIds((prev) => Array.from(new Set([...prev, ...matchingIds])));
+  };
+
+  const handleClearSelection = () => {
+    setSelectedJobIds([]);
+  };
+
+  const handleBulkSuccess = () => {
+    fetchJobPostings();
+    setSelectedJobIds([]);
+  };
 
   const handleDelete = async (id, title) => {
     if (window.confirm(`Are you sure you want to delete "${title}"?`)) {
@@ -165,7 +208,24 @@ const Jobs = () => {
             Manage company openings, parse JDs, publish drafts, and run AI candidate skill matching
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* Bulk Selection Toggle */}
+          <button
+            onClick={() => {
+              setIsBulkMode(!isBulkMode);
+              if (isBulkMode) setSelectedJobIds([]);
+            }}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold shadow-xs transition-colors cursor-pointer border ${
+              isBulkMode
+                ? 'bg-indigo-600 text-white border-indigo-600 dark:bg-indigo-500'
+                : 'bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-200 dark:border-gray-700'
+            }`}
+            title="Toggle bulk job selection and cleanup"
+          >
+            <ListChecks className="w-4 h-4 text-indigo-500 dark:text-indigo-400" />
+            <span>Bulk Manage Jobs</span>
+          </button>
+
           <button
             onClick={() => navigate('/placement/jobs/post')}
             className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center space-x-2 shadow-sm transition-colors cursor-pointer font-medium text-sm"
@@ -237,6 +297,69 @@ const Jobs = () => {
         </select>
       </div>
 
+      {/* Bulk Management Toolbar */}
+      {isBulkMode && (
+        <div className="bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 p-4 rounded-xl shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3 mb-6 animate-in fade-in slide-in-from-top-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-indigo-600 text-white flex items-center gap-1.5 shadow-2xs">
+              <ListChecks className="w-3.5 h-3.5" />
+              {selectedJobIds.length} job(s) selected
+            </span>
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+              of {filteredJobs.length} visible
+            </span>
+
+            <div className="flex flex-wrap items-center gap-1.5 ml-2">
+              <button
+                onClick={handleSelectAllFiltered}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 cursor-pointer shadow-2xs"
+              >
+                {filteredJobs.length > 0 && filteredJobs.every((j) => selectedJobIds.includes(j.id))
+                  ? 'Deselect All'
+                  : 'Select All Visible'}
+              </button>
+              <button
+                onClick={() => handleSelectByStatus('draft')}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg bg-amber-100/70 dark:bg-amber-950/60 hover:bg-amber-200 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 cursor-pointer"
+              >
+                + Drafts ({filteredJobs.filter((j) => j.status === 'draft').length})
+              </button>
+              <button
+                onClick={() => handleSelectByStatus('open')}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg bg-emerald-100/70 dark:bg-emerald-950/60 hover:bg-emerald-200 text-emerald-800 dark:text-emerald-200 border border-emerald-200 dark:border-emerald-800 cursor-pointer"
+              >
+                + Open ({filteredJobs.filter((j) => j.status === 'open').length})
+              </button>
+              <button
+                onClick={() => handleSelectByStatus('closed')}
+                className="px-2.5 py-1 text-xs font-medium rounded-lg bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-gray-700 cursor-pointer"
+              >
+                + Closed ({filteredJobs.filter((j) => j.status === 'closed').length})
+              </button>
+              {selectedJobIds.length > 0 && (
+                <button
+                  onClick={handleClearSelection}
+                  className="px-2 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 underline cursor-pointer ml-1"
+                >
+                  Clear Selection
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setBulkDeleteModalOpen(true)}
+              disabled={selectedJobIds.length === 0}
+              className="px-4 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-lg shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Bulk Delete / Safe Close ({selectedJobIds.length})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Jobs List */}
       {filteredJobs.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800">
@@ -254,25 +377,62 @@ const Jobs = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {filteredJobs.map((job) => (
-            <div
-              key={job.id}
-              className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-5 hover:shadow-md transition-shadow"
-            >
-              <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-3 mb-1.5">
-                    {getStatusBadge(job.status)}
-                    <span className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {job.created_at ? new Date(job.created_at).toLocaleDateString() : 'Recently'}
-                    </span>
-                    {job.status === 'draft' && (
-                      <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-                        (Draft — Review and publish to activate)
-                      </span>
+          {filteredJobs.map((job) => {
+            const isSelected = selectedJobIds.includes(job.id);
+            return (
+              <div
+                key={job.id}
+                onClick={() => {
+                  if (isBulkMode) {
+                    handleToggleSelectJob(job.id);
+                  }
+                }}
+                className={`bg-white dark:bg-gray-900 rounded-xl shadow-sm border p-5 transition-all ${
+                  isBulkMode ? 'cursor-pointer hover:border-indigo-400' : 'hover:shadow-md'
+                } ${
+                  isSelected
+                    ? 'border-indigo-500 bg-indigo-50/20 dark:bg-indigo-950/20 ring-2 ring-indigo-500/20'
+                    : 'border-gray-200 dark:border-gray-800'
+                }`}
+              >
+                <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+                  <div className="flex items-start space-x-3 flex-1">
+                    {/* Selection Checkbox */}
+                    {isBulkMode && (
+                      <div className="pt-1 shrink-0">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelectJob(job.id)}
+                          className="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                      </div>
                     )}
-                  </div>
+
+                    <div className="flex-1">
+                      <div className="flex flex-wrap items-center gap-2.5 mb-1.5">
+                        {getStatusBadge(job.status)}
+                        <span className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" />
+                          {job.created_at ? new Date(job.created_at).toLocaleDateString() : 'Recently'}
+                        </span>
+                        {/* Attached Documents Indicator */}
+                        {((job.attachments && job.attachments.length > 0) || job.file_id) && (
+                          <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                            <Paperclip className="w-3 h-3" />
+                            <span>
+                              {job.attachments?.length || 1} Doc
+                              {(job.attachments?.length || 1) > 1 ? 's' : ''}
+                            </span>
+                          </span>
+                        )}
+                        {job.status === 'draft' && (
+                          <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                            (Draft — Review and publish to activate)
+                          </span>
+                        )}
+                      </div>
 
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer transition-colors"
                       onClick={() => navigate(`/placement/jobs/${job.id}`)}>
@@ -337,6 +497,7 @@ const Jobs = () => {
                     )}
                   </div>
                 </div>
+              </div>
 
                 {/* Actions Button Group */}
                 <div className="flex flex-wrap items-center gap-2 self-start lg:self-center">
@@ -391,9 +552,10 @@ const Jobs = () => {
                 </div>
               </div>
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
+    )}
 
       {/* Publish Confirmation Modal */}
       {publishModal.isOpen && publishModal.job && (
@@ -471,6 +633,15 @@ const Jobs = () => {
           </div>
         </div>
       )}
+
+      {/* Bulk Delete & Safe Cleanup Modal */}
+      <BulkJobDeleteModal
+        isOpen={bulkDeleteModalOpen}
+        onClose={() => setBulkDeleteModalOpen(false)}
+        selectedJobIds={selectedJobIds}
+        jobs={jobs}
+        onSuccess={handleBulkSuccess}
+      />
     </div>
   );
 };

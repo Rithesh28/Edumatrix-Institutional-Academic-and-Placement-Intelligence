@@ -239,7 +239,7 @@ def check_file_permission(db: Session, file: File, current_user: User) -> bool:
     if file.uploaded_by == current_user.id:
         return True
 
-    if file.department and current_user.department and file.department == current_user.department:
+    if file.file_type not in [FileType.PLACEMENT_DOC, FileType.CIRCULAR] and file.department and current_user.department and file.department == current_user.department:
         return True
 
     if current_user.role == UserRole.PLACEMENT_OFFICER:
@@ -247,6 +247,11 @@ def check_file_permission(db: Session, file: File, current_user: User) -> bool:
             return True
         from ..models.recruitment_circular import RecruitmentCircularAttachment
         if db.query(RecruitmentCircularAttachment).filter(RecruitmentCircularAttachment.file_id == file.id).first():
+            return True
+        from ..models.job_posting import JobPosting, JobPostingAttachment
+        if db.query(JobPosting).filter(JobPosting.file_id == file.id).first():
+            return True
+        if db.query(JobPostingAttachment).filter(JobPostingAttachment.file_id == file.id).first():
             return True
 
     if current_user.role == UserRole.STUDENT:
@@ -278,6 +283,30 @@ def check_file_permission(db: Session, file: File, current_user: User) -> bool:
                 s_branch = current_user.department
             if s_branch:
                 target_branches = {str(b).strip().lower() for b in rc.branch_eligibility if b}
+                if str(s_branch).strip().lower() in target_branches:
+                    return True
+
+        # Check if file is attached to an OPEN JobPosting for which student is branch-eligible
+        from ..models.job_posting import JobPosting, JobPostingAttachment, JobStatus
+        attached_open_jobs = db.query(JobPosting).filter(
+            (JobPosting.file_id == file.id) |
+            (JobPosting.id.in_(
+                db.query(JobPostingAttachment.job_posting_id).filter(JobPostingAttachment.file_id == file.id)
+            )),
+            JobPosting.status == JobStatus.OPEN
+        ).all()
+
+        for job in attached_open_jobs:
+            branches = job.branch_eligibility or getattr(job, 'eligible_branches', None) or []
+            if not branches or len(branches) == 0:
+                return True
+            s_branch = None
+            if current_user.student_profile and current_user.student_profile.branch:
+                s_branch = current_user.student_profile.branch
+            elif current_user.department:
+                s_branch = current_user.department
+            if s_branch:
+                target_branches = {str(b).strip().lower() for b in branches if b}
                 if str(s_branch).strip().lower() in target_branches:
                     return True
 

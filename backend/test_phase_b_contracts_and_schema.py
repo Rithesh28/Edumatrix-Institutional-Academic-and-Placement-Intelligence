@@ -253,6 +253,7 @@ class TestAlembicMigrationIsolated(unittest.TestCase):
             conn.execute(sa.text("ALTER TABLE companies ALTER COLUMN industry DROP NOT NULL"))
             conn.execute(sa.text("ALTER TABLE companies ALTER COLUMN location DROP NOT NULL"))
             conn.execute(sa.text("ALTER TABLE job_postings DROP COLUMN IF EXISTS file_id CASCADE"))
+            conn.execute(sa.text("DROP TABLE IF EXISTS job_posting_attachments CASCADE"))
 
         # Verify pre-021 state
         inspector = sa.inspect(engine)
@@ -260,8 +261,8 @@ class TestAlembicMigrationIsolated(unittest.TestCase):
         self.assertTrue(comp_cols_pre["industry"]["nullable"], "industry should be nullable before 021")
         self.assertTrue(comp_cols_pre["location"]["nullable"], "location should be nullable before 021")
 
-        # 2. Upgrade to 021 (head)
-        command.upgrade(alembic_cfg, "head")
+        # 2. Upgrade to 021
+        command.upgrade(alembic_cfg, "021")
 
         # Inspect schema at head (021)
         inspector = sa.inspect(engine)
@@ -300,8 +301,8 @@ class TestAlembicMigrationIsolated(unittest.TestCase):
         job_cols_020 = {c["name"]: c for c in inspector.get_columns("job_postings")}
         self.assertNotIn("file_id", job_cols_020, "job_postings.file_id must not exist at 020")
 
-        # 4. Re-upgrade to head (021)
-        command.upgrade(alembic_cfg, "head")
+        # 4. Re-upgrade to 021
+        command.upgrade(alembic_cfg, "021")
         inspector = sa.inspect(engine)
         job_cols_re = {c["name"]: c for c in inspector.get_columns("job_postings")}
         self.assertIn("file_id", job_cols_re, "job_postings.file_id must exist after re-upgrade")
@@ -475,7 +476,7 @@ class TestAlembicHeadDiscovery(unittest.TestCase):
         script_dir = ScriptDirectory.from_config(alembic_cfg)
         heads = script_dir.get_heads()
         self.assertEqual(len(heads), 1, f"Expected single migration head, found: {heads}")
-        self.assertEqual(heads[0], "021", "Current migration head must be 021")
+        self.assertEqual(heads[0], "022", "Current migration head must be 022")
 
 
 if __name__ == "__main__":

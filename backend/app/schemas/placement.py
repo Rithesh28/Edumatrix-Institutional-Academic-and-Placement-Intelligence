@@ -37,6 +37,9 @@ class ApplicationStatus(str, Enum):
 # COMPANY SCHEMAS
 # ============================================
 
+INVALID_COMPANY_PLACEHOLDERS = {"general", "not specified", "n/a", "none", "unknown", "placeholder", "-"}
+
+
 class CompanyBase(BaseModel):
     """Base company schema."""
     name: str = Field(..., min_length=1, max_length=255, description="Company name")
@@ -57,6 +60,8 @@ class CompanyBase(BaseModel):
         v_clean = v.strip()
         if not v_clean:
             raise ValueError("Field cannot be blank or whitespace-only")
+        if v_clean.lower() in INVALID_COMPANY_PLACEHOLDERS:
+            raise ValueError(f"Placeholder values such as '{v_clean}' are not permitted. Please specify an actual value.")
         return v_clean
 
 
@@ -84,6 +89,8 @@ class CompanyUpdate(BaseModel):
             v_clean = v.strip()
             if not v_clean:
                 raise ValueError("Field cannot be blank or whitespace-only")
+            if v_clean.lower() in INVALID_COMPANY_PLACEHOLDERS:
+                raise ValueError(f"Placeholder values such as '{v_clean}' are not permitted. Please specify an actual value.")
             return v_clean
         return v
 
@@ -117,6 +124,8 @@ def validate_http_or_https_url(v: Optional[str]) -> Optional[str]:
         raise ValueError("Application URL must use http or https scheme (unsafe schemes like javascript: or file: are rejected)")
     if not parsed.netloc:
         raise ValueError("Application URL must include a valid host or domain")
+    if "." not in parsed.netloc and parsed.netloc != "localhost":
+        raise ValueError("Application URL must include a valid domain name")
     return v_clean
 
 
@@ -124,11 +133,23 @@ def validate_http_or_https_url(v: Optional[str]) -> Optional[str]:
 # JOB POSTING SCHEMAS
 # ============================================
 
+class JobAttachmentResponse(BaseModel):
+    """Schema for attached job document response."""
+    id: int
+    file_id: UUID
+    filename: Optional[str] = None
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class JobPostingBase(BaseModel):
     """Base job posting schema."""
     company_id: int = Field(..., description="Company ID")
     title: str = Field(..., max_length=255, description="Job title")
-    description: Optional[str] = Field(None, description="Job description")
+    description: Optional[str] = None
     file_id: Optional[UUID] = Field(None, description="Optional attached document file ID (UUID from files table)")
     required_skills: List[str] = Field(default=[], description="Required skills")
     preferred_skills: List[str] = Field(default=[], description="Preferred skills")
@@ -151,6 +172,7 @@ class JobPostingBase(BaseModel):
 class JobPostingCreate(JobPostingBase):
     """Schema for creating a job posting."""
     created_by: Optional[int] = Field(None, description="User ID who created")
+    attachment_file_ids: Optional[List[UUID]] = Field(default=None, description="Optional list of attached document UUIDs from files table")
 
 
 class JobPostingUpdate(BaseModel):
@@ -159,6 +181,7 @@ class JobPostingUpdate(BaseModel):
     title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
     file_id: Optional[UUID] = Field(None, description="Optional attached document file ID (UUID from files table)")
+    attachment_file_ids: Optional[List[UUID]] = Field(default=None, description="Optional list of attached document UUIDs from files table")
     required_skills: Optional[List[str]] = None
     preferred_skills: Optional[List[str]] = None
     experience_level: Optional[str] = Field(None, max_length=50)
@@ -186,6 +209,7 @@ class JobPostingResponse(JobPostingBase):
     # Additional fields from relationships
     company_name: Optional[str] = None  # Make sure this exists
     file_name: Optional[str] = Field(None, description="Filename of attached document if present")
+    attachments: List[JobAttachmentResponse] = Field(default=[], description="List of all attached job documents")
     applications_count: Optional[int] = Field(0, description="Number of applications")
     shortlisted_count: Optional[int] = Field(0, description="Number of shortlisted students")
     
@@ -503,6 +527,14 @@ class JdParseResponse(BaseModel):
     application_instructions: Optional[str] = Field(None, description="Instructions or portal link for applying")
     application_url: Optional[str] = Field(None, description="Extracted external application URL (http/https)")
     
+    # File Persistence and Multi-Document Linkage (Phase C)
+    file_id: Optional[UUID] = Field(None, description="Persisted primary File ID in files table")
+    file_name: Optional[str] = Field(None, description="Filename of the persisted primary file")
+    file_ids: List[UUID] = Field(default=[], description="List of all persisted file IDs for multiple uploads")
+    file_names: List[str] = Field(default=[], description="List of filenames of all persisted files")
+    extracted_files: List[Dict[str, Any]] = Field(default=[], description="Per-file extraction breakdown and source tracking")
+    extraction_status: str = Field(default="success", description="Overall extraction outcome: success, partial, or failed")
+
     # Verification, Auditability & Quality Assurance
     review_flags: List[str] = Field(
         default=[],
@@ -512,6 +544,64 @@ class JdParseResponse(BaseModel):
         default={},
         description="Source text snippets justifying each extracted field for full auditability"
     )
+
+
+# ============================================
+# BULK DELETION SCHEMAS (Phase C)
+# ============================================
+
+class CompanyBulkDeleteRequest(BaseModel):
+    """Request payload for multi-select company deletion."""
+    company_ids: List[int] = Field(..., min_length=1, description="List of company IDs to delete")
+    mode: str = Field("soft", description="Deletion mode: 'soft' (deactivate company and jobs) or 'hard' (permanent delete)")
+
+
+class CompanyBulkDeleteResultItem(BaseModel):
+    """Result per company in bulk deletion."""
+    id: int
+    name: Optional[str] = None
+    success: bool
+    status: str  # "deactivated", "deleted", "blocked", "not_found"
+    message: str
+    dependent_counts: Optional[Dict[str, int]] = None
+
+
+class CompanyBulkDeleteResponse(BaseModel):
+    """Summary response for bulk company deletion."""
+    total_requested: int
+    successful_count: int
+    failed_count: int
+    deleted_count: Optional[int] = 0
+    deactivated_count: Optional[int] = 0
+    blocked_count: Optional[int] = 0
+    results: List[CompanyBulkDeleteResultItem]
+
+
+class JobBulkDeleteRequest(BaseModel):
+    """Request payload for multi-select job deletion."""
+    job_ids: List[int] = Field(..., min_length=1, description="List of job IDs to delete")
+    force: bool = Field(False, description="Whether to close jobs with applications instead of blocking")
+
+
+class JobBulkDeleteResultItem(BaseModel):
+    """Result per job in bulk deletion."""
+    id: int
+    title: Optional[str] = None
+    success: bool
+    status: str  # "deleted", "closed", "blocked", "not_found"
+    message: str
+    dependent_counts: Optional[Dict[str, int]] = None
+
+
+class JobBulkDeleteResponse(BaseModel):
+    """Summary response for bulk job deletion."""
+    total_requested: int
+    successful_count: int
+    failed_count: int
+    deleted_count: Optional[int] = 0
+    closed_count: Optional[int] = 0
+    blocked_count: Optional[int] = 0
+    results: List[JobBulkDeleteResultItem]
 
 
 # ============================================

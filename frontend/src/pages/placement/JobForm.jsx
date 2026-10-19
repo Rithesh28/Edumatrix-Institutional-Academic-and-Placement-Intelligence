@@ -40,6 +40,7 @@ const JobForm = () => {
     isLoading,
     parseJdText,
     uploadJdFile,
+    uploadJdFiles,
   } = usePlacementStore();
 
   const [formData, setFormData] = useState({
@@ -57,6 +58,8 @@ const JobForm = () => {
     application_deadline: '',
     drive_date: '',
     status: 'draft',
+    file_id: null,
+    attachment_file_ids: [],
   });
 
   const [skillInput, setSkillInput] = useState('');
@@ -72,7 +75,8 @@ const JobForm = () => {
   const [isParsingJd, setIsParsingJd] = useState(false);
   const [jdParseMode, setJdParseMode] = useState('upload'); // 'upload' | 'text'
   const [jdRawText, setJdRawText] = useState('');
-  const [jdSelectedFile, setJdSelectedFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [existingAttachments, setExistingAttachments] = useState([]);
   const [parsedResult, setParsedResult] = useState(null);
   const [showEvidence, setShowEvidence] = useState(false);
   const fileInputRef = useRef(null);
@@ -99,6 +103,14 @@ const JobForm = () => {
         companyNameToUse = foundCompany?.name || '';
       }
 
+      const existingAtts = selectedJob.attachments || [];
+      setExistingAttachments(existingAtts);
+
+      const attachedIds = existingAtts.map((a) => a.file_id);
+      if (selectedJob.file_id && !attachedIds.includes(selectedJob.file_id)) {
+        attachedIds.unshift(selectedJob.file_id);
+      }
+
       setFormData({
         company_id: companyId,
         title: selectedJob.title || '',
@@ -114,6 +126,8 @@ const JobForm = () => {
         application_deadline: selectedJob.application_deadline ? selectedJob.application_deadline.slice(0, 16) : '',
         drive_date: selectedJob.drive_date ? selectedJob.drive_date.slice(0, 16) : '',
         status: selectedJob.status || 'draft',
+        file_id: selectedJob.file_id || null,
+        attachment_file_ids: attachedIds,
       });
 
       setCompanySearch(companyNameToUse);
@@ -215,10 +229,24 @@ const JobForm = () => {
     }));
   };
 
+  const handleFilesSelected = (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    const newFiles = Array.from(fileList);
+    setSelectedFiles((prev) => {
+      const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}`));
+      const nonDups = newFiles.filter((f) => !existingKeys.has(`${f.name}-${f.size}`));
+      return [...prev, ...nonDups];
+    });
+  };
+
+  const handleRemoveSelectedFile = (idx) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== idx));
+  };
+
   // Handle JD File & Text Parsing
   const handleParseJd = async () => {
-    if (jdParseMode === 'upload' && !jdSelectedFile) {
-      toast.error('Please select a JD document, recruitment poster, or eligibility file');
+    if (jdParseMode === 'upload' && selectedFiles.length === 0) {
+      toast.error('Please select at least one JD document, poster, or sheet');
       return;
     }
     if (jdParseMode === 'text' && !jdRawText.trim()) {
@@ -232,7 +260,7 @@ const JobForm = () => {
     try {
       let parsed = null;
       if (jdParseMode === 'upload') {
-        parsed = await uploadJdFile(jdSelectedFile);
+        parsed = await uploadJdFiles(selectedFiles);
       } else {
         parsed = await parseJdText(jdRawText);
       }
@@ -279,9 +307,11 @@ const JobForm = () => {
           return exp;
         };
 
-        // Update form fields with extracted data
+        // Update form fields with extracted data and persistent file attachments
         setFormData((prev) => ({
           ...prev,
+          file_id: parsed.file_id || prev.file_id,
+          attachment_file_ids: parsed.file_ids?.length ? parsed.file_ids : prev.attachment_file_ids,
           title: parsed.title || prev.title,
           description: richDescription || prev.description,
           required_skills: Array.from(new Set([...(parsed.required_skills || []), ...prev.required_skills])),
@@ -313,7 +343,7 @@ const JobForm = () => {
         const reqCount = parsed.required_skills?.length || 0;
         const prefCount = parsed.preferred_skills?.length || 0;
         toast.success(
-          `Extracted ${reqCount} required & ${prefCount} preferred skills + requirements. Review fields and warnings below.`
+          `Extracted ${reqCount} required & ${prefCount} preferred skills + requirements (${parsed.extraction_status?.toUpperCase() || 'SUCCESS'}). Review fields below.`
         );
       }
     } catch (err) {
@@ -365,8 +395,10 @@ const JobForm = () => {
     toast.success('Appended additional extracted criteria to Job Description');
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (e, forcedStatus = null) => {
+    if (e && e.preventDefault) {
+      e.preventDefault();
+    }
 
     if (!formData.company_id) {
       setCompanyError('Please select a company');
@@ -374,14 +406,22 @@ const JobForm = () => {
       return;
     }
 
-    if (!formData.title.trim()) {
+    if (!formData.title?.trim()) {
       toast.error('Please enter a job title');
       return;
     }
 
+    const finalStatus = forcedStatus || formData.status || 'draft';
+
     try {
       const submitData = {
         ...formData,
+        title: formData.title.trim(),
+        location: formData.location?.trim() || null,
+        salary_range: formData.salary_range?.trim() || null,
+        status: finalStatus,
+        file_id: formData.file_id || null,
+        attachment_file_ids: formData.attachment_file_ids || [],
         application_url: formData.application_url?.trim() || null,
         cgpa_criteria: formData.cgpa_criteria ? parseFloat(formData.cgpa_criteria) : null,
         required_skills: formData.required_skills || [],
@@ -391,14 +431,14 @@ const JobForm = () => {
 
       if (isEditing) {
         await updateJobPosting(id, submitData);
-        toast.success('Job updated successfully');
+        toast.success(`Job updated successfully as ${finalStatus.toUpperCase()}`);
       } else {
         await createJobPosting(submitData);
-        toast.success(`Job posted successfully as ${submitData.status.toUpperCase()}`);
+        toast.success(`Job saved successfully as ${finalStatus.toUpperCase()}`);
       }
       navigate('/placement/jobs');
     } catch (error) {
-      toast.error(error.message || 'Failed to save job');
+      toast.error(error.response?.data?.detail || error.message || 'Failed to save job');
     }
   };
 
@@ -475,7 +515,7 @@ const JobForm = () => {
         </div>
 
         <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
-          Extracts company, designation, 80/20 skills, academic percentages, CGPA, staged compensation, deadlines, and bond requirements. Parsing populates the review interface below without publishing the job.
+          Extracts company, designation, 80/20 skills, academic percentages, CGPA, staged compensation, deadlines, bond requirements, and official application URLs across one or multiple documents. Uploads populate the review interface below without publishing the job.
         </p>
 
         {jdParseMode === 'upload' ? (
@@ -487,35 +527,119 @@ const JobForm = () => {
               <input
                 ref={fileInputRef}
                 type="file"
+                multiple
                 accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg,.xlsx,.xls,.csv"
                 className="hidden"
                 onChange={(e) => {
-                  if (e.target.files && e.target.files[0]) {
-                    setJdSelectedFile(e.target.files[0]);
-                  }
+                  handleFilesSelected(e.target.files);
+                  e.target.value = '';
                 }}
               />
               <Upload className="w-8 h-8 text-indigo-600 dark:text-indigo-400 mx-auto mb-2" />
-              {jdSelectedFile ? (
-                <div>
-                  <p className="text-sm font-semibold text-indigo-600 dark:text-indigo-400">
-                    📎 {jdSelectedFile.name}
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {(jdSelectedFile.size / 1024).toFixed(1)} KB — Click to choose a different file
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Click to browse or drop Job Description file
-                  </p>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                    Supports PDF, DOCX, TXT, recruitment images (.png, .jpg), and eligibility sheets (.xlsx, .csv)
-                  </p>
-                </div>
-              )}
+              <div>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Click to browse or drop one or multiple Job Description files
+                </p>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Supports PDF, DOCX, TXT, recruitment images (.png, .jpg), and eligibility sheets (.xlsx, .csv)
+                </p>
+              </div>
             </div>
+
+            {/* Selected Files Staging List */}
+            {selectedFiles.length > 0 && (
+              <div className="mt-4 p-3 bg-white dark:bg-gray-800/80 rounded-xl border border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-semibold text-gray-700 dark:text-gray-300">
+                    Selected Documents ({selectedFiles.length})
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="text-xs text-indigo-600 hover:text-indigo-800 font-medium cursor-pointer"
+                    >
+                      + Add More
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedFiles([])}
+                      className="text-xs text-red-500 hover:text-red-700 font-medium cursor-pointer ml-2"
+                    >
+                      Clear All
+                    </button>
+                  </div>
+                </div>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  {selectedFiles.map((file, idx) => (
+                    <div
+                      key={idx}
+                      className="flex items-center justify-between p-2 rounded-lg bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-800 text-xs"
+                    >
+                      <div className="flex items-center space-x-2 min-w-0">
+                        <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                        <span className="font-medium text-gray-900 dark:text-gray-200 truncate">
+                          {file.name}
+                        </span>
+                        <span className="text-gray-400 text-[10px] shrink-0">
+                          ({(file.size / 1024).toFixed(1)} KB)
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveSelectedFile(idx);
+                        }}
+                        className="text-gray-400 hover:text-red-500 p-1 rounded transition-colors"
+                        title="Remove file"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Existing Persistent Attachments (When editing) */}
+            {isEditing && existingAttachments.length > 0 && (
+              <div className="mt-4 p-3 bg-indigo-50/50 dark:bg-indigo-950/20 rounded-xl border border-indigo-100 dark:border-indigo-900/50 text-xs">
+                <p className="font-semibold text-indigo-900 dark:text-indigo-200 mb-2 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                  Currently Attached Documents ({existingAttachments.length})
+                </p>
+                <div className="space-y-1.5">
+                  {existingAttachments.map((att) => (
+                    <div
+                      key={att.id || att.file_id}
+                      className="flex items-center justify-between p-2 rounded-lg bg-white dark:bg-gray-900 border border-indigo-200 dark:border-indigo-800/60"
+                    >
+                      <span className="font-medium text-gray-900 dark:text-gray-100 truncate">
+                        {att.file_name}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`/api/v1/placement/jobs/${id}/files/${att.file_id}/preview`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold"
+                        >
+                          Preview
+                        </a>
+                        <a
+                          href={`/api/v1/placement/jobs/${id}/files/${att.file_id}/download`}
+                          download
+                          className="text-xs text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                        >
+                          Download
+                        </a>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div>
@@ -544,7 +668,7 @@ const JobForm = () => {
             ) : (
               <>
                 <Sparkles className="w-4 h-4" />
-                <span>Extract Job Details</span>
+                <span>{selectedFiles.length > 1 ? `Extract from ${selectedFiles.length} Documents` : 'Extract Job Details'}</span>
               </>
             )}
           </button>
@@ -561,10 +685,57 @@ const JobForm = () => {
                 Extraction Review & Quality Analysis
               </h3>
             </div>
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              Processed {parsedResult.raw_text_length} characters
-            </span>
+            <div className="flex items-center gap-2">
+              {parsedResult.extraction_status === 'success' && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                  ✓ Successful Extraction
+                </span>
+              )}
+              {parsedResult.extraction_status === 'partial' && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                  ⚠️ Partial Extraction / Needs Review
+                </span>
+              )}
+              {parsedResult.extraction_status === 'failed' && (
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                  ✕ Extraction Failed
+                </span>
+              )}
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                Processed {parsedResult.raw_text_length} characters
+              </span>
+            </div>
           </div>
+
+          {/* Source Documents Processed Summary */}
+          {parsedResult.extracted_files?.length > 0 && (
+            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-800 text-xs">
+              <p className="font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                Processed Source Documents ({parsedResult.extracted_files.length})
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                {parsedResult.extracted_files.map((f, idx) => (
+                  <div
+                    key={idx}
+                    className="p-2 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 flex items-center justify-between"
+                  >
+                    <span className="font-medium text-gray-900 dark:text-gray-100 truncate" title={f.filename}>
+                      {f.filename}
+                    </span>
+                    <span
+                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase ${
+                        f.status === 'success'
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                          : 'bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300'
+                      }`}
+                    >
+                      {f.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Actionable Review Flags / Warnings */}
           {parsedResult.review_flags?.length > 0 && (
@@ -1105,13 +1276,32 @@ const JobForm = () => {
           </div>
 
           {/* Buttons */}
-          <div className="flex space-x-3 pt-4 border-t border-gray-200 dark:border-gray-800">
-            <button
-              type="submit"
-              className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-sm transition-colors cursor-pointer flex-1"
-            >
-              {isEditing ? 'Update Job Posting' : formData.status === 'draft' ? 'Save as Draft' : 'Post Job'}
-            </button>
+          <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-200 dark:border-gray-800">
+            {isEditing ? (
+              <button
+                type="submit"
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-lg shadow-sm transition-colors cursor-pointer flex-1"
+              >
+                Update Job Posting
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => handleSubmit(e, 'draft')}
+                  className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-lg shadow-sm transition-colors cursor-pointer flex-1"
+                >
+                  Save as Draft (Review Later)
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => handleSubmit(e, 'open')}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-lg shadow-sm transition-colors cursor-pointer flex-1"
+                >
+                  Publish Job (Make Open & Active)
+                </button>
+              </>
+            )}
             <button
               type="button"
               onClick={() => navigate('/placement/jobs')}

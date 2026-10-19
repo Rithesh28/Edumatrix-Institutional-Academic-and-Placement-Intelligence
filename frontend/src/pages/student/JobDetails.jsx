@@ -653,6 +653,84 @@ function StudentJobDetails() {
             )}
           </div>
 
+          {/* Attached Job Documents & Circulars */}
+          {((selectedJob.attachments && selectedJob.attachments.length > 0) || selectedJob.file_id) && (
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm space-y-3">
+              <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                <span>Official Job Documents & Criteria</span>
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Official documents provided by the Placement Cell for this recruitment opening.
+              </p>
+              <div className="space-y-2 mt-2">
+                {selectedJob.attachments && selectedJob.attachments.length > 0 ? (
+                  selectedJob.attachments.map((att) => (
+                    <div
+                      key={att.id || att.file_id}
+                      className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/60 flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-gray-900 dark:text-white truncate" title={att.file_name}>
+                            {att.file_name}
+                          </p>
+                          <p className="text-[10px] text-gray-500">
+                            {att.file_size ? `${(att.file_size / 1024).toFixed(1)} KB` : 'Attached Document'}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <a
+                          href={`/api/v1/placement/jobs/${selectedJob.id}/files/${att.file_id}/preview`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:text-indigo-600 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold"
+                        >
+                          Preview
+                        </a>
+                        <a
+                          href={`/api/v1/placement/jobs/${selectedJob.id}/files/${att.file_id}/download`}
+                          download
+                          className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold"
+                        >
+                          Download
+                        </a>
+                      </div>
+                    </div>
+                  ))
+                ) : selectedJob.file_id ? (
+                  <div className="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-700/60 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">
+                        {selectedJob.file_name || 'Job Description Document'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <a
+                        href={`/api/v1/placement/jobs/${selectedJob.id}/files/${selectedJob.file_id}/preview`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-3 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:text-indigo-600 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold"
+                      >
+                        Preview
+                      </a>
+                      <a
+                        href={`/api/v1/placement/jobs/${selectedJob.id}/files/${selectedJob.file_id}/download`}
+                        download
+                        className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold"
+                      >
+                        Download
+                      </a>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
+
           {/* Skill Requirements Catalog Card */}
           <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-6 shadow-sm space-y-4">
             <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">

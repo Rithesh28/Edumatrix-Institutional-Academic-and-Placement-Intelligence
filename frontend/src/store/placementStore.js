@@ -5,11 +5,13 @@ import {
   getCompany,
   updateCompany,
   deleteCompany,
+  bulkDeleteCompanies,
   createJobPosting,
   getJobPostings,
   getJobPosting,
   updateJobPosting,
   deleteJobPosting,
+  bulkDeleteJobs,
   createApplication,
   getApplications,
   updateApplication,
@@ -23,6 +25,7 @@ import {
   publishJobPosting,
   parseJdText,
   uploadJdFile,
+  uploadJdFiles,
   checkStudentEligibility,
   getStudentPlacementStatus,
   getRecruitmentCirculars,
@@ -220,6 +223,37 @@ const usePlacementStore = create((set, get) => ({
     }
   },
 
+  bulkDeleteCompanies: async (companyIds, mode = 'soft') => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await bulkDeleteCompanies(companyIds, mode);
+      // If deleted/deactivated successfully, update companies state
+      const successfulIds = new Set(
+        (result.results || [])
+          .filter((r) => r.success && (r.status === 'deleted' || r.status === 'deactivated'))
+          .map((r) => r.id)
+      );
+      if (mode === 'hard') {
+        set((state) => ({
+          companies: state.companies.filter((c) => !successfulIds.has(c.id)),
+          isLoading: false,
+        }));
+      } else {
+        // Soft mode deactivates
+        set((state) => ({
+          companies: state.companies.map((c) =>
+            successfulIds.has(c.id) ? { ...c, is_active: false } : c
+          ),
+          isLoading: false,
+        }));
+      }
+      return result;
+    } catch (error) {
+      set({ isLoading: false, error: error.response?.data?.detail || error.message });
+      throw error;
+    }
+  },
+
   // ============================================
   // JOB POSTING ACTIONS
   // ============================================
@@ -320,6 +354,34 @@ const usePlacementStore = create((set, get) => ({
     }
   },
 
+  bulkDeleteJobs: async (jobIds, force = false) => {
+    set({ isLoading: true, error: null });
+    try {
+      const result = await bulkDeleteJobs(jobIds, force);
+      const deletedIds = new Set(
+        (result.results || [])
+          .filter((r) => r.success && r.status === 'deleted')
+          .map((r) => r.id)
+      );
+      const closedIds = new Set(
+        (result.results || [])
+          .filter((r) => r.success && r.status === 'closed')
+          .map((r) => r.id)
+      );
+
+      set((state) => ({
+        jobs: state.jobs
+          .filter((j) => !deletedIds.has(j.id))
+          .map((j) => (closedIds.has(j.id) ? { ...j, status: 'closed' } : j)),
+        isLoading: false,
+      }));
+      return result;
+    } catch (error) {
+      set({ isLoading: false, error: error.response?.data?.detail || error.message });
+      throw error;
+    }
+  },
+
   publishJobPosting: async (id, confirmNoSkills = false) => {
     set({ isLoading: true, error: null });
     try {
@@ -349,9 +411,13 @@ const usePlacementStore = create((set, get) => ({
   },
 
   uploadJdFile: async (file) => {
+    return get().uploadJdFiles([file]);
+  },
+
+  uploadJdFiles: async (files) => {
     set({ isLoading: true, error: null });
     try {
-      const parsed = await uploadJdFile(file);
+      const parsed = await uploadJdFiles(files);
       set({ isLoading: false });
       return parsed;
     } catch (error) {

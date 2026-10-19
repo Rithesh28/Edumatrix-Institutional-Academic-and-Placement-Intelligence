@@ -52,25 +52,47 @@ const CompanyForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.name.trim()) {
-      toast.error('Company name is required');
+    const name = formData.name.trim();
+    const industry = formData.industry.trim();
+    const location = formData.location.trim();
+
+    if (!name) {
+      toast.error('Company name is required and cannot be empty or whitespace only');
       return;
     }
-    if (!formData.industry.trim()) {
-      toast.error('Industry is required');
+    if (!industry) {
+      toast.error('Industry is required and cannot be empty or whitespace only');
       return;
     }
-    if (!formData.location.trim()) {
-      toast.error('Location is required');
+    if (!location) {
+      toast.error('Location is required and cannot be empty or whitespace only');
+      return;
+    }
+
+    const placeholderPattern = /^(not specified|general|n\/a|none|unknown|placeholder|-)$/i;
+    if (placeholderPattern.test(name)) {
+      toast.error('Please enter a specific company name (placeholder values are not accepted)');
+      return;
+    }
+    if (placeholderPattern.test(industry)) {
+      toast.error('Please enter a specific industry (placeholder values such as "General" or "Not Specified" are not accepted)');
+      return;
+    }
+    if (placeholderPattern.test(location)) {
+      toast.error('Please enter a specific location (placeholder values such as "General" or "Not Specified" are not accepted)');
       return;
     }
 
     try {
       const payload = {
         ...formData,
-        name: formData.name.trim(),
-        industry: formData.industry.trim(),
-        location: formData.location.trim(),
+        name,
+        industry,
+        location,
+        contact_email: formData.contact_email?.trim() || null,
+        contact_phone: formData.contact_phone?.trim() || null,
+        description: formData.description?.trim() || null,
+        website: formData.website?.trim() || null,
       };
       if (isEditing) {
         await updateCompany(id, payload);
@@ -81,7 +103,7 @@ const CompanyForm = () => {
       }
       navigate('/placement/companies');
     } catch (error) {
-      toast.error(error.message || 'Failed to save company');
+      toast.error(error.response?.data?.detail || error.message || 'Failed to save company');
     }
   };
 

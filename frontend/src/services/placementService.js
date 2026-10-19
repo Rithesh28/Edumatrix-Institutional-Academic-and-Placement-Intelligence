@@ -33,6 +33,14 @@ export const deleteCompany = async (id) => {
   return response.data;
 };
 
+export const bulkDeleteCompanies = async (companyIds, mode = 'soft') => {
+  const response = await api.post('/placement/companies/bulk-delete', {
+    company_ids: companyIds,
+    mode,
+  });
+  return response.data;
+};
+
 // ============================================
 // JOB POSTING ENDPOINTS
 // ============================================
@@ -62,6 +70,14 @@ export const deleteJobPosting = async (id) => {
   return response.data;
 };
 
+export const bulkDeleteJobs = async (jobIds, force = false) => {
+  const response = await api.post('/placement/jobs/bulk-delete', {
+    job_ids: jobIds,
+    force,
+  });
+  return response.data;
+};
+
 export const publishJobPosting = async (id, confirmNoSkills = false) => {
   const response = await api.post(`/placement/jobs/${id}/publish`, null, {
     params: { confirm_no_skills: confirmNoSkills }
@@ -74,15 +90,31 @@ export const parseJdText = async (text) => {
   return response.data;
 };
 
-export const uploadJdFile = async (file) => {
+export const uploadJdFiles = async (files) => {
   const formData = new FormData();
-  formData.append('file', file);
+  if (Array.isArray(files)) {
+    files.forEach((f) => formData.append('files', f));
+  } else if (files) {
+    formData.append('files', files);
+  }
   const response = await api.post('/placement/jobs/upload-jd', formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
     },
   });
   return response.data;
+};
+
+export const uploadJdFile = async (file) => {
+  return uploadJdFiles([file]);
+};
+
+export const getJobFileDownloadUrl = (jobId, fileId) => {
+  return `/api/v1/placement/jobs/${jobId}/files/${fileId}/download`;
+};
+
+export const getJobFilePreviewUrl = (jobId, fileId) => {
+  return `/api/v1/placement/jobs/${jobId}/files/${fileId}/preview`;
 };
 
 // ============================================

@@ -2,7 +2,7 @@
 Job Posting Model for Placement Management
 """
 
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Enum, JSON
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, Enum, JSON, UniqueConstraint
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -15,6 +15,29 @@ class JobStatus(str, enum.Enum):
     DRAFT = "draft"
     OPEN = "open"
     CLOSED = "closed"
+
+
+class JobPostingAttachment(Base):
+    """Attachment metadata for job postings (referencing files table)."""
+    
+    __tablename__ = "job_posting_attachments"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    job_posting_id = Column(Integer, ForeignKey("job_postings.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_id = Column(UUID(as_uuid=True), ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True)
+    display_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    
+    __table_args__ = (
+        UniqueConstraint("job_posting_id", "file_id", name="uq_job_posting_file"),
+    )
+    
+    # Relationships
+    job_posting = relationship("JobPosting", back_populates="attachments")
+    file = relationship("File", lazy="joined")
+    
+    def __repr__(self):
+        return f"<JobPostingAttachment {self.id}: job={self.job_posting_id} file={self.file_id}>"
 
 
 class JobPosting(Base):
@@ -45,6 +68,13 @@ class JobPosting(Base):
     # Relationships
     company = relationship("Company", back_populates="job_postings")
     file = relationship("File", foreign_keys=[file_id], lazy="joined")
+    attachments = relationship(
+        "JobPostingAttachment",
+        back_populates="job_posting",
+        cascade="all, delete-orphan",
+        order_by="JobPostingAttachment.display_order",
+        lazy="joined"
+    )
     applications = relationship("Application", back_populates="job_posting", cascade="all, delete-orphan")
     shortlists = relationship("Shortlist", back_populates="job_posting")
     rounds = relationship("RecruitmentRound", back_populates="job_posting", cascade="all, delete-orphan", order_by="RecruitmentRound.round_number")
@@ -61,6 +91,17 @@ class JobPosting(Base):
             "description": self.description,
             "file_id": str(self.file_id) if self.file_id else None,
             "file_name": self.file.filename if self.file else None,
+            "attachments": [
+                {
+                    "id": att.id,
+                    "file_id": str(att.file_id),
+                    "filename": att.file.filename if att.file else None,
+                    "file_size": att.file.file_size if att.file else None,
+                    "mime_type": att.file.mime_type if att.file else None,
+                    "created_at": att.created_at.isoformat() if att.created_at else None,
+                }
+                for att in (self.attachments or [])
+            ],
             "application_url": self.application_url,
             "required_skills": self.required_skills or [],
             "preferred_skills": self.preferred_skills or [],

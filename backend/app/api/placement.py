@@ -12,17 +12,22 @@ Provides REST API for placement operations:
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, File, UploadFile
 from sqlalchemy.orm import Session, joinedload, subqueryload
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
+from uuid import UUID
+import uuid
+import os
 import io
 import csv
 from datetime import datetime
 import logging
 
 from ..core.database import get_db
+from ..core.config import settings
 from ..api.auth import get_current_user, get_current_placement_officer
 from ..models.user import User, UserRole
 from ..models.company import Company
-from ..models.job_posting import JobPosting, JobStatus
+from ..models.job_posting import JobPosting, JobStatus, JobPostingAttachment
+from ..models.file import File as FileModel, FileStatus, FileType
 from ..models.application import Application
 from ..models.shortlist import Shortlist
 from ..models.profile import StudentProfileExtended, Skill, Project
@@ -38,7 +43,9 @@ from ..models.recruitment_round import (
 )
 from ..schemas.placement import (
     CompanyCreate, CompanyUpdate, CompanyResponse,
+    CompanyBulkDeleteRequest, CompanyBulkDeleteResponse,
     JobPostingCreate, JobPostingUpdate, JobPostingResponse,
+    JobBulkDeleteRequest, JobBulkDeleteResponse,
     ApplicationCreate, ApplicationUpdate, ApplicationResponse,
     ShortlistCreate, ShortlistUpdate, ShortlistResponse,
     PlacementStatistics, CompanyStatistics, StudentPlacementStatus,
@@ -53,6 +60,7 @@ from ..schemas.placement import (
 )
 from ..services.placement_service import placement_service
 from ..services.jd_parser_service import jd_parser_service
+from ..services.file_storage.file_service import file_service
 from ..services.placement_offer_service import placement_offer_service
 from ..services.recruitment_progression_service import recruitment_progression_service
 from ..services.placement_cleanup_service import placement_cleanup_service
@@ -143,6 +151,26 @@ async def delete_company(
     if not result:
         raise HTTPException(status_code=404, detail="Company not found")
     return {"message": "Company deleted successfully"}
+
+
+@router.post("/companies/bulk-delete", response_model=CompanyBulkDeleteResponse)
+async def bulk_delete_companies(
+    request: CompanyBulkDeleteRequest,
+    current_user: User = Depends(get_current_placement_officer),
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk delete or deactivate companies with relationship-aware safety handling.
+    - 'soft' mode: Deactivates companies and closes open jobs.
+    - 'hard' mode: Permanently deletes only if zero applications/circulars/offers exist.
+    """
+    if not request.company_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one company ID must be provided."
+        )
+    result = placement_service.bulk_delete_companies(db, request.company_ids, mode=request.mode)
+    return CompanyBulkDeleteResponse(**result)
 
 
 # ============================================
@@ -245,11 +273,152 @@ async def delete_job_posting(
     current_user: User = Depends(get_current_placement_officer),
     db: Session = Depends(get_db)
 ):
-    """Delete a job posting."""
-    result = placement_service.delete_job_posting(db, job_id)
+    """Delete a job posting safely. Blocks deletion if applications exist."""
+    try:
+        result = placement_service.delete_job_posting(db, job_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not result:
         raise HTTPException(status_code=404, detail="Job posting not found")
     return {"message": "Job posting deleted successfully"}
+
+
+@router.post("/jobs/bulk-delete", response_model=JobBulkDeleteResponse)
+async def bulk_delete_jobs(
+    request: JobBulkDeleteRequest,
+    current_user: User = Depends(get_current_placement_officer),
+    db: Session = Depends(get_db)
+):
+    """
+    Bulk delete or close job postings with relationship-aware safety handling.
+    - Jobs with zero applications/circulars are permanently deleted.
+    - Jobs with applications/circulars: closed if force=True, blocked if force=False.
+    """
+    if not request.job_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one job ID must be provided."
+        )
+    result = placement_service.bulk_delete_jobs(db, request.job_ids, force=request.force)
+    return JobBulkDeleteResponse(**result)
+
+
+@router.get("/jobs/{job_id}/files/{file_id}/download")
+async def download_job_file(
+    job_id: int,
+    file_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Download a file attached to a job posting.
+    Enforces RBAC:
+    - Admins and Placement Officers have full access.
+    - Students have access only if the job is OPEN and matches their branch eligibility.
+    """
+    job = placement_service.get_job_posting(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job posting not found")
+
+    attached_ids = []
+    if job.file_id:
+        attached_ids.append(job.file_id)
+    if job.attachments:
+        attached_ids.extend([att.file_id for att in job.attachments])
+
+    if file_id not in attached_ids:
+        raise HTTPException(status_code=404, detail="File is not attached to this job posting")
+
+    if current_user.role == UserRole.STUDENT:
+        if job.status != JobStatus.OPEN:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        if job.eligible_branches and len(job.eligible_branches) > 0:
+            student_branch = None
+            if current_user.student_profile and current_user.student_profile.branch:
+                student_branch = current_user.student_profile.branch
+            elif current_user.department:
+                student_branch = current_user.department
+            target_branches = {str(b).strip().lower() for b in job.eligible_branches if b}
+            if not student_branch or str(student_branch).strip().lower() not in target_branches:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: You are not eligible for this job posting.")
+    elif current_user.role not in [UserRole.ADMIN, UserRole.PLACEMENT_OFFICER]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+    result = file_service.download_file(db, file_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="File content not found")
+
+    content = result['content']
+    filename = result['filename']
+    mime_type = result['mime_type']
+
+    return Response(
+        content=content,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(content))
+        }
+    )
+
+
+@router.get("/jobs/{job_id}/files/{file_id}/preview")
+async def preview_job_file(
+    job_id: int,
+    file_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Preview (inline display) a file attached to a job posting.
+    Enforces RBAC:
+    - Admins and Placement Officers have full access.
+    - Students have access only if the job is OPEN and matches their branch eligibility.
+    """
+    job = placement_service.get_job_posting(db, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job posting not found")
+
+    attached_ids = []
+    if job.file_id:
+        attached_ids.append(job.file_id)
+    if job.attachments:
+        attached_ids.extend([att.file_id for att in job.attachments])
+
+    if file_id not in attached_ids:
+        raise HTTPException(status_code=404, detail="File is not attached to this job posting")
+
+    if current_user.role == UserRole.STUDENT:
+        if job.status != JobStatus.OPEN:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        if job.eligible_branches and len(job.eligible_branches) > 0:
+            student_branch = None
+            if current_user.student_profile and current_user.student_profile.branch:
+                student_branch = current_user.student_profile.branch
+            elif current_user.department:
+                student_branch = current_user.department
+            target_branches = {str(b).strip().lower() for b in job.eligible_branches if b}
+            if not student_branch or str(student_branch).strip().lower() not in target_branches:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: You are not eligible for this job posting.")
+    elif current_user.role not in [UserRole.ADMIN, UserRole.PLACEMENT_OFFICER]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+
+    result = file_service.download_file(db, file_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="File content not found")
+
+    content = result['content']
+    filename = result['filename']
+    mime_type = result['mime_type']
+
+    return Response(
+        content=content,
+        media_type=mime_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Length": str(len(content))
+        }
+    )
 
 
 @router.post("/jobs/parse-jd", response_model=JdParseResponse)
@@ -279,21 +448,94 @@ async def parse_job_description(
 
 @router.post("/jobs/upload-jd", response_model=JdParseResponse)
 async def upload_job_description(
-    file: UploadFile = File(...),
+    files: Optional[List[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
     current_user: User = Depends(get_current_placement_officer),
     db: Session = Depends(get_db)
 ):
     """
-    Upload a Job Description file (PDF, DOCX, TXT) to extract structured requirements.
-    Allows Placement Officer to review and edit before creating/publishing the job.
+    Upload one or multiple Job Description files (PDF, DOCX, TXT, PNG, XLSX, etc.)
+    Persists uploaded files to storage and extracts structured job requirements
+    for Placement Officer review and editing before publication.
     """
-    try:
-        content = await file.read()
-        extracted_text = jd_parser_service.extract_text_from_file(
-            content=content,
-            filename=file.filename
+    upload_list: List[UploadFile] = []
+    if files:
+        upload_list.extend([f for f in files if f and f.filename])
+    if file and file.filename:
+        upload_list.append(file)
+
+    if not upload_list:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one job document file must be uploaded."
         )
-        parsed = jd_parser_service.parse_jd_text(extracted_text)
+
+    allowed_extensions = {".pdf", ".docx", ".doc", ".txt", ".png", ".jpg", ".jpeg", ".xlsx", ".xls", ".csv"}
+    files_data = []
+
+    for f in upload_list:
+        ext = os.path.splitext(f.filename)[1].lower() if f.filename else ""
+        if ext not in allowed_extensions:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Unsupported file format '{ext}' for file '{f.filename}'. Allowed: {', '.join(sorted(allowed_extensions))}."
+            )
+
+        content = await f.read()
+        if len(content) > settings.MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File '{f.filename}' exceeds maximum allowed size of {settings.MAX_FILE_SIZE // (1024 * 1024)}MB."
+            )
+
+        await f.seek(0)
+        file_id = None
+        try:
+            upload_res = await file_service.upload_file(
+                db=db,
+                file=f,
+                uploaded_by=current_user,
+                title=f.filename,
+                file_type="placement_doc",
+                department=current_user.department or "Placement",
+                extra_data={"module": "placement", "purpose": "job_document"}
+            )
+            if upload_res and upload_res.get("file_id"):
+                file_id = upload_res["file_id"]
+        except Exception as upload_err:
+            logger.warning(f"File storage upload failed for {f.filename}: {upload_err}")
+            try:
+                fallback_file = FileModel(
+                    id=uuid.uuid4(),
+                    filename=f.filename,
+                    file_size=len(content),
+                    mime_type=f.content_type or "application/octet-stream",
+                    bucket="placement-docs",
+                    object_key=f"fallback/{uuid.uuid4()}/{f.filename}",
+                    title=f.filename,
+                    department=current_user.department or "Placement",
+                    file_type=FileType.PLACEMENT_DOC,
+                    uploaded_by=current_user.id,
+                    version=1,
+                    is_latest=True,
+                    status=FileStatus.ACTIVE
+                )
+                db.add(fallback_file)
+                db.commit()
+                db.refresh(fallback_file)
+                file_id = fallback_file.id
+            except Exception as db_err:
+                db.rollback()
+                logger.error(f"Fallback DB file creation failed for {f.filename}: {db_err}")
+
+        files_data.append({
+            "content": content,
+            "filename": f.filename,
+            "file_id": file_id
+        })
+
+    try:
+        parsed = jd_parser_service.parse_multiple_files(files_data)
         return JdParseResponse(**parsed)
     except ValueError as e:
         raise HTTPException(

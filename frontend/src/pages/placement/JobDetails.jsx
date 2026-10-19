@@ -507,6 +507,81 @@ const JobDetails = () => {
             </a>
           </div>
         )}
+
+        {/* Attached Job Documents (Phase C) */}
+        {((selectedJob.attachments && selectedJob.attachments.length > 0) || selectedJob.file_id) && (
+          <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800/60 rounded-xl border border-gray-200 dark:border-gray-800">
+            <h3 className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+              <FileText className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              Attached Job Documents & Criteria ({selectedJob.attachments?.length || 1})
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              {selectedJob.attachments && selectedJob.attachments.length > 0 ? (
+                selectedJob.attachments.map((att) => (
+                  <div
+                    key={att.id || att.file_id}
+                    className="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-between gap-2 shadow-xs"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate" title={att.file_name}>
+                          {att.file_name}
+                        </p>
+                        <p className="text-[10px] text-gray-500">
+                          {att.file_size ? `${(att.file_size / 1024).toFixed(1)} KB` : 'Job Attachment'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <a
+                        href={`/api/v1/placement/jobs/${selectedJob.id}/files/${att.file_id}/preview`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="px-2 py-1 text-[11px] font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-gray-100 dark:bg-gray-800 rounded hover:bg-gray-200 transition-colors"
+                      >
+                        Preview
+                      </a>
+                      <a
+                        href={`/api/v1/placement/jobs/${selectedJob.id}/files/${att.file_id}/download`}
+                        download
+                        className="px-2 py-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 bg-indigo-50 dark:bg-indigo-950/50 rounded hover:bg-indigo-100 transition-colors"
+                      >
+                        Download
+                      </a>
+                    </div>
+                  </div>
+                ))
+              ) : selectedJob.file_id ? (
+                <div className="p-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg flex items-center justify-between gap-2 shadow-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <p className="text-xs font-medium text-gray-900 dark:text-gray-100 truncate">
+                      {selectedJob.file_name || 'Job Description Document'}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <a
+                      href={`/api/v1/placement/jobs/${selectedJob.id}/files/${selectedJob.file_id}/preview`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2 py-1 text-[11px] font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 bg-gray-100 dark:bg-gray-800 rounded hover:bg-gray-200"
+                    >
+                      Preview
+                    </a>
+                    <a
+                      href={`/api/v1/placement/jobs/${selectedJob.id}/files/${selectedJob.file_id}/download`}
+                      download
+                      className="px-2 py-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 bg-indigo-50 dark:bg-indigo-950/50 rounded hover:bg-indigo-100"
+                    >
+                      Download
+                    </a>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Tab Navigation Bar */}

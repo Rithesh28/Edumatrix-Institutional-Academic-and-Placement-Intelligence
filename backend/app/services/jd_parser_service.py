@@ -20,6 +20,7 @@ import logging
 import tempfile
 from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime
+from urllib.parse import urlparse
 
 from .skill_normalizer import skill_normalizer
 from .file_storage.text_extractor import text_extractor
@@ -1331,6 +1332,19 @@ class JdParserService:
         }
         return special_casing.get(skill.lower(), skill.title())
 
+    IGNORED_URL_HOSTS = {
+        "schemas.openxmlformats.org",
+        "schemas.microsoft.com",
+        "www.w3.org",
+        "w3.org",
+        "purl.org",
+        "xml.org",
+        "localhost",
+        "127.0.0.1",
+        "example.com",
+        "schema.org",
+    }
+
     def _extract_application_url_and_instructions(
         self,
         text: str,
@@ -1339,34 +1353,57 @@ class JdParserService:
         """
         Extract external company application URL (http/https) and application instructions.
         Looks for explicit links in context of application, registration, careers, portal, etc.
+        Validates URL structure and rejects invalid formats and metadata/schema URLs.
         """
         app_url: Optional[str] = None
         instructions: Optional[str] = None
 
-        # 1. URL extraction
-        url_matches = list(re.finditer(r'https?://[^\s<>"\'\`,;)]+', text, re.IGNORECASE))
-        candidate_urls = []
-        for m in url_matches:
-            raw_url = m.group(0).rstrip('.,;:)]>')
-            if raw_url.startswith(('http://', 'https://')):
-                candidate_urls.append(raw_url)
+        # 1. Candidate URL extraction
+        raw_candidates = []
+        for m in re.finditer(r'(?:https?://|www\.|forms\.gle/)[^\s<>"\'\`,;)]+', text, re.IGNORECASE):
+            raw_url = m.group(0)
+            cleaned = re.sub(r'[.,;:)>\]"\'`]+$', '', raw_url)
+            if cleaned.lower().startswith('www.'):
+                cleaned = 'https://' + cleaned
+            elif cleaned.lower().startswith('forms.gle/'):
+                cleaned = 'https://' + cleaned
+            raw_candidates.append(cleaned)
 
-        if candidate_urls:
+        valid_candidates = []
+        for u in raw_candidates:
+            try:
+                parsed = urlparse(u)
+                if parsed.scheme.lower() not in ('http', 'https'):
+                    continue
+                netloc = parsed.netloc.lower().split(':')[0]
+                if not netloc or '.' not in netloc:
+                    continue
+                if netloc in self.IGNORED_URL_HOSTS or any(netloc.endswith('.' + ign) for ign in self.IGNORED_URL_HOSTS):
+                    continue
+                path_lower = parsed.path.lower()
+                if any(path_lower.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js', '.woff']):
+                    continue
+                valid_candidates.append(u)
+            except Exception:
+                continue
+
+        if valid_candidates:
             def score_url(u: str) -> int:
                 score = 0
                 u_lower = u.lower()
                 if any(k in u_lower for k in ["apply", "career", "job", "portal", "recruit", "form", "forms.gle"]):
-                    score += 10
+                    score += 15
                 u_idx = text.find(u)
                 if u_idx != -1:
-                    window = text[max(0, u_idx - 100):min(len(text), u_idx + len(u) + 100)].lower()
-                    if any(k in window for k in ["apply", "application", "register", "registration", "portal", "submit", "link", "url"]):
-                        score += 5
+                    window = text[max(0, u_idx - 120):min(len(text), u_idx + len(u) + 120)].lower()
+                    if any(k in window for k in ["apply", "application", "register", "registration", "portal", "submit", "link", "url", "form"]):
+                        score += 10
                 return score
 
-            best_url = max(candidate_urls, key=score_url)
-            app_url = best_url
-            evidence["application_url"] = app_url
+            best_url = max(valid_candidates, key=score_url)
+            if score_url(best_url) > 0 or len(valid_candidates) == 1:
+                app_url = best_url
+                evidence["application_url"] = app_url
 
         # 2. Application instructions extraction
         instruction_patterns = [
@@ -1385,6 +1422,11 @@ class JdParserService:
 
         return app_url, instructions
 
+    def _extract_application_url(self, text: str) -> Optional[str]:
+        """Extract application URL from text using the URL extraction and validation logic."""
+        app_url, _ = self._extract_application_url_and_instructions(text, {})
+        return app_url
+
     def _extract_description(self, text: str, evidence: Dict[str, str]) -> str:
         """Extract a readable summary excerpt of the job description."""
         paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
@@ -1393,6 +1435,285 @@ class JdParserService:
             evidence["description"] = summary[:150] + "..." if len(summary) > 150 else summary
             return summary[:800].strip()
         return text[:500].strip()
+
+    def parse_multiple_files(self, files_data: List[Dict[str, Any]]) -> JdParseResult:
+        """
+        Extract and parse requirements across multiple uploaded Job Description documents.
+        Intelligently merges fields, identifies conflicts between documents, tags source evidence,
+        and distinguishes between success, partial, and failed extractions.
+        
+        Args:
+            files_data: List of dicts with keys:
+                - filename: str
+                - content: bytes
+                - file_id: Optional[UUID]
+                
+        Returns:
+            JdParseResult with merged requirements, review flags for conflicts,
+            per-file extraction details, and overall extraction status.
+        """
+        if not files_data:
+            return self._empty_result()
+
+        extracted_files_summary: List[Dict[str, Any]] = []
+        per_file_results: List[Dict[str, Any]] = []
+
+        for item in files_data:
+            fn = item.get("filename", "unknown")
+            content = item.get("content", b"")
+            fid = item.get("file_id")
+
+            try:
+                text = self.extract_text_from_file(content=content, filename=fn)
+                parsed = self.parse_jd_text(text)
+                per_file_results.append({
+                    "filename": fn,
+                    "file_id": fid,
+                    "parsed": parsed,
+                    "text": text
+                })
+                extracted_files_summary.append({
+                    "filename": fn,
+                    "file_id": str(fid) if fid else None,
+                    "size": len(content),
+                    "text_length": len(text),
+                    "status": "success" if len(text) >= 20 else "partial"
+                })
+            except Exception as err:
+                logger.warning(f"Text extraction failed for {fn}: {err}")
+                extracted_files_summary.append({
+                    "filename": fn,
+                    "file_id": str(fid) if fid else None,
+                    "size": len(content),
+                    "text_length": 0,
+                    "status": "failed",
+                    "error": str(err)
+                })
+
+        # If all failed
+        if not per_file_results:
+            empty = self._empty_result()
+            empty["extracted_files"] = extracted_files_summary
+            empty["extraction_status"] = "failed"
+            empty["review_flags"] = ["Failed to extract readable text from uploaded documents."]
+            empty["file_ids"] = [item["file_id"] for item in files_data if item.get("file_id")]
+            empty["file_names"] = [item["filename"] for item in files_data if item.get("filename")]
+            if empty["file_ids"]:
+                empty["file_id"] = empty["file_ids"][0]
+                empty["file_name"] = empty["file_names"][0]
+            return empty
+
+        # If single file succeeded
+        if len(per_file_results) == 1:
+            res = per_file_results[0]["parsed"]
+            fn = per_file_results[0]["filename"]
+            fid = per_file_results[0]["file_id"]
+            res["file_id"] = fid
+            res["file_name"] = fn
+            res["file_ids"] = [fid] if fid else []
+            res["file_names"] = [fn]
+            res["extracted_files"] = extracted_files_summary
+            
+            # Determine extraction status
+            has_failed_other = any(f["status"] == "failed" for f in extracted_files_summary)
+            if has_failed_other or len(res.get("review_flags", [])) > 0 or not res.get("title") or not res.get("required_skills"):
+                res["extraction_status"] = "partial"
+            else:
+                res["extraction_status"] = "success"
+            return res
+
+        # Multi-file merge logic
+        merged_review_flags: List[str] = []
+        merged_evidence: Dict[str, Any] = {}
+
+        # 1. Job Title selection and conflict detection
+        titles = [(r["filename"], r["parsed"].get("title")) for r in per_file_results if r["parsed"].get("title")]
+        chosen_title = None
+        if titles:
+            unique_titles = {t[1].strip().lower(): t for t in titles}
+            if len(unique_titles) > 1:
+                t1 = titles[0]
+                t2 = titles[1]
+                chosen_title = t1[1]
+                merged_review_flags.append(
+                    f"Document conflict on Job Title: '{t1[1]}' ({t1[0]}) vs '{t2[1]}' ({t2[0]}). Defaulted to '{chosen_title}'. Please verify."
+                )
+            else:
+                chosen_title = titles[0][1]
+            merged_evidence["title"] = f"[{titles[0][0]}] {chosen_title}"
+
+        # 2. Company Name
+        companies = [(r["filename"], r["parsed"].get("company_name")) for r in per_file_results if r["parsed"].get("company_name")]
+        chosen_company = None
+        if companies:
+            unique_companies = {c[1].strip().lower(): c for c in companies}
+            if len(unique_companies) > 1:
+                c1 = companies[0]
+                c2 = companies[1]
+                chosen_company = c1[1]
+                merged_review_flags.append(
+                    f"Document conflict on Company Name: '{c1[1]}' ({c1[0]}) vs '{c2[1]}' ({c2[0]}). Defaulted to '{chosen_company}'."
+                )
+            else:
+                chosen_company = companies[0][1]
+            merged_evidence["company_name"] = f"[{companies[0][0]}] {chosen_company}"
+
+        # 3. CGPA Criteria
+        cgpa_vals = [(r["filename"], r["parsed"].get("cgpa_criteria")) for r in per_file_results if r["parsed"].get("cgpa_criteria") is not None]
+        chosen_cgpa = None
+        if cgpa_vals:
+            unique_cgpas = {c[1]: c for c in cgpa_vals}
+            if len(unique_cgpas) > 1:
+                cg1 = cgpa_vals[0]
+                cg2 = cgpa_vals[1]
+                chosen_cgpa = max(c[1] for c in cgpa_vals)
+                merged_review_flags.append(
+                    f"Conflicting Minimum CGPA criteria: {cg1[1]} ({cg1[0]}) vs {cg2[1]} ({cg2[0]}). Selected higher value ({chosen_cgpa}). Please verify."
+                )
+            else:
+                chosen_cgpa = cgpa_vals[0][1]
+            merged_evidence["cgpa_criteria"] = f"[{cgpa_vals[0][0]}] Minimum CGPA: {chosen_cgpa}"
+
+        # 4. Location and Workplace Mode
+        loc_vals = [(r["filename"], r["parsed"].get("location")) for r in per_file_results if r["parsed"].get("location")]
+        chosen_location = None
+        if loc_vals:
+            unique_locs = {l[1].strip().lower(): l for l in loc_vals}
+            if len(unique_locs) > 1:
+                l1 = loc_vals[0]
+                l2 = loc_vals[1]
+                chosen_location = l1[1]
+                merged_review_flags.append(
+                    f"Conflicting Job Location: '{l1[1]}' ({l1[0]}) vs '{l2[1]}' ({l2[0]}). Please confirm."
+                )
+            else:
+                chosen_location = loc_vals[0][1]
+            merged_evidence["location"] = f"[{loc_vals[0][0]}] {chosen_location}"
+
+        work_modes = [r["parsed"].get("work_mode") for r in per_file_results if r["parsed"].get("work_mode")]
+        chosen_work_mode = work_modes[0] if work_modes else None
+
+        # 5. Salary Range & Compensation Details
+        salary_vals = [(r["filename"], r["parsed"].get("salary_range")) for r in per_file_results if r["parsed"].get("salary_range")]
+        chosen_salary = None
+        if salary_vals:
+            chosen_salary = salary_vals[0][1]
+            merged_evidence["salary_range"] = f"[{salary_vals[0][0]}] {chosen_salary}"
+        
+        comp_details = next((r["parsed"].get("compensation_details") for r in per_file_results if r["parsed"].get("compensation_details")), None)
+
+        # 6. Deadlines & Important Dates
+        deadlines = [(r["filename"], r["parsed"].get("application_deadline")) for r in per_file_results if r["parsed"].get("application_deadline")]
+        chosen_deadline = deadlines[0][1] if deadlines else None
+        if deadlines:
+            merged_evidence["application_deadline"] = f"[{deadlines[0][0]}] {chosen_deadline}"
+
+        drive_dates = [r["parsed"].get("drive_date") for r in per_file_results if r["parsed"].get("drive_date")]
+        chosen_drive_date = drive_dates[0] if drive_dates else None
+
+        joining_dates = [r["parsed"].get("joining_date") for r in per_file_results if r["parsed"].get("joining_date")]
+        chosen_joining_date = joining_dates[0] if joining_dates else None
+
+        # 7. Skills Union (Required and Preferred)
+        all_req_skills: List[str] = []
+        all_pref_skills: List[str] = []
+        for r in per_file_results:
+            fn = r["filename"]
+            reqs = r["parsed"].get("required_skills") or []
+            prefs = r["parsed"].get("preferred_skills") or []
+            all_req_skills.extend(reqs)
+            all_pref_skills.extend(prefs)
+            if reqs:
+                merged_evidence[f"required_skills_{fn}"] = f"[{fn}] {', '.join(reqs)}"
+
+        merged_req_skills = list(dict.fromkeys(all_req_skills))
+        merged_pref_skills = [s for s in list(dict.fromkeys(all_pref_skills)) if s not in merged_req_skills]
+
+        # 8. Branch Eligibility Union
+        all_branches: List[str] = []
+        for r in per_file_results:
+            b_list = r["parsed"].get("branch_eligibility") or []
+            all_branches.extend(b_list)
+        merged_branches = list(dict.fromkeys(all_branches))
+
+        # 9. Degrees and Graduation Batches
+        all_degrees: List[str] = []
+        all_batches: List[Any] = []
+        for r in per_file_results:
+            all_degrees.extend(r["parsed"].get("degree_eligibility") or [])
+            all_batches.extend(r["parsed"].get("graduation_years") or [])
+        merged_degrees = list(dict.fromkeys(all_degrees))
+        merged_batches = list(dict.fromkeys(all_batches))
+
+        # 10. Application URL
+        urls = [(r["filename"], r["parsed"].get("application_url")) for r in per_file_results if r["parsed"].get("application_url")]
+        chosen_url = urls[0][1] if urls else None
+        if chosen_url:
+            merged_evidence["application_url"] = f"[{urls[0][0]}] {chosen_url}"
+
+        instructions_list = [r["parsed"].get("application_instructions") for r in per_file_results if r["parsed"].get("application_instructions")]
+        chosen_instructions = instructions_list[0] if instructions_list else None
+
+        # 11. Description combining
+        descriptions = [r["parsed"].get("description") for r in per_file_results if r["parsed"].get("description")]
+        chosen_description = "\n\n".join(descriptions) if descriptions else ""
+
+        # 12. Aggregate Review Flags
+        for r in per_file_results:
+            fn = r["filename"]
+            for flag in r["parsed"].get("review_flags", []):
+                merged_review_flags.append(f"[{fn}] {flag}")
+
+        # Determine extraction status
+        any_failed = any(f["status"] == "failed" for f in extracted_files_summary)
+        if any_failed or merged_review_flags or not chosen_title or not merged_req_skills:
+            extraction_status = "partial"
+        else:
+            extraction_status = "success"
+
+        all_file_ids = [item["file_id"] for item in files_data if item.get("file_id")]
+        all_file_names = [item["filename"] for item in files_data if item.get("filename")]
+
+        return JdParseResult({
+            "title": chosen_title,
+            "description": chosen_description,
+            "required_skills": merged_req_skills,
+            "preferred_skills": merged_pref_skills,
+            "experience_level": per_file_results[0]["parsed"].get("experience_level"),
+            "cgpa_criteria": chosen_cgpa,
+            "branch_eligibility": merged_branches,
+            "location": chosen_location,
+            "salary_range": chosen_salary,
+            "raw_text_length": sum(r.get("text_length", 0) for r in extracted_files_summary),
+
+            "company_name": chosen_company,
+            "job_type": per_file_results[0]["parsed"].get("job_type"),
+            "degree_eligibility": merged_degrees,
+            "graduation_years": merged_batches,
+            "academic_percentages": per_file_results[0]["parsed"].get("academic_percentages"),
+            "backlog_criteria": per_file_results[0]["parsed"].get("backlog_criteria"),
+            "certifications": list(dict.fromkeys(sum([r["parsed"].get("certifications") or [] for r in per_file_results], []))),
+            "compensation_details": comp_details,
+            "application_deadline": chosen_deadline,
+            "drive_date": chosen_drive_date,
+            "joining_date": chosen_joining_date,
+            "work_mode": chosen_work_mode,
+            "bond_details": next((r["parsed"].get("bond_details") for r in per_file_results if r["parsed"].get("bond_details")), None),
+            "selection_rounds": list(dict.fromkeys(sum([r["parsed"].get("selection_rounds") or [] for r in per_file_results], []))),
+            "application_instructions": chosen_instructions,
+            "application_url": chosen_url,
+
+            # File persistence and multi-document tracking
+            "file_id": all_file_ids[0] if all_file_ids else None,
+            "file_name": all_file_names[0] if all_file_names else None,
+            "file_ids": all_file_ids,
+            "file_names": all_file_names,
+            "extracted_files": extracted_files_summary,
+            "extraction_status": extraction_status,
+
+            "review_flags": merged_review_flags,
+            "field_evidence": merged_evidence
+        })
 
     def _empty_result(self) -> Dict[str, Any]:
         """Return standardized empty extraction result."""
@@ -1434,6 +1755,12 @@ class JdParserService:
             "selection_rounds": [],
             "application_instructions": None,
             "application_url": None,
+            "file_id": None,
+            "file_name": None,
+            "file_ids": [],
+            "file_names": [],
+            "extracted_files": [],
+            "extraction_status": "failed",
             "review_flags": ["No text provided for analysis."],
             "field_evidence": {}
         })

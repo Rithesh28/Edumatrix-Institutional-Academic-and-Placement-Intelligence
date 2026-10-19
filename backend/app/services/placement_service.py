@@ -18,7 +18,7 @@ from sqlalchemy import func, and_, or_
 from datetime import datetime
 
 from ..models.company import Company
-from ..models.job_posting import JobPosting, JobStatus
+from ..models.job_posting import JobPosting, JobStatus, JobPostingAttachment
 from ..models.application import Application, ApplicationStatus
 from ..models.shortlist import Shortlist
 from ..models.user import User, UserRole
@@ -93,36 +93,167 @@ class PlacementService:
         return company
     
     def delete_company(self, db: Session, company_id: int) -> bool:
-        """Delete a company (soft delete by setting is_active=False)."""
+        """Delete a company (soft delete by setting is_active=False and closing open jobs)."""
         company = self.get_company(db, company_id)
         if not company:
             return False
         
         company.is_active = False
         company.updated_at = datetime.utcnow()
+        # Also close open jobs for this company
+        for job in company.job_postings:
+            if job.status == JobStatus.OPEN:
+                job.status = JobStatus.CLOSED
+                job.updated_at = datetime.utcnow()
+
         db.commit()
         logger.info(f"🗑️ Company soft deleted: {company.name} (ID: {company.id})")
         return True
+
+    def bulk_delete_companies(self, db: Session, company_ids: List[int], mode: str = "soft") -> Dict[str, Any]:
+        """
+        Bulk delete or deactivate companies with relationship-aware safety handling.
+        - 'soft' (default): Deactivates companies and closes any open jobs.
+        - 'hard': Permanently deletes companies only if they have zero student applications,
+                  zero circulars, and zero offers. Otherwise blocks deletion with explanation.
+        """
+        from ..models.recruitment_circular import RecruitmentCircular
+        from ..models.recruitment_round import PlacementOffer, RecruitmentRound
+
+        results = []
+        successful_count = 0
+        failed_count = 0
+
+        for cid in company_ids:
+            company = db.query(Company).filter(Company.id == cid).first()
+            if not company:
+                results.append({
+                    "id": cid,
+                    "name": None,
+                    "success": False,
+                    "status": "not_found",
+                    "message": f"Company with ID {cid} not found."
+                })
+                failed_count += 1
+                continue
+
+            job_count = db.query(JobPosting).filter(JobPosting.company_id == company.id).count()
+            app_count = db.query(Application).join(JobPosting, Application.job_posting_id == JobPosting.id).filter(JobPosting.company_id == company.id).count()
+            circular_count = db.query(RecruitmentCircular).filter(RecruitmentCircular.company_id == company.id).count()
+            offer_count = db.query(PlacementOffer).join(JobPosting, PlacementOffer.job_posting_id == JobPosting.id).filter(JobPosting.company_id == company.id).count()
+
+            dep_counts = {
+                "jobs": job_count,
+                "applications": app_count,
+                "circulars": circular_count,
+                "offers": offer_count
+            }
+
+            if mode == "hard":
+                if app_count > 0 or circular_count > 0 or offer_count > 0:
+                    results.append({
+                        "id": cid,
+                        "name": company.name,
+                        "success": False,
+                        "status": "blocked",
+                        "message": (
+                            f"Cannot permanently delete '{company.name}' because it has {app_count} application(s), "
+                            f"{circular_count} recruitment drive(s), and {offer_count} verified offer(s). "
+                            f"Use deactivation (soft delete) instead to preserve institutional records."
+                        ),
+                        "dependent_counts": dep_counts
+                    })
+                    failed_count += 1
+                    continue
+
+                # Safe to hard delete empty jobs & company
+                for job in company.job_postings:
+                    db.query(JobPostingAttachment).filter(JobPostingAttachment.job_posting_id == job.id).delete()
+                    db.query(Shortlist).filter(Shortlist.job_posting_id == job.id).delete()
+                    db.delete(job)
+                db.query(Shortlist).filter(Shortlist.company_id == company.id).delete()
+                db.delete(company)
+                db.commit()
+                results.append({
+                    "id": cid,
+                    "name": company.name,
+                    "success": True,
+                    "status": "deleted",
+                    "message": f"Company '{company.name}' permanently deleted.",
+                    "dependent_counts": dep_counts
+                })
+                successful_count += 1
+            else:
+                # Soft delete
+                company.is_active = False
+                company.updated_at = datetime.utcnow()
+                open_jobs_closed = 0
+                for job in company.job_postings:
+                    if job.status == JobStatus.OPEN:
+                        job.status = JobStatus.CLOSED
+                        job.updated_at = datetime.utcnow()
+                        open_jobs_closed += 1
+                db.commit()
+                results.append({
+                    "id": cid,
+                    "name": company.name,
+                    "success": True,
+                    "status": "deactivated",
+                    "message": f"Company '{company.name}' deactivated successfully ({open_jobs_closed} open job(s) closed).",
+                    "dependent_counts": dep_counts
+                })
+                successful_count += 1
+
+        deleted_cnt = sum(1 for r in results if r["status"] == "deleted")
+        deactivated_cnt = sum(1 for r in results if r["status"] == "deactivated")
+        blocked_cnt = sum(1 for r in results if r["status"] == "blocked")
+
+        return {
+            "total_requested": len(company_ids),
+            "successful_count": successful_count,
+            "failed_count": failed_count,
+            "deleted_count": deleted_cnt,
+            "deactivated_count": deactivated_cnt,
+            "blocked_count": blocked_cnt,
+            "results": results
+        }
     
     # ============================================
     # JOB POSTING MANAGEMENT
     # ============================================
     
     def create_job_posting(self, db: Session, job_data: JobPostingCreate, created_by: int) -> JobPosting:
-        """Create a new job posting (defaults to DRAFT status)."""
-        # Validate attached file if specified
-        if getattr(job_data, "file_id", None) is not None:
-            file_rec = db.query(File).filter(File.id == job_data.file_id).first()
+        """Create a new job posting (defaults to DRAFT status) with multi-document attachment support."""
+        # 1. Collect and validate attached files
+        attachment_ids: List[Any] = []
+        if getattr(job_data, "attachment_file_ids", None):
+            attachment_ids.extend(job_data.attachment_file_ids)
+        if getattr(job_data, "file_id", None) and job_data.file_id not in attachment_ids:
+            attachment_ids.insert(0, job_data.file_id)
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduped_ids = []
+        for fid in attachment_ids:
+            if fid not in seen:
+                seen.add(fid)
+                deduped_ids.append(fid)
+
+        # Validate that all referenced files exist in files table and are not deleted
+        for fid in deduped_ids:
+            file_rec = db.query(File).filter(File.id == fid).first()
             if not file_rec:
-                raise ValueError(f"Attached file with ID {job_data.file_id} not found")
+                raise ValueError(f"Attached file with ID {fid} not found")
             if file_rec.status == FileStatus.DELETED:
-                raise ValueError(f"Attached file with ID {job_data.file_id} has been deleted")
+                raise ValueError(f"Attached file with ID {fid} has been deleted")
+
+        primary_file_id = getattr(job_data, 'file_id', None) or (deduped_ids[0] if deduped_ids else None)
 
         job = JobPosting(
             company_id=job_data.company_id,
             title=job_data.title,
             description=job_data.description,
-            file_id=getattr(job_data, 'file_id', None),
+            file_id=primary_file_id,
             required_skills=job_data.required_skills,
             preferred_skills=getattr(job_data, 'preferred_skills', []),
             experience_level=job_data.experience_level,
@@ -137,9 +268,20 @@ class PlacementService:
             created_by=created_by
         )
         db.add(job)
+        db.flush()
+
+        # Link attachments
+        for idx, fid in enumerate(deduped_ids):
+            att = JobPostingAttachment(
+                job_posting_id=job.id,
+                file_id=fid,
+                display_order=idx
+            )
+            db.add(att)
+
         db.commit()
         db.refresh(job)
-        logger.info(f"✅ Job posting created: {job.title} (ID: {job.id})")
+        logger.info(f"✅ Job posting created: {job.title} (ID: {job.id}) with {len(deduped_ids)} attachment(s)")
         return job
 
     def publish_job_posting(self, db: Session, job_id: int, confirm_no_skills: bool = False) -> Optional[JobPosting]:
@@ -252,19 +394,21 @@ class PlacementService:
         return notif_count
     
     def get_job_posting(self, db: Session, job_id: int) -> Optional[JobPosting]:
-        """Get a job posting by ID with company and file data."""
+        """Get a job posting by ID with company, primary file, and attachments loaded."""
         return db.query(JobPosting).options(
             joinedload(JobPosting.company),
-            joinedload(JobPosting.file)
+            joinedload(JobPosting.file),
+            joinedload(JobPosting.attachments).joinedload(JobPostingAttachment.file)
         ).filter(JobPosting.id == job_id).first()
 
     def get_job_postings(self, db: Session, skip: int = 0, limit: int = 100, 
                         company_id: Optional[int] = None, 
                         status: Optional[JobStatus] = None) -> List[JobPosting]:
-        """Get all job postings with filters."""
+        """Get all job postings with filters and attached documents loaded."""
         query = db.query(JobPosting).options(
             joinedload(JobPosting.company),
-            joinedload(JobPosting.file)
+            joinedload(JobPosting.file),
+            joinedload(JobPosting.attachments).joinedload(JobPostingAttachment.file)
         )
         
         if company_id:
@@ -275,7 +419,7 @@ class PlacementService:
         return query.order_by(JobPosting.created_at.desc()).offset(skip).limit(limit).all()
     
     def update_job_posting(self, db: Session, job_id: int, job_data: JobPostingUpdate) -> Optional[JobPosting]:
-        """Update a job posting."""
+        """Update a job posting and sync attachments."""
         job = self.get_job_posting(db, job_id)
         if not job:
             return None
@@ -283,13 +427,46 @@ class PlacementService:
         old_status = job.status
         update_dict = job_data.model_dump(exclude_unset=True)
 
-        # Validate attached file if being updated
+        # Synchronize attachments if specified
+        new_attachment_ids = update_dict.pop("attachment_file_ids", None)
         if "file_id" in update_dict and update_dict["file_id"] is not None:
             file_rec = db.query(File).filter(File.id == update_dict["file_id"]).first()
             if not file_rec:
                 raise ValueError(f"Attached file with ID {update_dict['file_id']} not found")
             if file_rec.status == FileStatus.DELETED:
                 raise ValueError(f"Attached file with ID {update_dict['file_id']} has been deleted")
+
+        if new_attachment_ids is not None:
+            seen = set()
+            deduped_ids = []
+            for fid in new_attachment_ids:
+                if fid not in seen:
+                    seen.add(fid)
+                    deduped_ids.append(fid)
+
+            # Ensure file_id is also in attachments if set
+            current_fid = update_dict.get("file_id") or job.file_id
+            if current_fid and current_fid not in seen:
+                seen.add(current_fid)
+                deduped_ids.append(current_fid)
+
+            for fid in deduped_ids:
+                file_rec = db.query(File).filter(File.id == fid).first()
+                if not file_rec:
+                    raise ValueError(f"Attached file with ID {fid} not found")
+                if file_rec.status == FileStatus.DELETED:
+                    raise ValueError(f"Attached file with ID {fid} has been deleted")
+
+            # Replace attachments
+            db.query(JobPostingAttachment).filter(JobPostingAttachment.job_posting_id == job.id).delete()
+            for idx, fid in enumerate(deduped_ids):
+                db.add(JobPostingAttachment(
+                    job_posting_id=job.id,
+                    file_id=fid,
+                    display_order=idx
+                ))
+            if deduped_ids and not update_dict.get("file_id"):
+                job.file_id = deduped_ids[0]
 
         for key, value in update_dict.items():
             setattr(job, key, value)
@@ -309,15 +486,127 @@ class PlacementService:
         return job
     
     def delete_job_posting(self, db: Session, job_id: int) -> bool:
-        """Delete a job posting."""
+        """Delete a job posting safely. Rejects deletion if job has student applications."""
         job = self.get_job_posting(db, job_id)
         if not job:
             return False
         
+        # Check if job has applications or circular links
+        app_count = db.query(Application).filter(Application.job_posting_id == job.id).count()
+        if app_count > 0:
+            raise ValueError(
+                f"Cannot delete job '{job.title}' because it has {app_count} student application(s). "
+                "Please close the job instead to preserve institutional records."
+            )
+        
+        from ..models.recruitment_circular import RecruitmentCircularJob
+        circ_count = db.query(RecruitmentCircularJob).filter(RecruitmentCircularJob.job_posting_id == job.id).count()
+        if circ_count > 0:
+            raise ValueError(
+                f"Cannot delete job '{job.title}' because it is linked to {circ_count} recruitment circular(s)."
+            )
+
+        db.query(JobPostingAttachment).filter(JobPostingAttachment.job_posting_id == job.id).delete()
+        db.query(Shortlist).filter(Shortlist.job_posting_id == job.id).delete()
         db.delete(job)
         db.commit()
         logger.info(f"🗑️ Job posting deleted: {job.title} (ID: {job.id})")
         return True
+
+    def bulk_delete_jobs(self, db: Session, job_ids: List[int], force: bool = False) -> Dict[str, Any]:
+        """
+        Bulk delete or close job postings with relationship-aware safety handling.
+        - If a job has 0 applications and 0 circular links: permanently deletes the job and its attachments.
+        - If a job has student applications or circular links:
+            - If force=True: Closes the job (status -> CLOSED) to preserve student applications and progression history.
+            - If force=False: Blocks deletion and explains the restriction with dependent counts.
+        """
+        from ..models.recruitment_circular import RecruitmentCircularJob
+
+        results = []
+        successful_count = 0
+        failed_count = 0
+
+        for jid in job_ids:
+            job = db.query(JobPosting).filter(JobPosting.id == jid).first()
+            if not job:
+                results.append({
+                    "id": jid,
+                    "title": None,
+                    "success": False,
+                    "status": "not_found",
+                    "message": f"Job posting with ID {jid} not found."
+                })
+                failed_count += 1
+                continue
+
+            app_count = db.query(Application).filter(Application.job_posting_id == job.id).count()
+            circular_count = db.query(RecruitmentCircularJob).filter(RecruitmentCircularJob.job_posting_id == job.id).count()
+            rounds_count = len(job.rounds) if job.rounds else 0
+
+            dep_counts = {
+                "applications": app_count,
+                "circulars": circular_count,
+                "rounds": rounds_count
+            }
+
+            if app_count > 0 or circular_count > 0:
+                if force:
+                    # Safe alternative: close job to preserve records
+                    job.status = JobStatus.CLOSED
+                    job.updated_at = datetime.utcnow()
+                    db.commit()
+                    results.append({
+                        "id": jid,
+                        "title": job.title,
+                        "success": True,
+                        "status": "closed",
+                        "message": f"Job '{job.title}' has {app_count} application(s); changed status to CLOSED to preserve recruitment records.",
+                        "dependent_counts": dep_counts
+                    })
+                    successful_count += 1
+                else:
+                    results.append({
+                        "id": jid,
+                        "title": job.title,
+                        "success": False,
+                        "status": "blocked",
+                        "message": (
+                            f"Cannot delete job '{job.title}' because it has {app_count} student application(s) "
+                            f"and {circular_count} drive link(s). You can close the job to end recruitment safely."
+                        ),
+                        "dependent_counts": dep_counts
+                    })
+                    failed_count += 1
+            else:
+                # 0 applications, 0 circular links: safe to delete
+                db.query(JobPostingAttachment).filter(JobPostingAttachment.job_posting_id == job.id).delete()
+                db.query(Shortlist).filter(Shortlist.job_posting_id == job.id).delete()
+                db.delete(job)
+                db.commit()
+                results.append({
+                    "id": jid,
+                    "title": job.title,
+                    "success": True,
+                    "status": "deleted",
+                    "message": f"Job '{job.title}' deleted successfully.",
+                    "dependent_counts": dep_counts
+                })
+                successful_count += 1
+
+        deleted_cnt = sum(1 for r in results if r["status"] == "deleted")
+        closed_cnt = sum(1 for r in results if r["status"] == "closed")
+        blocked_cnt = sum(1 for r in results if r["status"] == "blocked")
+
+        return {
+            "total_requested": len(job_ids),
+            "successful_count": successful_count,
+            "failed_count": failed_count,
+            "deleted_count": deleted_cnt,
+            "closed_count": closed_cnt,
+            "blocked_count": blocked_cnt,
+            "results": results
+        }
     
     # ============================================
     # APPLICATION MANAGEMENT

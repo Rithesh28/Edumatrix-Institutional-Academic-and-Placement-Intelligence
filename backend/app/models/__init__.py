@@ -11,7 +11,7 @@ from .duty_conflict import DutyConflict, ConflictType
 from .file import File, FileType, FileStatus
 from .file_version import FileVersion
 from .company import Company
-from .job_posting import JobPosting, JobStatus
+from .job_posting import JobPosting, JobStatus, JobPostingAttachment
 from .application import Application, ApplicationStatus
 from .shortlist import Shortlist
 from .recruitment_circular import (
@@ -91,6 +91,7 @@ __all__ = [
     'Company',
     'JobPosting',
     'JobStatus',
+    'JobPostingAttachment',
     'Application',
     'ApplicationStatus',
     'Shortlist',
