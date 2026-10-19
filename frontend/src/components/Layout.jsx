@@ -67,10 +67,12 @@ function Layout() {
     if (role === 'placement_officer' || role === 'placement') {
       return [
         { name: 'Dashboard', path: '/placement/dashboard', icon: '📊' },
+        { name: 'Manage Companies', path: '/placement/companies', icon: '🏢' },
+        { name: 'Manage Jobs', path: '/placement/jobs', icon: '💼' },
         { name: 'Recruitment Drives', path: '/placement/circulars', icon: '📢' },
-        { name: 'Students', path: '/placement/students', icon: '👨‍🎓' },
+        { name: 'Applications', path: '/placement/applications', icon: '📑' },
+        { name: 'View Students', path: '/placement/students', icon: '👨‍🎓' },
         { name: 'Reports', path: '/placement/reports', icon: '📈' },
-        { name: 'Resume Analyzer', path: '/placement/resume-analyzer', icon: '📄' },
         { name: 'Chat', path: '/placement/chat', icon: '💬' },
       ]
     }

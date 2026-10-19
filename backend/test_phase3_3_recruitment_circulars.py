@@ -566,12 +566,17 @@ class TestRecruitmentCirculars(unittest.TestCase):
         pub_res = requests.post(f"{BASE_URL}/placement/jobs/{job_id}/publish", headers=self.po_headers)
         self.assertEqual(pub_res.status_code, 200)
 
-        # Verify student receives placement_job notification
-        notifs = requests.get(f"{BASE_URL}/notifications", headers=self.s1_headers).json()
-        job_notifs = [
-            n for n in notifs
-            if n.get("type") == "placement_job" and n.get("reference_id") == job_id
-        ]
+        # Verify student receives placement_job notification (allow async Celery dispatch)
+        job_notifs = []
+        for _ in range(10):
+            notifs = requests.get(f"{BASE_URL}/notifications", headers=self.s1_headers).json()
+            job_notifs = [
+                n for n in notifs
+                if n.get("type") == "placement_job" and n.get("reference_id") == job_id
+            ]
+            if len(job_notifs) >= 1:
+                break
+            time.sleep(0.5)
         self.assertEqual(len(job_notifs), 1, "Standalone job publication failed to notify student!")
 
     def test_12_cross_department_attachment_preview_and_download(self):

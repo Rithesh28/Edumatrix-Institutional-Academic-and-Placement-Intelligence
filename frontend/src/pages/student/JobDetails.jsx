@@ -106,6 +106,26 @@ function StudentJobDetails() {
     activeApplication?.external_applied_at || activeApplication?.is_external_confirmed
   );
 
+  // Validate HTTP/HTTPS application URL and prevent sensitive path exposure
+  const isValidHttpUrl = (urlString) => {
+    if (!urlString || typeof urlString !== 'string') return false;
+    const trimmed = urlString.trim();
+    if (!/^https?:\/\//i.test(trimmed)) return false;
+    if (trimmed.includes('/minio/') || trimmed.includes(':9000/') || trimmed.includes('minio:')) {
+      return false;
+    }
+    try {
+      const parsed = new URL(trimmed);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+
+  const hasValidExternalUrl = useMemo(() => {
+    return isValidHttpUrl(selectedJob?.application_url);
+  }, [selectedJob?.application_url]);
+
   // Check if student has a verified placement offer for this job (Stage 3.3.6)
   const jobVerifiedOffer = useMemo(() => {
     if (!jobIdNum || !Array.isArray(myOffers)) return null;
@@ -328,7 +348,7 @@ function StudentJobDetails() {
 
           {/* Quick CTA on Header */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full lg:w-auto">
-            {selectedJob.application_url ? (
+            {hasValidExternalUrl ? (
               // EXTERNAL JOB WORKFLOW
               <>
                 <a
@@ -336,9 +356,10 @@ function StudentJobDetails() {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-all shadow-sm hover:shadow flex items-center justify-center gap-2 cursor-pointer"
-                  title="Open company application portal in a new tab"
+                  title="Open company application website in a new tab"
+                  id="apply-on-website-btn"
                 >
-                  <span>Apply on Company Website</span>
+                  <span>Apply on Website</span>
                   <ExternalLink className="w-4 h-4" />
                 </a>
 
@@ -369,13 +390,19 @@ function StudentJobDetails() {
                       disabled={isConfirmingExternal || (isEligibilityForCurrentJob && !jobEligibility.is_eligible)}
                       className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-all shadow-sm flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                       id="header-confirm-external-btn"
+                      data-testid="mark-as-applied-btn"
                     >
                       <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>{isConfirmingExternal ? 'Confirming...' : "I've Applied — Confirm Application"}</span>
+                      <span>{isConfirmingExternal ? 'Recording...' : "Mark as Applied"}</span>
                     </button>
                   </div>
                 )}
               </>
+            ) : selectedJob?.application_url ? (
+              <div className="px-4 py-2 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-xl text-xs font-medium flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>External URL is invalid or unsupported</span>
+              </div>
             ) : (
               // INTERNAL DIRECT JOB WORKFLOW (no external URL)
               isAlreadyApplied ? (
@@ -535,7 +562,7 @@ function StudentJobDetails() {
                   <div className="space-y-1">
                     <p className="font-semibold">Important instructions:</p>
                     <ol className="list-decimal list-inside space-y-0.5 text-blue-800 dark:text-blue-300 text-[11px]">
-                      <li>Click <strong>Apply on Company Website</strong> below to open the official application form in a new tab.</li>
+                      <li>Click <strong>Apply on Website</strong> below to open the official application form in a new tab.</li>
                       <li>Complete and submit your application on the company's website.</li>
                       <li>Return to EduMatrix after applying. Opening the external URL does not automatically record your application.</li>
                     </ol>
@@ -548,8 +575,9 @@ function StudentJobDetails() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm hover:shadow cursor-pointer"
+                    id="apply-on-website-body-btn"
                   >
-                    <span>Apply on Company Website</span>
+                    <span>Apply on Website</span>
                     <ExternalLink className="w-4 h-4" />
                   </a>
 
@@ -573,9 +601,10 @@ function StudentJobDetails() {
                         disabled={isConfirmingExternal || (isEligibilityForCurrentJob && !jobEligibility.is_eligible)}
                         className="inline-flex items-center justify-center gap-2 px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold transition-all shadow-sm hover:shadow cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         id="confirm-external-application-btn"
+                        data-testid="mark-as-applied-body-btn"
                       >
                         <CheckCircle2 className="w-4 h-4" />
-                        <span>{isConfirmingExternal ? 'Confirming...' : "I've Applied — Confirm Application"}</span>
+                        <span>{isConfirmingExternal ? 'Recording...' : "Mark as Applied"}</span>
                       </button>
                     </div>
                   )}
@@ -593,7 +622,7 @@ function StudentJobDetails() {
                   </div>
                 ) : (
                   <p className="text-[11px] text-gray-500 dark:text-gray-400 italic">
-                    Click <strong>I've Applied on Company Website</strong> only after completing your submission on the external portal.
+                    Click <strong>Mark as Applied</strong> only after completing your submission on the external portal.
                   </p>
                 )}
               </div>
@@ -1410,16 +1439,17 @@ function StudentJobDetails() {
                 disabled={isConfirmingExternal}
                 className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 id="modal-confirm-external-btn"
+                data-testid="modal-mark-as-applied-btn"
               >
                 {isConfirmingExternal ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Confirming Submission...</span>
+                    <span>Recording Application...</span>
                   </>
                 ) : (
                   <>
                     <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>I've Applied — Confirm Application</span>
+                    <span>Mark as Applied</span>
                   </>
                 )}
               </button>

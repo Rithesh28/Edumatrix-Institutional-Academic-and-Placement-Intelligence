@@ -715,11 +715,11 @@ const CircularDetails = () => {
                   Posters, JDs, Guidelines, and Eligibility Sheets
                 </span>
                 <button
-                  onClick={() => navigate('/files')}
+                  onClick={() => navigate('/placement/results')}
                   className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
-                  title="Open Institutional File Repository"
+                  title="Process recruitment round results and shortlists"
                 >
-                  <span>File Repository →</span>
+                  <span>Shortlists & Results →</span>
                 </button>
               </div>
             </div>

@@ -90,12 +90,63 @@ class Application(Base):
         return None
 
     @property
+    def student_usn(self):
+        if self.student and hasattr(self.student, "student_profile") and self.student.student_profile:
+            return self.student.student_profile.enrollment_number
+        return None
+
+    @property
     def job_title(self):
         return self.job_posting.title if self.job_posting else None
 
     @property
     def company_name(self):
         return self.job_posting.company.name if self.job_posting and self.job_posting.company else None
+
+    @property
+    def company_id(self):
+        return self.job_posting.company_id if self.job_posting else None
+
+    @property
+    def job_deadline(self):
+        return self.job_posting.application_deadline if self.job_posting else None
+
+    @property
+    def job_status(self):
+        return self.job_posting.status.value if (self.job_posting and self.job_posting.status) else None
+
+    @property
+    def recruitment_progression(self):
+        if not self.round_outcomes:
+            return []
+        return [
+            {
+                "id": outcome.id,
+                "round_id": outcome.round_id,
+                "round_number": outcome.round.round_number if outcome.round else None,
+                "round_name": outcome.round.name if outcome.round else None,
+                "round_type": outcome.round.round_type if outcome.round else None,
+                "outcome": outcome.outcome.value if outcome.outcome else None,
+                "score": outcome.score,
+                "remarks": outcome.remarks,
+                "confirmed_at": outcome.confirmed_at.isoformat() if outcome.confirmed_at else None,
+            }
+            for outcome in self.round_outcomes
+        ]
+
+    @property
+    def verified_offer(self):
+        if not self.placement_offer:
+            return None
+        offer = self.placement_offer
+        return {
+            "id": offer.id,
+            "ctc_lpa": offer.ctc_lpa,
+            "designation": offer.designation,
+            "acceptance_status": offer.acceptance_status.value if offer.acceptance_status else None,
+            "offer_date": offer.offer_date.isoformat() if offer.offer_date else None,
+            "response_date": offer.response_date.isoformat() if offer.response_date else None,
+        }
 
     def to_dict(self):
         return {
@@ -105,9 +156,13 @@ class Application(Base):
             "student_email": self.student_email,
             "student_branch": self.student_branch,
             "student_cgpa": self.student_cgpa,
+            "student_usn": self.student_usn,
             "job_posting_id": self.job_posting_id,
             "job_title": self.job_title,
             "company_name": self.company_name,
+            "company_id": self.company_id,
+            "job_deadline": self.job_deadline.isoformat() if self.job_deadline else None,
+            "job_status": self.job_status,
             "status": self.status.value if self.status else None,
             "eligibility_score": self.eligibility_score,
             "match_percentage": self.match_percentage,
@@ -118,5 +173,7 @@ class Application(Base):
             "applied_at": self.applied_at.isoformat() if self.applied_at else None,
             "external_applied_at": self.external_applied_at.isoformat() if self.external_applied_at else None,
             "is_external_confirmed": self.is_external_confirmed,
+            "recruitment_progression": self.recruitment_progression,
+            "verified_offer": self.verified_offer,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

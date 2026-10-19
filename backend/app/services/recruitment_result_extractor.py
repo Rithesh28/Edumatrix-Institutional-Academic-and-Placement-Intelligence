@@ -71,16 +71,144 @@ class RecruitmentResultExtractor:
         if not file_bytes or len(file_bytes) == 0:
             raise RecruitmentResultExtractionError("The uploaded result file is empty.")
 
-        ext = os.path.splitext(filename)[1].lower()
+        ext = os.path.splitext(filename or "")[1].lower()
 
-        if ext == ".csv":
+        if ext in [".csv", ".txt"]:
             return self._extract_csv(file_bytes)
         elif ext in [".xlsx", ".xls"]:
             return self._extract_excel(file_bytes, ext)
         elif ext == ".pdf":
             return self._extract_pdf(file_bytes)
+        elif ext in [".docx", ".doc"]:
+            return self._extract_docx(file_bytes)
+        elif ext in [".png", ".jpg", ".jpeg"]:
+            return self._extract_image(file_bytes)
         else:
-            raise RecruitmentResultExtractionError(f"Unsupported result file format: '{ext}'. Supported formats: .csv, .xlsx, .xls, .pdf")
+            raise RecruitmentResultExtractionError(f"Unsupported result file format: '{ext}'. Supported formats: .csv, .xlsx, .xls, .pdf, .docx, .txt, .png, .jpg, .jpeg")
+
+    # =========================================================================
+    # IMAGE OCR EXTRACTION
+    # =========================================================================
+    def _extract_image(self, file_bytes: bytes) -> Dict[str, Any]:
+        """Extract candidate rows from image files using OCR."""
+        try:
+            from app.services.ocr_service import OCRService
+            ocr = OCRService()
+            text = ocr.extract_text_from_image_bytes(file_bytes)
+        except Exception as e:
+            raise ValueError(f"OCR service failed on image: {str(e)}")
+
+        if not text or text.startswith("OCR Error:"):
+            raise ValueError(f"Could not extract readable text from image: {text}")
+
+        lines = [line.strip() for line in text.splitlines() if line.strip()]
+        if not lines:
+            raise ValueError("Image OCR extracted no readable text lines.")
+
+        # Attempt structured delimiter-based parsing (e.g. CSV-like text inside image)
+        for candidate_delim in [",", "\t", ";", "|"]:
+            if candidate_delim in lines[0] and lines[0].count(candidate_delim) >= 1:
+                reader = csv.reader(lines, delimiter=candidate_delim)
+                raw_rows = [row for row in reader if any(cell.strip() for cell in row)]
+                if len(raw_rows) >= 2:
+                    header_row = raw_rows[0]
+                    data_rows = raw_rows[1:]
+                    return self._build_extracted_result(header_row, data_rows, source_page=1)
+
+        # Tabular whitespace check: if header line has 2+ columns separated by 2+ spaces
+        tokens_line_0 = re.split(r"\s{2,}|\t", lines[0])
+        if len(tokens_line_0) >= 2 and any(k in lines[0].lower() for k in ["usn", "roll", "name", "email", "status", "candidate"]):
+            headers = [t.strip() for t in tokens_line_0 if t.strip()]
+            data_rows = []
+            for line in lines[1:]:
+                parts = [p.strip() for p in re.split(r"\s{2,}|\t", line) if p.strip()]
+                if parts:
+                    data_rows.append(parts)
+            if data_rows:
+                return self._build_extracted_result(headers, data_rows, source_page=1)
+
+        # Free-form line pattern matching for USN / Name / Email / Status
+        headers = ["USN", "Name", "Email", "Status"]
+        data_rows = []
+        for line in lines:
+            # Check email
+            email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", line)
+            email = email_match.group(0) if email_match else ""
+
+            # Check USN pattern
+            usn_match = re.search(r"\b[0-9][a-zA-Z]{2}[0-9]{2}[a-zA-Z]{2}[0-9]{3}\b|\b[a-zA-Z]{2,4}[0-9]{5,10}\b", line, re.IGNORECASE)
+            usn = usn_match.group(0).upper() if usn_match else ""
+
+            # Remainder as name / status
+            rem = line
+            if email:
+                rem = rem.replace(email, "")
+            if usn:
+                rem = re.sub(re.escape(usn), "", rem, flags=re.IGNORECASE)
+            rem = rem.strip(" ,-|:\t")
+
+            status = "shortlisted"
+            for term in ["selected", "rejected", "shortlisted", "absent", "cleared"]:
+                if re.search(r"\b" + term + r"\b", rem, re.IGNORECASE):
+                    status = term
+                    rem = re.sub(r"\b" + term + r"\b", "", rem, flags=re.IGNORECASE).strip(" ,-|:\t")
+                    break
+
+            name = rem
+            if usn or email or name:
+                data_rows.append([usn, name, email, status])
+
+        if not data_rows:
+            raise ValueError("Could not extract any candidate records from the image OCR output.")
+
+        return self._build_extracted_result(headers, data_rows, source_page=1)
+
+
+    # =========================================================================
+    # DOCX TABLE EXTRACTION
+    # =========================================================================
+    def _extract_docx(self, file_bytes: bytes) -> Dict[str, Any]:
+        """Extract candidate rows from tables inside a DOCX document."""
+        try:
+            import docx
+        except ImportError:
+            raise RuntimeError("python-docx is required for DOCX table extraction.")
+
+        try:
+            doc = docx.Document(io.BytesIO(file_bytes))
+        except Exception as e:
+            raise ValueError(f"Failed to open Word document: {str(e)}")
+
+        all_headers: Optional[List[str]] = None
+        data_rows: List[List[str]] = []
+
+        for table in doc.tables:
+            table_rows = []
+            for row in table.rows:
+                row_cells = [cell.text.strip() for cell in row.cells]
+                if any(row_cells):
+                    table_rows.append(row_cells)
+
+            if not table_rows:
+                continue
+
+            if all_headers is None:
+                all_headers = table_rows[0]
+                data_rows.extend(table_rows[1:])
+            else:
+                # If subsequent table repeats header, skip header row
+                if [c.lower() for c in table_rows[0]] == [c.lower() for c in all_headers]:
+                    data_rows.extend(table_rows[1:])
+                else:
+                    data_rows.extend(table_rows)
+
+        if not all_headers or not data_rows:
+            raise ValueError(
+                "Could not extract a candidate table from this Word document. "
+                "Ensure the document contains a table with candidate column headers (e.g., USN, Name, Status)."
+            )
+
+        return self._build_extracted_result(all_headers, data_rows, source_page=1)
 
     # =========================================================================
     # CSV EXTRACTION

@@ -13,7 +13,7 @@ Handles all placement operations:
 
 import logging
 from typing import List, Optional, Dict, Any, Tuple, Union
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, subqueryload
 from sqlalchemy import func, and_, or_
 from datetime import datetime
 
@@ -26,6 +26,13 @@ from ..models.profile import StudentProfile, Skill, StudentProfileExtended, Plac
 from ..models.resume import Resume
 from ..models.notification import Notification
 from ..models.file import File, FileStatus
+from ..models.recruitment_circular import RecruitmentCircular
+from ..models.recruitment_round import (
+    RecruitmentRound,
+    StudentRoundOutcome,
+    PlacementOffer,
+    OfferAcceptanceStatus,
+)
 from ..schemas.placement import (
     CompanyCreate, CompanyUpdate,
     JobPostingCreate, JobPostingUpdate,
@@ -616,7 +623,8 @@ class PlacementService:
         self,
         db: Session,
         app_data: ApplicationCreate,
-        current_user: Optional[User] = None
+        current_user: Optional[User] = None,
+        allow_existing: bool = False
     ) -> Application:
         """
         Create a new application with server-authoritative scoring, eligibility validation,
@@ -665,6 +673,8 @@ class PlacementService:
             Application.job_posting_id == job.id
         ).first()
         if existing:
+            if allow_existing:
+                return existing
             raise ValueError("You have already applied for this job")
 
         # 4. Server-Authoritative Matching and Eligibility
@@ -732,6 +742,12 @@ class PlacementService:
             db.refresh(application)
         except IntegrityError:
             db.rollback()
+            existing = db.query(Application).filter(
+                Application.student_id == student_id,
+                Application.job_posting_id == job.id
+            ).first()
+            if existing and allow_existing:
+                return existing
             raise ValueError("You have already applied for this job")
 
         logger.info(f"✅ Authoritative Application created: Student {student_id} -> Job {job.id} (Score: {authoritative_match_score}%)")
@@ -744,21 +760,43 @@ class PlacementService:
             joinedload(Application.job_posting)
         ).filter(Application.id == app_id).first()
     
-    def get_applications(self, db: Session, student_id: Optional[int] = None,
-                         job_posting_id: Optional[int] = None,
-                         circular_id: Optional[int] = None,
-                         status: Optional[ApplicationStatus] = None,
-                         skip: int = 0, limit: int = 100) -> List[Application]:
-        """Get applications with filters."""
+    def get_applications(
+        self,
+        db: Session,
+        student_id: Optional[int] = None,
+        job_posting_id: Optional[int] = None,
+        circular_id: Optional[int] = None,
+        company_id: Optional[int] = None,
+        branch: Optional[str] = None,
+        status: Optional[Any] = None,
+        search: Optional[str] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Application]:
+        """Get applications with comprehensive filtering (company, job, branch, status, search)."""
+        from sqlalchemy import or_
+        from ..models.profile import StudentProfileExtended
+        from ..models.recruitment_round import StudentRoundOutcome
+
         query = db.query(Application).options(
             joinedload(Application.student).joinedload(User.student_profile),
-            joinedload(Application.job_posting).joinedload(JobPosting.company)
+            joinedload(Application.job_posting).joinedload(JobPosting.company),
+            subqueryload(Application.round_outcomes).joinedload(StudentRoundOutcome.round),
+            joinedload(Application.placement_offer),
         )
         
+        has_job_join = False
+        has_student_join = False
+        has_profile_join = False
+
         if student_id:
             query = query.filter(Application.student_id == student_id)
         if job_posting_id:
             query = query.filter(Application.job_posting_id == job_posting_id)
+        if company_id:
+            query = query.join(Application.job_posting)
+            has_job_join = True
+            query = query.filter(JobPosting.company_id == company_id)
         if circular_id:
             from ..models.recruitment_circular import RecruitmentCircularJob
             query = query.join(
@@ -766,7 +804,51 @@ class PlacementService:
                 RecruitmentCircularJob.job_posting_id == Application.job_posting_id
             ).filter(RecruitmentCircularJob.circular_id == circular_id)
         if status:
-            query = query.filter(Application.status == status)
+            if isinstance(status, str):
+                try:
+                    status_enum = ApplicationStatus(status.lower())
+                    query = query.filter(Application.status == status_enum)
+                except ValueError:
+                    query = query.filter(Application.status == status)
+            else:
+                query = query.filter(Application.status == status)
+        if branch:
+            branch_clean = branch.strip()
+            if branch_clean:
+                if not has_student_join:
+                    query = query.join(Application.student)
+                    has_student_join = True
+                if not has_profile_join:
+                    query = query.outerjoin(User.student_profile)
+                    has_profile_join = True
+                query = query.filter(
+                    or_(
+                        StudentProfileExtended.branch.ilike(f"%{branch_clean}%"),
+                        User.department.ilike(f"%{branch_clean}%")
+                    )
+                )
+        if search:
+            search_clean = search.strip()
+            if search_clean:
+                search_term = f"%{search_clean}%"
+                if not has_student_join:
+                    query = query.join(Application.student)
+                    has_student_join = True
+                if not has_profile_join:
+                    query = query.outerjoin(User.student_profile)
+                    has_profile_join = True
+                if not has_job_join:
+                    query = query.join(Application.job_posting)
+                    has_job_join = True
+                query = query.join(JobPosting.company).filter(
+                    or_(
+                        User.name.ilike(search_term),
+                        User.email.ilike(search_term),
+                        StudentProfileExtended.enrollment_number.ilike(search_term),
+                        JobPosting.title.ilike(search_term),
+                        Company.name.ilike(search_term)
+                    )
+                )
         
         return query.order_by(Application.applied_at.desc()).offset(skip).limit(limit).all()
     
@@ -819,6 +901,18 @@ class PlacementService:
 
         if not job.application_url or not job.application_url.strip():
             raise ValueError("Job posting does not have an external application URL to confirm")
+
+        url_clean = job.application_url.strip().lower()
+        if not (url_clean.startswith("http://") or url_clean.startswith("https://")):
+            raise ValueError("Job application URL must use HTTP or HTTPS protocol")
+
+        if job.application_deadline:
+            now_utc = datetime.now(timezone.utc)
+            deadline = job.application_deadline
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+            if now_utc > deadline:
+                raise ValueError("Application deadline has passed")
 
         # Idempotent: preserve original timestamp if already set
         if application.external_applied_at is not None:
@@ -1087,47 +1181,161 @@ class PlacementService:
     # STATISTICS & REPORTS
     # ============================================
     
-    def get_placement_statistics(self, db: Session) -> PlacementStatistics:
-        """Get overall placement statistics."""
-        total_companies = db.query(Company).count()
-        active_companies = db.query(Company).filter(Company.is_active == True).count()
-        total_jobs = db.query(JobPosting).count()
-        open_jobs = db.query(JobPosting).filter(JobPosting.status == JobStatus.OPEN).count()
-        total_applications = db.query(Application).count()
-        total_shortlists = db.query(Shortlist).count()
-        total_students = db.query(User).filter(User.role == UserRole.STUDENT).count()
-        
+    def get_placement_statistics(
+        self,
+        db: Session,
+        company_id: Optional[int] = None,
+        job_id: Optional[int] = None,
+        branch: Optional[str] = None,
+        status: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> PlacementStatistics:
+        """Get overall placement statistics with optional filters and authoritative counts."""
+        # Parse dates
+        start_dt = None
+        end_dt = None
+        if start_date:
+            try:
+                start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+            except Exception:
+                pass
+        if end_date:
+            try:
+                end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+                if end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0:
+                    end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+            except Exception:
+                pass
+
+        # Company counts
+        comp_q = db.query(Company)
+        if company_id:
+            comp_q = comp_q.filter(Company.id == company_id)
+        total_companies = comp_q.count()
+        active_companies = comp_q.filter(Company.is_active == True).count()
+
+        # Job counts
+        job_q = db.query(JobPosting)
+        if company_id:
+            job_q = job_q.filter(JobPosting.company_id == company_id)
+        if job_id:
+            job_q = job_q.filter(JobPosting.id == job_id)
+        total_jobs = job_q.count()
+        open_jobs = job_q.filter(JobPosting.status == JobStatus.OPEN).count()
+
+        # Recruitment Circulars (Drives)
+        circ_q = db.query(RecruitmentCircular)
+        if company_id:
+            circ_q = circ_q.filter(RecruitmentCircular.company_id == company_id)
+        total_recruitment_drives = circ_q.count()
+
+        # Recruitment Rounds
+        round_q = db.query(RecruitmentRound)
+        if job_id:
+            round_q = round_q.filter(RecruitmentRound.job_posting_id == job_id)
+        elif company_id:
+            round_q = round_q.join(JobPosting, RecruitmentRound.job_posting_id == JobPosting.id).filter(
+                JobPosting.company_id == company_id
+            )
+        total_rounds = round_q.count()
+
+        # Applications
+        app_q = db.query(Application)
+        if company_id:
+            app_q = app_q.join(JobPosting, Application.job_posting_id == JobPosting.id).filter(
+                JobPosting.company_id == company_id
+            )
+        if job_id:
+            app_q = app_q.filter(Application.job_posting_id == job_id)
+        if branch:
+            app_q = app_q.join(StudentProfileExtended, Application.student_id == StudentProfileExtended.user_id).filter(
+                func.lower(StudentProfileExtended.branch) == branch.strip().lower()
+            )
+        if status:
+            app_q = app_q.filter(Application.status == status)
+        if start_dt:
+            app_q = app_q.filter(Application.created_at >= start_dt)
+        if end_dt:
+            app_q = app_q.filter(Application.created_at <= end_dt)
+
+        total_applications = app_q.count()
+
+        # Shortlists
+        sl_q = db.query(Shortlist)
+        if company_id:
+            sl_q = sl_q.filter(Shortlist.company_id == company_id)
+        if job_id:
+            sl_q = sl_q.filter(Shortlist.job_posting_id == job_id)
+        total_shortlists = sl_q.count()
+
+        # Students
+        stu_q = db.query(User).filter(User.role == UserRole.STUDENT)
+        if branch:
+            stu_q = stu_q.join(StudentProfileExtended, User.id == StudentProfileExtended.user_id).filter(
+                func.lower(StudentProfileExtended.branch) == branch.strip().lower()
+            )
+        total_students = stu_q.count()
+
         # Applications by status
         apps_by_status = {}
-        for status in ApplicationStatus:
-            count = db.query(Application).filter(Application.status == status).count()
-            apps_by_status[status.value] = count
-        
+        for app_status in ApplicationStatus:
+            count = app_q.filter(Application.status == app_status).count()
+            apps_by_status[app_status.value] = count
+
         # Jobs by status
         jobs_by_status = {}
-        for status in JobStatus:
-            count = db.query(JobPosting).filter(JobPosting.status == status).count()
-            jobs_by_status[status.value] = count
-        
-        # Placed / Selected students calculation:
-        # A student is considered placed if they have at least one Application with status SELECTED
-        # OR their StudentProfileExtended has placement_status PLACED.
-        # Intermediate shortlisting (ApplicationStatus.SHORTLISTED or Shortlist entry) is tracked
-        # separately and NOT counted as a final placement.
+        for j_status in JobStatus:
+            count = job_q.filter(JobPosting.status == j_status).count()
+            jobs_by_status[j_status.value] = count
+
+        # Distinct shortlisted students (avoiding double-counting)
+        shortlisted_app_student_ids = set(
+            r[0] for r in app_q.filter(Application.status == ApplicationStatus.SHORTLISTED).with_entities(Application.student_id).all()
+        )
+        shortlist_entry_student_ids = set(
+            r[0] for r in sl_q.with_entities(Shortlist.student_id).all()
+        )
+        students_shortlisted_ids = shortlisted_app_student_ids.union(shortlist_entry_student_ids)
+        students_shortlisted = len(students_shortlisted_ids)
+
+        # Distinct selected students (avoiding double-counting)
         selected_student_ids = set(
-            r[0] for r in db.query(Application.student_id).filter(Application.status == ApplicationStatus.SELECTED).all()
+            r[0] for r in app_q.filter(Application.status == ApplicationStatus.SELECTED).with_entities(Application.student_id).all()
         )
-        profile_placed_ids = set(
-            r[0] for r in db.query(StudentProfileExtended.user_id).filter(StudentProfileExtended.placement_status == PlacementStatus.PLACED).all()
-        )
+        students_selected = len(selected_student_ids)
+
+        # Legacy placed student calculation
+        profile_placed_ids = set()
+        if not company_id and not job_id:
+            prof_q = db.query(StudentProfileExtended.user_id).filter(
+                StudentProfileExtended.placement_status == PlacementStatus.PLACED
+            )
+            if branch:
+                prof_q = prof_q.filter(func.lower(StudentProfileExtended.branch) == branch.strip().lower())
+            profile_placed_ids = set(r[0] for r in prof_q.all())
+
         placed_student_ids = selected_student_ids.union(profile_placed_ids)
         total_placed = len(placed_student_ids)
-
         placement_rate = (total_placed / total_students * 100.0) if total_students > 0 else 0.0
 
-        # Verified Accounting Metrics (Phase 3.3.4)
+        # Student Round Outcomes
+        outcomes_q = db.query(StudentRoundOutcome)
+        if job_id:
+            outcomes_q = outcomes_q.join(RecruitmentRound, StudentRoundOutcome.round_id == RecruitmentRound.id).filter(
+                RecruitmentRound.job_posting_id == job_id
+            )
+        elif company_id:
+            outcomes_q = outcomes_q.join(RecruitmentRound, StudentRoundOutcome.round_id == RecruitmentRound.id).join(
+                JobPosting, RecruitmentRound.job_posting_id == JobPosting.id
+            ).filter(JobPosting.company_id == company_id)
+        total_outcomes = outcomes_q.count()
+
+        # Verified Accounting Metrics (Phase 3.3.4 & Phase F)
         from .placement_offer_service import placement_offer_service
-        verified_metrics = placement_offer_service.get_placement_accounting_metrics(db)
+        verified_metrics = placement_offer_service.get_placement_accounting_metrics(
+            db, company_id=company_id, job_id=job_id, branch=branch
+        )
 
         return PlacementStatistics(
             total_companies=total_companies,
@@ -1137,6 +1345,12 @@ class PlacementService:
             total_applications=total_applications,
             total_shortlists=total_shortlists,
             total_students=total_students,
+            # Phase F: Recruitment drives, rounds, outcomes, and distinct counts
+            total_recruitment_drives=total_recruitment_drives,
+            total_rounds=total_rounds,
+            total_outcomes=total_outcomes,
+            students_shortlisted=students_shortlisted,
+            students_selected=students_selected,
             # Legacy metrics
             total_placed=total_placed,
             placement_rate=round(placement_rate, 2),

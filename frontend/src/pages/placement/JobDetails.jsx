@@ -70,6 +70,48 @@ const JobDetails = () => {
   const [eligibilityFilter, setEligibilityFilter] = useState('all'); // 'all' | 'eligible' | 'ineligible'
   const [sortBy, setSortBy] = useState('match_desc'); // 'match_desc' | 'match_asc' | 'cgpa_desc' | 'req_desc'
 
+  // Applications Tab Filter State
+  const [appSearch, setAppSearch] = useState('');
+  const [appStatusFilter, setAppStatusFilter] = useState('all');
+  const [appBranchFilter, setAppBranchFilter] = useState('all');
+
+  // Filtered job applications
+  const filteredJobApplications = useMemo(() => {
+    if (!Array.isArray(applications)) return [];
+    const q = appSearch.trim().toLowerCase();
+    return applications.filter((app) => {
+      if (q) {
+        const name = (app.student_name || '').toLowerCase();
+        const email = (app.student_email || '').toLowerCase();
+        const usn = (app.student_usn || '').toLowerCase();
+        if (!name.includes(q) && !email.includes(q) && !usn.includes(q)) {
+          return false;
+        }
+      }
+      if (appStatusFilter !== 'all' && app.status?.toLowerCase() !== appStatusFilter.toLowerCase()) {
+        return false;
+      }
+      if (appBranchFilter !== 'all') {
+        const branch = (app.student_branch || app.match_snapshot?.branch || '').toLowerCase();
+        if (!branch.includes(appBranchFilter.toLowerCase())) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [applications, appSearch, appStatusFilter, appBranchFilter]);
+
+  // Unique branches in applications
+  const applicationBranches = useMemo(() => {
+    if (!Array.isArray(applications)) return [];
+    const set = new Set();
+    applications.forEach((a) => {
+      const b = a.student_branch || a.match_snapshot?.branch;
+      if (b) set.add(b);
+    });
+    return Array.from(set).sort();
+  }, [applications]);
+
   // Publish modal state
   const [publishModal, setPublishModal] = useState({
     isOpen: false,
@@ -1256,49 +1298,146 @@ const JobDetails = () => {
 
       {/* Applications Section */}
       {activeTab === 'applications' && (
-        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6">
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2 mb-4">
-            <FileText className="w-5 h-5 text-gray-500" />
-            <span>Applications Submitted ({applications.length})</span>
-          </h3>
+        <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center space-x-2">
+                <FileText className="w-5 h-5 text-gray-500" />
+                <span>Applications Submitted ({applications.length})</span>
+              </h3>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                Review student applicants, USN, academic branch, match scores, self-reported external submissions, and round progression.
+              </p>
+            </div>
+          </div>
+
+          {/* Search and Filters Bar */}
+          {applications.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-800">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                <input
+                  type="text"
+                  placeholder="Search student, USN, email..."
+                  value={appSearch}
+                  onChange={(e) => setAppSearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <select
+                value={appBranchFilter}
+                onChange={(e) => setAppBranchFilter(e.target.value)}
+                className="px-3 py-1.5 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              >
+                <option value="all">All Academic Branches</option>
+                {applicationBranches.map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+
+              <select
+                value={appStatusFilter}
+                onChange={(e) => setAppStatusFilter(e.target.value)}
+                className="px-3 py-1.5 border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+              >
+                <option value="all">All Application Statuses</option>
+                <option value="applied">Applied</option>
+                <option value="shortlisted">Shortlisted</option>
+                <option value="selected">Selected</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </div>
+          )}
 
           {applications.length === 0 ? (
-            <p className="text-gray-500 dark:text-gray-400 text-center py-6">No applications submitted yet</p>
+            <div className="text-center py-10 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl">
+              <FileText className="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+              <p className="text-sm font-semibold text-gray-700 dark:text-gray-300">No applications submitted yet</p>
+              <p className="text-xs text-gray-400 mt-1">Students who apply or confirm external submission will appear here.</p>
+            </div>
+          ) : filteredJobApplications.length === 0 ? (
+            <div className="text-center py-8 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl">
+              <Search className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">No matching applications found</p>
+              <button
+                onClick={() => { setAppSearch(''); setAppStatusFilter('all'); setAppBranchFilter('all'); }}
+                className="mt-2 text-xs text-indigo-600 dark:text-indigo-400 font-semibold hover:underline"
+              >
+                Reset filters
+              </button>
+            </div>
           ) : (
             <div className="space-y-3">
-              {applications.map((app) => (
+              {filteredJobApplications.map((app) => (
                 <div
                   key={app.id}
-                  className="flex items-center justify-between p-3.5 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800"
+                  className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800"
                 >
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white text-sm">{app.student_name}</p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{app.student_email}</p>
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-bold text-gray-900 dark:text-white text-sm">{app.student_name}</p>
+                      {app.student_usn && (
+                        <span className="px-2 py-0.5 rounded font-mono text-[11px] font-semibold bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200" title="University Seat Number (USN)">
+                          {app.student_usn}
+                        </span>
+                      )}
+                      {(app.student_branch || app.match_snapshot?.branch) && (
+                        <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                          {app.student_branch || app.match_snapshot?.branch}
+                        </span>
+                      )}
+                      {(app.student_cgpa || app.match_snapshot?.cgpa) && (
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                          • {Number(app.student_cgpa || app.match_snapshot?.cgpa).toFixed(2)} CGPA
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 flex-wrap">
+                      <span>{app.student_email}</span>
+                      <span>•</span>
+                      <span>Applied: {app.applied_at ? new Date(app.applied_at).toLocaleDateString() : 'Recorded'}</span>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-3">
+
+                  <div className="flex items-center space-x-2.5 flex-wrap">
                     <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold ${getAppStatusColor(app.status)}`}>
                       {app.status?.toUpperCase()}
                     </span>
+
                     {app.external_applied_at ? (
                       <span
                         className="text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-800"
                         title={`Student confirmed external submission on ${new Date(app.external_applied_at).toLocaleString()}`}
                       >
-                        ✓ External Confirmed ({new Date(app.external_applied_at).toLocaleDateString()})
+                        ✓ Marked as Applied ({new Date(app.external_applied_at).toLocaleDateString()})
                       </span>
                     ) : selectedJob?.application_url ? (
                       <span className="text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800">
                         External: Pending
                       </span>
-                    ) : null}
+                    ) : (
+                      <span className="text-[10px] font-medium text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded-full">
+                        Internal Drive
+                      </span>
+                    )}
+
+                    {app.verified_offer && (
+                      <span className="text-[10px] font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 px-2 py-0.5 rounded-full border border-purple-200 dark:border-purple-800">
+                        🏆 Offer: {app.verified_offer.designation || 'Offered'}
+                      </span>
+                    )}
+
                     {(app.has_low_match_warning || app.match_snapshot?.has_low_match_warning) && (
                       <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/50 px-2 py-0.5 rounded-full border border-amber-200 dark:border-amber-800" title={app.low_match_warning || app.match_snapshot?.low_match_warning || 'Required skill match < 50%'}>
                         ⚠️ Low match (&lt;50%)
                       </span>
                     )}
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                      {app.match_percentage !== null && app.match_percentage !== undefined ? `${app.match_percentage.toFixed(1)}% match` : 'Score N/A'}
+
+                    <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                      {app.match_percentage !== null && app.match_percentage !== undefined ? `${Math.round(app.match_percentage)}% match` : 'Score N/A'}
                     </span>
+
                     {app.match_snapshot && (
                       <button
                         onClick={() => setSelectedCandidate({
@@ -1326,11 +1465,12 @@ const JobDetails = () => {
                           isSnapshot: true,
                           snapshot_time: app.match_snapshot.created_at
                         })}
-                        className="px-2.5 py-1 text-xs bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors border border-indigo-200 dark:border-indigo-800"
+                        className="px-2.5 py-1 text-xs bg-indigo-50 dark:bg-indigo-950/50 text-indigo-700 dark:text-indigo-300 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors border border-indigo-200 dark:border-indigo-800 cursor-pointer"
                       >
                         Snapshot
                       </button>
                     )}
+
                     <button
                       onClick={() => setProgressionModalStudent({ studentId: app.student_id, studentName: app.student_name })}
                       className="px-2.5 py-1 text-xs bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors border border-purple-200 dark:border-purple-800 flex items-center gap-1 cursor-pointer"
@@ -1339,11 +1479,12 @@ const JobDetails = () => {
                       <TrendingUp className="w-3.5 h-3.5" />
                       <span>Progression</span>
                     </button>
+
                     <button
                       onClick={() => navigate(`/placement/students/${app.student_id}`)}
-                      className="px-3 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                      className="px-3 py-1 text-xs bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors cursor-pointer"
                     >
-                      View
+                      Profile
                     </button>
                   </div>
                 </div>

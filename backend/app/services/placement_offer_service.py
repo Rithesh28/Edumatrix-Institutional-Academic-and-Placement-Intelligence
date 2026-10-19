@@ -664,7 +664,13 @@ class PlacementOfferService:
     # 6. PLACEMENT ACCOUNTING METRICS
     # =========================================================================
 
-    def get_placement_accounting_metrics(self, db: Session) -> Dict[str, Any]:
+    def get_placement_accounting_metrics(
+        self,
+        db: Session,
+        company_id: Optional[int] = None,
+        job_id: Optional[int] = None,
+        branch: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Compute precise placement accounting metrics distinguishing:
         1. Legacy placed student count (ApplicationStatus.SELECTED or profile.placement_status == PLACED).
@@ -678,44 +684,73 @@ class PlacementOfferService:
           offer are NOT counted as verified placements.
         - A student with multiple accepted offers is counted exactly once in unique placed metrics.
         - Multiple offers do NOT automatically cancel each other.
+        - Supports optional filtering by company_id, job_id, and branch.
         """
-        total_students = db.query(User).filter(User.role == UserRole.STUDENT).count()
+        students_q = db.query(User).filter(User.role == UserRole.STUDENT)
+        if branch:
+            students_q = students_q.join(StudentProfileExtended, User.id == StudentProfileExtended.user_id).filter(
+                StudentProfileExtended.branch == branch
+            )
+        total_students = students_q.count()
 
         # 1. Legacy placed calculation
-        selected_student_ids = set(
-            r[0] for r in db.query(Application.student_id).filter(
-                Application.status == ApplicationStatus.SELECTED
-            ).all()
-        )
-        profile_placed_ids = set(
-            r[0] for r in db.query(StudentProfileExtended.user_id).filter(
+        app_q = db.query(Application.student_id).filter(Application.status == ApplicationStatus.SELECTED)
+        if job_id:
+            app_q = app_q.filter(Application.job_posting_id == job_id)
+        elif company_id:
+            app_q = app_q.join(JobPosting, Application.job_posting_id == JobPosting.id).filter(JobPosting.company_id == company_id)
+        if branch:
+            app_q = app_q.join(StudentProfileExtended, Application.student_id == StudentProfileExtended.user_id).filter(
+                StudentProfileExtended.branch == branch
+            )
+        selected_student_ids = set(r[0] for r in app_q.all())
+
+        if not company_id and not job_id:
+            prof_q = db.query(StudentProfileExtended.user_id).filter(
                 StudentProfileExtended.placement_status == PlacementStatus.PLACED
-            ).all()
-        )
+            )
+            if branch:
+                prof_q = prof_q.filter(StudentProfileExtended.branch == branch)
+            profile_placed_ids = set(r[0] for r in prof_q.all())
+        else:
+            profile_placed_ids = set()
+
         legacy_placed_ids = selected_student_ids.union(profile_placed_ids)
         legacy_placed_count = len(legacy_placed_ids)
         legacy_placement_rate = (legacy_placed_count / total_students * 100.0) if total_students > 0 else 0.0
 
-        # 2. Verified offer metrics
-        total_verified_offers = db.query(PlacementOffer).count()
-        accepted_offers_count = db.query(PlacementOffer).filter(
+        # 2. Verified offer metrics with optional filters
+        offers_base = db.query(PlacementOffer)
+        if job_id:
+            offers_base = offers_base.filter(PlacementOffer.job_posting_id == job_id)
+        elif company_id:
+            offers_base = offers_base.join(JobPosting, PlacementOffer.job_posting_id == JobPosting.id).filter(
+                JobPosting.company_id == company_id
+            )
+        if branch:
+            offers_base = offers_base.join(StudentProfileExtended, PlacementOffer.student_id == StudentProfileExtended.user_id).filter(
+                StudentProfileExtended.branch == branch
+            )
+
+        total_verified_offers = offers_base.count()
+        accepted_offers_count = offers_base.filter(
             PlacementOffer.acceptance_status == OfferAcceptanceStatus.ACCEPTED
         ).count()
-        declined_offers_count = db.query(PlacementOffer).filter(
+        declined_offers_count = offers_base.filter(
             PlacementOffer.acceptance_status == OfferAcceptanceStatus.DECLINED
         ).count()
-        rescinded_offers_count = db.query(PlacementOffer).filter(
+        rescinded_offers_count = offers_base.filter(
             PlacementOffer.acceptance_status == OfferAcceptanceStatus.RESCINDED
         ).count()
-        pending_offers_count = db.query(PlacementOffer).filter(
+        pending_offers_count = offers_base.filter(
             PlacementOffer.acceptance_status == OfferAcceptanceStatus.OFFERED
         ).count()
 
         # 3. Final verified placed students count (unique students with >= 1 ACCEPTED offer)
         verified_placed_student_ids = set(
-            r[0] for r in db.query(PlacementOffer.student_id).filter(
+            r[0] for r in offers_base.filter(
                 PlacementOffer.acceptance_status == OfferAcceptanceStatus.ACCEPTED
-            ).all()
+            ).with_entities(PlacementOffer.student_id).all()
         )
         verified_placed_students_count = len(verified_placed_student_ids)
         verified_placement_rate = (
@@ -724,8 +759,9 @@ class PlacementOfferService:
 
         # 4. Students with multiple verified active offers (excluding RESCINDED)
         multi_offer_rows = (
-            db.query(PlacementOffer.student_id)
+            offers_base
             .filter(PlacementOffer.acceptance_status != OfferAcceptanceStatus.RESCINDED)
+            .with_entities(PlacementOffer.student_id)
             .group_by(PlacementOffer.student_id)
             .having(func.count(PlacementOffer.id) > 1)
             .all()

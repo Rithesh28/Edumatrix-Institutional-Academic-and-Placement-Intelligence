@@ -11,6 +11,7 @@ Provides REST API for placement operations:
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Response, File, UploadFile
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, subqueryload
 from typing import List, Optional, Any, Dict
 from uuid import UUID
@@ -611,20 +612,24 @@ async def get_applications(
     student_id: Optional[int] = Query(None, description="Filter by student ID"),
     job_posting_id: Optional[int] = Query(None, description="Filter by job posting ID"),
     circular_id: Optional[int] = Query(None, description="Filter by recruitment circular ID"),
+    company_id: Optional[int] = Query(None, description="Filter by company ID"),
+    branch: Optional[str] = Query(None, description="Filter by student branch"),
     status: Optional[str] = Query(None, description="Filter by status"),
+    search: Optional[str] = Query(None, description="Search by student name, USN, job title, company"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=200),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all applications."""
+    """Get all applications with role-based scoping and filtering."""
     # Students can only see their own applications
     if current_user.role == UserRole.STUDENT:
         student_id = current_user.id
     
     applications = placement_service.get_applications(
         db, student_id=student_id, job_posting_id=job_posting_id,
-        circular_id=circular_id, status=status, skip=skip, limit=limit
+        circular_id=circular_id, company_id=company_id, branch=branch,
+        status=status, search=search, skip=skip, limit=limit
     )
     results = []
     for a in applications:
@@ -714,12 +719,31 @@ async def confirm_external_application(
             detail="Job posting is no longer open for applications"
         )
 
-    # 4. Validate job has external application URL
+    # 4. Validate job has external application URL and uses HTTP/HTTPS
     if not job.application_url or not job.application_url.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="This job posting does not have an external application URL to confirm"
         )
+    url_clean = job.application_url.strip().lower()
+    if not (url_clean.startswith("http://") or url_clean.startswith("https://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job application URL must use HTTP or HTTPS protocol"
+        )
+
+    # Validate application deadline
+    if job.application_deadline:
+        from datetime import timezone
+        now_utc = datetime.now(timezone.utc)
+        deadline = job.application_deadline
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        if now_utc > deadline:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Application deadline has passed"
+            )
 
     # 5. Idempotent confirmation
     confirmed_app = placement_service.confirm_external_application(db, application, current_user)
@@ -766,6 +790,26 @@ async def confirm_external_job_application(
             detail="This job posting does not have an external application URL to confirm"
         )
 
+    url_clean = job.application_url.strip().lower()
+    if not (url_clean.startswith("http://") or url_clean.startswith("https://")):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job application URL must use HTTP or HTTPS protocol"
+        )
+
+    # Validate application deadline
+    if job.application_deadline:
+        from datetime import timezone
+        now_utc = datetime.now(timezone.utc)
+        deadline = job.application_deadline
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=timezone.utc)
+        if now_utc > deadline:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Application deadline has passed"
+            )
+
     # Check if application already exists for this student and job
     existing_app = db.query(Application).filter(
         Application.student_id == current_user.id,
@@ -778,12 +822,20 @@ async def confirm_external_job_application(
             notes="Applied via external company portal"
         )
         try:
-            existing_app = placement_service.create_application(db, app_create, current_user)
-        except ValueError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(e)
+            existing_app = placement_service.create_application(
+                db, app_create, current_user, allow_existing=True
             )
+        except ValueError as e:
+            # Handle race condition or duplicate attempt gracefully
+            existing_app = db.query(Application).filter(
+                Application.student_id == current_user.id,
+                Application.job_posting_id == job_id
+            ).first()
+            if not existing_app:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(e)
+                )
 
     confirmed_app = placement_service.confirm_external_application(db, existing_app, current_user)
     resp = ApplicationResponse.model_validate(confirmed_app)
@@ -898,24 +950,61 @@ async def check_student_eligibility(
 # STATISTICS & REPORT ENDPOINTS
 # ============================================
 
+def sanitize_csv_cell(val: Any) -> Any:
+    """Neutralize formula injection by prefixing dangerous characters with a single quote."""
+    if val is None:
+        return ""
+    s = str(val)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{s}"
+    return s
+
+
 @router.get("/reports/export")
 async def export_placement_report(
+    company_id: Optional[int] = Query(None),
+    job_id: Optional[int] = Query(None),
+    branch: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Export institutional placement report as a downloadable CSV.
+    Export institutional placement report as a downloadable CSV with optional filters and formula injection protection.
     Accessible by Placement Officers and Admins.
     """
     check_placement_officer_or_admin(current_user)
-    
-    users = db.query(User).filter(User.role == UserRole.STUDENT).all()
-    
+
+    start_dt = None
+    end_dt = None
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace("Z", "+00:00"))
+        except Exception:
+            pass
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace("Z", "+00:00"))
+            if end_dt.hour == 0 and end_dt.minute == 0 and end_dt.second == 0:
+                end_dt = end_dt.replace(hour=23, minute=59, second=59, microsecond=999999)
+        except Exception:
+            pass
+
+    users_q = db.query(User).filter(User.role == UserRole.STUDENT)
+    if branch:
+        users_q = users_q.outerjoin(StudentProfileExtended, User.id == StudentProfileExtended.user_id).filter(
+            (func.lower(StudentProfileExtended.branch) == branch.strip().lower()) |
+            (func.lower(User.department) == branch.strip().lower())
+        )
+    users = users_q.all()
+
     output = io.StringIO()
     writer = csv.writer(output)
-    
+
     # CSV Header
-    writer.writerow([
+    header = [
         "Student ID",
         "Student Name",
         "Enrollment Number",
@@ -933,15 +1022,38 @@ async def export_placement_report(
         "Verified Offers Count",
         "Accepted Offer CTC (LPA)",
         "Offer Acceptance Status",
-    ])
-    
+    ]
+    writer.writerow([sanitize_csv_cell(h) for h in header])
+
     for u in users:
         profile = db.query(StudentProfileExtended).filter(StudentProfileExtended.user_id == u.id).first()
         skills = db.query(Skill).filter(Skill.student_id == profile.id).all() if profile else []
         latest_resume = db.query(Resume).filter(Resume.student_id == u.id).order_by(Resume.created_at.desc()).first()
-        apps = db.query(Application).filter(Application.student_id == u.id).all()
-        shortlists = db.query(Shortlist).filter(Shortlist.student_id == u.id).all()
-        
+
+        apps_q = db.query(Application).filter(Application.student_id == u.id)
+        if company_id:
+            apps_q = apps_q.join(JobPosting, Application.job_posting_id == JobPosting.id).filter(
+                JobPosting.company_id == company_id
+            )
+        if job_id:
+            apps_q = apps_q.filter(Application.job_posting_id == job_id)
+        if start_dt:
+            apps_q = apps_q.filter(Application.created_at >= start_dt)
+        if end_dt:
+            apps_q = apps_q.filter(Application.created_at <= end_dt)
+        apps = apps_q.all()
+
+        sl_q = db.query(Shortlist).filter(Shortlist.student_id == u.id)
+        if company_id:
+            sl_q = sl_q.filter(Shortlist.company_id == company_id)
+        if job_id:
+            sl_q = sl_q.filter(Shortlist.job_posting_id == job_id)
+        shortlists = sl_q.all()
+
+        # If filtering by company or job, skip students who have no applications or shortlists for that scope
+        if (company_id or job_id) and len(apps) == 0 and len(shortlists) == 0:
+            continue
+
         # Determine placement status
         status_val = "not_applied"
         if any(a.status == "selected" or (hasattr(a.status, "value") and a.status.value == "selected") for a in apps):
@@ -952,22 +1064,36 @@ async def export_placement_report(
             status_val = "applied"
         elif profile and profile.placement_status:
             status_val = profile.placement_status.value if hasattr(profile.placement_status, "value") else str(profile.placement_status)
-        
+
+        # Filter by status if requested
+        if status:
+            target_status = status.strip().lower()
+            if status_val.lower() != target_status and not (target_status == "placed" and status_val.lower() == "selected"):
+                continue
+
         student_skills_list = [s.name for s in skills] + (latest_resume.skills if (latest_resume and latest_resume.skills) else [])
         skills_str = ", ".join(dict.fromkeys(student_skills_list))
-        
+
         applied_jobs = []
         for a in apps:
             job = db.query(JobPosting).filter(JobPosting.id == a.job_posting_id).first()
             if job and job.title:
                 applied_jobs.append(job.title)
-            jobs_str = "; ".join(applied_jobs)
+        jobs_str = "; ".join(applied_jobs)
 
         # Verified Offer Details
-        offers = db.query(PlacementOffer).filter(
+        offers_q = db.query(PlacementOffer).filter(
             PlacementOffer.student_id == u.id,
             PlacementOffer.acceptance_status != OfferAcceptanceStatus.RESCINDED
-        ).all()
+        )
+        if company_id:
+            offers_q = offers_q.join(JobPosting, PlacementOffer.job_posting_id == JobPosting.id).filter(
+                JobPosting.company_id == company_id
+            )
+        if job_id:
+            offers_q = offers_q.filter(PlacementOffer.job_posting_id == job_id)
+        offers = offers_q.all()
+
         accepted_offer = next((o for o in offers if o.acceptance_status == OfferAcceptanceStatus.ACCEPTED), None)
         accepted_ctc_str = f"{accepted_offer.ctc_lpa:.2f}" if (accepted_offer and accepted_offer.ctc_lpa is not None) else ""
         if accepted_offer:
@@ -977,7 +1103,7 @@ async def export_placement_report(
         else:
             offer_status_str = "NONE"
 
-        writer.writerow([
+        row = [
             u.id,
             profile.full_name if (profile and profile.full_name) else u.name,
             profile.enrollment_number if profile else "",
@@ -995,12 +1121,12 @@ async def export_placement_report(
             len(offers),
             accepted_ctc_str,
             offer_status_str,
-        ])
+        ]
+        writer.writerow([sanitize_csv_cell(cell) for cell in row])
 
-    
     csv_content = output.getvalue()
     filename = f"placement_report_{datetime.utcnow().strftime('%Y-%m-%d')}.csv"
-    
+
     return Response(
         content=csv_content,
         media_type="text/csv",
@@ -1013,11 +1139,25 @@ async def export_placement_report(
 
 @router.get("/stats", response_model=PlacementStatistics)
 async def get_placement_statistics(
+    company_id: Optional[int] = Query(None),
+    job_id: Optional[int] = Query(None),
+    branch: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
     current_user: User = Depends(get_current_placement_officer),
     db: Session = Depends(get_db)
 ):
-    """Get overall placement statistics."""
-    return placement_service.get_placement_statistics(db)
+    """Get overall placement statistics with optional filters."""
+    return placement_service.get_placement_statistics(
+        db,
+        company_id=company_id,
+        job_id=job_id,
+        branch=branch,
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @router.get("/companies/{company_id}/stats", response_model=CompanyStatistics)
@@ -1579,11 +1719,16 @@ async def list_placement_offers(
 
 @router.get("/accounting")
 async def get_placement_accounting(
+    company_id: Optional[int] = None,
+    job_id: Optional[int] = None,
+    branch: Optional[str] = None,
     current_user: User = Depends(get_current_placement_officer),
     db: Session = Depends(get_db),
 ):
-    """Retrieve detailed placement accounting metrics."""
-    return placement_offer_service.get_placement_accounting_metrics(db)
+    """Retrieve detailed placement accounting metrics with optional filtering."""
+    return placement_offer_service.get_placement_accounting_metrics(
+        db, company_id=company_id, job_id=job_id, branch=branch
+    )
 
 
 # ============================================

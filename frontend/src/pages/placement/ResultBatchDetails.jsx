@@ -23,6 +23,7 @@ import {
   Send,
   RotateCcw,
   Layers,
+  Download,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import { searchStudentsForMatching, getJobRounds } from '../../services/placementService';
@@ -116,15 +117,17 @@ export default function ResultBatchDetails() {
       if (!matchesSearch) return false;
 
       // Status filter
+      const status = (item.review_status || '').toLowerCase();
       if (filterState === 'all') return true;
-      if (filterState === 'confirmed') return item.review_status === 'CONFIRMED';
-      if (filterState === 'ambiguous') return item.review_status === 'AMBIGUOUS';
-      if (filterState === 'unmatched') return item.review_status === 'UNMATCHED';
-      if (filterState === 'ignored') return item.review_status === 'IGNORED';
+      if (filterState === 'confirmed') return status === 'confirmed';
+      if (filterState === 'ambiguous') return status === 'ambiguous';
+      if (filterState === 'unmatched') return status === 'unresolved' || status === 'unmatched' || (!item.matched_student_id && status !== 'ignored');
+      if (filterState === 'ignored') return status === 'ignored';
       if (filterState === 'ready') {
         return (
-          item.review_status !== 'CONFIRMED' &&
-          item.review_status !== 'IGNORED' &&
+          status !== 'confirmed' &&
+          status !== 'ignored' &&
+          status !== 'ambiguous' &&
           Boolean(item.matched_student_id)
         );
       }
@@ -135,10 +138,10 @@ export default function ResultBatchDetails() {
   // Checkbox Selection Logic
   const eligibleItems = useMemo(() => {
     return items.filter(
-      (item) =>
-        item.review_status !== 'CONFIRMED' &&
-        item.review_status !== 'IGNORED' &&
-        Boolean(item.matched_student_id)
+      (item) => {
+        const status = (item.review_status || '').toLowerCase();
+        return status !== 'confirmed' && status !== 'ignored' && status !== 'ambiguous' && Boolean(item.matched_student_id);
+      }
     );
   }, [items]);
 
@@ -202,7 +205,7 @@ export default function ResultBatchDetails() {
     try {
       await updateCandidateMatch(matchingItem.id, {
         student_id: student.id,
-        review_status: 'RESOLVED',
+        review_status: 'matched',
         notes: matchNotes.trim() || `Manually assigned to ${student.full_name} (${student.usn})`,
       });
       toast.success(`Matched to ${student.full_name}`);
@@ -215,14 +218,14 @@ export default function ResultBatchDetails() {
   };
 
   const handleClearMatch = async (item) => {
-    if (item.review_status === 'CONFIRMED') {
+    if ((item.review_status || '').toLowerCase() === 'confirmed') {
       toast.error('Cannot clear match on an already confirmed candidate.');
       return;
     }
     try {
       await updateCandidateMatch(item.id, {
         student_id: null,
-        review_status: 'UNMATCHED',
+        review_status: 'unresolved',
         notes: 'Match cleared by Placement Officer',
       });
       toast.success('Match cleared.');
@@ -237,19 +240,21 @@ export default function ResultBatchDetails() {
   };
 
   const handleToggleIgnore = async (item) => {
-    if (item.review_status === 'CONFIRMED') {
+    const status = (item.review_status || '').toLowerCase();
+    if (status === 'confirmed') {
       toast.error('Cannot ignore a confirmed record.');
       return;
     }
-    const newStatus = item.review_status === 'IGNORED' ? 'PENDING' : 'IGNORED';
+    const isCurrentlyIgnored = status === 'ignored';
+    const newStatus = isCurrentlyIgnored ? (item.matched_student_id ? 'matched' : 'unresolved') : 'ignored';
     try {
       await updateCandidateMatch(item.id, {
         student_id: item.matched_student_id,
         review_status: newStatus,
-        notes: newStatus === 'IGNORED' ? 'Ignored by officer' : 'Unignored by officer',
+        notes: newStatus === 'ignored' ? 'Ignored by officer' : 'Unignored by officer',
       });
-      toast.success(newStatus === 'IGNORED' ? 'Record marked as ignored.' : 'Record restored.');
-      if (newStatus === 'IGNORED') {
+      toast.success(newStatus === 'ignored' ? 'Record marked as ignored.' : 'Record restored.');
+      if (newStatus === 'ignored') {
         setSelectedItemIds((prev) => {
           const next = new Set(prev);
           next.delete(item.id);
@@ -388,6 +393,16 @@ export default function ResultBatchDetails() {
                 <div className="flex items-center gap-1.5">
                   <FileText className="w-4 h-4 text-gray-400" />
                   <span>{batch.source_file.original_name}</span>
+                  <a
+                    href={`/api/v1/placement/results/batches/${batch.id}/download`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 ml-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 dark:hover:text-indigo-300 underline"
+                    title="Download original uploaded file"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    Download
+                  </a>
                 </div>
               )}
               <div className="flex items-center gap-1.5">
@@ -566,10 +581,12 @@ export default function ResultBatchDetails() {
                 </tr>
               ) : (
                 filteredItems.map((item) => {
-                  const isItemConfirmed = item.review_status === 'CONFIRMED';
-                  const isItemIgnored = item.review_status === 'IGNORED';
+                  const status = (item.review_status || '').toLowerCase();
+                  const isItemConfirmed = status === 'confirmed';
+                  const isItemIgnored = status === 'ignored';
+                  const isItemAmbiguous = status === 'ambiguous';
                   const canSelect =
-                    !isItemConfirmed && !isItemIgnored && Boolean(item.matched_student_id);
+                    !isItemConfirmed && !isItemIgnored && !isItemAmbiguous && Boolean(item.matched_student_id);
 
                   return (
                     <tr
@@ -612,12 +629,12 @@ export default function ResultBatchDetails() {
                       {/* Status */}
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${
-                            item.normalized_status === 'SELECTED'
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold uppercase ${
+                            item.normalized_status?.toLowerCase() === 'selected'
                               ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300'
-                              : item.normalized_status === 'SHORTLISTED'
+                              : item.normalized_status?.toLowerCase() === 'shortlisted'
                               ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300'
-                              : item.normalized_status === 'REJECTED'
+                              : item.normalized_status?.toLowerCase() === 'rejected'
                               ? 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300'
                               : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
                           }`}
@@ -640,7 +657,7 @@ export default function ResultBatchDetails() {
                               {item.matched_student.usn} • {item.matched_student.department || '—'}
                             </div>
                           </div>
-                        ) : item.review_status === 'AMBIGUOUS' ? (
+                        ) : isItemAmbiguous ? (
                           <div className="text-amber-600 dark:text-amber-400 text-xs flex items-center gap-1">
                             <AlertTriangle className="w-3.5 h-3.5" />
                             <span>Ambiguous: multiple candidate matches</span>
@@ -679,14 +696,14 @@ export default function ResultBatchDetails() {
                       {/* Review State */}
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            item.review_status === 'CONFIRMED'
+                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium uppercase ${
+                            status === 'confirmed'
                               ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300'
-                              : item.review_status === 'RESOLVED'
+                              : status === 'matched'
                               ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/50 dark:text-indigo-300'
-                              : item.review_status === 'AMBIGUOUS'
+                              : status === 'ambiguous'
                               ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300'
-                              : item.review_status === 'IGNORED'
+                              : status === 'ignored'
                               ? 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                               : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
                           }`}

@@ -10,6 +10,9 @@ import {
   FileText,
   Clock,
   Paperclip,
+  Megaphone,
+  ClipboardList,
+  BarChart2,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import StatsCard from '../../components/placement/StatsCard';
@@ -121,13 +124,6 @@ const Dashboard = () => {
         </div>
         <div className="flex space-x-3">
           <button
-            onClick={() => navigate('/placement/resume-analyzer')}
-            className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 flex items-center space-x-2 shadow-sm transition-colors cursor-pointer"
-          >
-            <FileText className="w-4 h-4" />
-            <span>AI Resume Analyzer</span>
-          </button>
-          <button
             onClick={() => navigate('/placement/companies/add')}
             className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center space-x-2 shadow-sm transition-colors cursor-pointer"
           >
@@ -179,14 +175,12 @@ const Dashboard = () => {
       {/* Quick Actions */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
         <button
-          onClick={() => navigate('/placement/resume-analyzer')}
-          className="bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-950/40 dark:to-indigo-950/40 p-4 rounded-xl shadow-sm border border-purple-200 dark:border-purple-800/60 hover:shadow-md hover:border-purple-400 dark:hover:border-purple-600 transition-all text-left group cursor-pointer"
+          onClick={() => navigate('/placement/circulars')}
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700 transition-all text-left cursor-pointer"
         >
-          <div className="w-10 h-10 bg-purple-600 text-white rounded-lg flex items-center justify-center mb-2 group-hover:scale-110 transition-transform">
-            <FileText className="w-5 h-5" />
-          </div>
-          <h3 className="font-semibold text-gray-900 dark:text-white">AI Resume Analyzer</h3>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Upload & score resumes</p>
+          <Megaphone className="w-6 h-6 text-purple-600 mb-2" />
+          <h3 className="font-medium text-gray-900 dark:text-white">Recruitment Drives</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Manage circulars & results</p>
         </button>
         <button
           onClick={() => navigate('/placement/companies')}
@@ -205,28 +199,28 @@ const Dashboard = () => {
           <p className="text-sm text-gray-500 dark:text-gray-400">Post or view jobs</p>
         </button>
         <button
-          onClick={() => navigate('/placement/students')}
-          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-purple-300 dark:hover:border-purple-700 transition-all text-left cursor-pointer"
+          onClick={() => navigate('/placement/applications')}
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all text-left cursor-pointer"
         >
-          <Users className="w-6 h-6 text-purple-600 mb-2" />
+          <ClipboardList className="w-6 h-6 text-indigo-600 mb-2" />
+          <h3 className="font-medium text-gray-900 dark:text-white">Applications</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Track student applications</p>
+        </button>
+        <button
+          onClick={() => navigate('/placement/students')}
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-orange-300 dark:hover:border-orange-700 transition-all text-left cursor-pointer"
+        >
+          <Users className="w-6 h-6 text-orange-600 mb-2" />
           <h3 className="font-medium text-gray-900 dark:text-white">View Students</h3>
           <p className="text-sm text-gray-500 dark:text-gray-400">Browse student profiles</p>
         </button>
         <button
-          onClick={() => navigate('/placement/shortlist')}
-          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-orange-300 dark:hover:border-orange-700 transition-all text-left cursor-pointer"
+          onClick={() => navigate('/placement/reports')}
+          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-teal-300 dark:hover:border-teal-700 transition-all text-left cursor-pointer"
         >
-          <UserCheck className="w-6 h-6 text-orange-600 mb-2" />
-          <h3 className="font-medium text-gray-900 dark:text-white">Shortlists</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">View shortlisted students</p>
-        </button>
-        <button
-          onClick={() => navigate('/files')}
-          className="bg-white dark:bg-gray-900 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 hover:shadow-md hover:border-indigo-300 dark:hover:border-indigo-700 transition-all text-left cursor-pointer"
-        >
-          <Paperclip className="w-6 h-6 text-indigo-600 mb-2" />
-          <h3 className="font-medium text-gray-900 dark:text-white">Institutional Files</h3>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Manage placement files</p>
+          <BarChart2 className="w-6 h-6 text-teal-600 mb-2" />
+          <h3 className="font-medium text-gray-900 dark:text-white">Reports</h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Analytics & CSV export</p>
         </button>
       </div>
 

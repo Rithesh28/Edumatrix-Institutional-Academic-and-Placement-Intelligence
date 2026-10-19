@@ -269,12 +269,12 @@ const Circulars = () => {
 
           {isPrivileged && (
             <button
-              onClick={() => navigate('/files')}
+              onClick={() => navigate('/placement/results')}
               className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer"
-              title="Access institutional placement files and circular attachments"
+              title="Process recruitment round results, shortlists, and student matches"
             >
-              <Paperclip className="w-4 h-4 text-indigo-500" />
-              <span>File Repository</span>
+              <ListChecks className="w-4 h-4 text-indigo-500" />
+              <span>Shortlists & Results</span>
             </button>
           )}
 

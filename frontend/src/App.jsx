@@ -45,6 +45,7 @@ import CompanyForm from './pages/placement/CompanyForm'
 import Jobs from './pages/placement/Jobs'
 import JobForm from './pages/placement/JobForm'
 import JobDetails from './pages/placement/JobDetails'
+import PlacementApplications from './pages/placement/Applications'
 import Students from './pages/placement/Students'
 import PlacementStudentProfile from './pages/placement/StudentProfile'
 import Shortlist from './pages/placement/Shortlist'
@@ -178,6 +179,7 @@ function App() {
               <Route path="/placement/circulars/new" element={<CircularForm />} />
               <Route path="/placement/circulars/:id" element={<CircularDetails />} />
               <Route path="/placement/circulars/:id/edit" element={<CircularForm />} />
+              <Route path="/placement/applications" element={<PlacementApplications />} />
               <Route path="/placement/results" element={<Results />} />
               <Route path="/placement/results/:batchId" element={<ResultBatchDetails />} />
               <Route path="/placement/students" element={<Students />} />

@@ -202,8 +202,8 @@ export const checkStudentEligibility = async (jobId, studentId) => {
 // STATISTICS ENDPOINTS
 // ============================================
 
-export const getPlacementStats = async () => {
-  const response = await api.get('/placement/stats');
+export const getPlacementStats = async (params = {}) => {
+  const response = await api.get('/placement/stats', { params });
   return response.data;
 };
 

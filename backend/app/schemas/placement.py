@@ -259,8 +259,16 @@ class ApplicationResponse(ApplicationBase):
     student_email: Optional[str] = None
     student_branch: Optional[str] = None
     student_cgpa: Optional[float] = None
+    student_usn: Optional[str] = None
     job_title: Optional[str] = None
     company_name: Optional[str] = None
+    company_id: Optional[int] = None
+    job_deadline: Optional[datetime] = None
+    job_status: Optional[str] = None
+    
+    # Recruitment progression and offers
+    recruitment_progression: Optional[List[Dict[str, Any]]] = None
+    verified_offer: Optional[Dict[str, Any]] = None
     
     # Authoritative Snapshot & Warning
     match_snapshot: Optional[Dict[str, Any]] = Field(None, description="Immutable application-time snapshot")
@@ -360,6 +368,13 @@ class PlacementStatistics(BaseModel):
     # Breakdowns
     applications_by_status: Dict[str, int] = Field(default={})
     jobs_by_status: Dict[str, int] = Field(default={})
+
+    # Phase F: Recruitment Drives & Authoritative Progression Metrics
+    total_recruitment_drives: int = Field(0, description="Total recruitment circulars / drives")
+    total_rounds: int = Field(0, description="Total recruitment rounds")
+    total_outcomes: int = Field(0, description="Total recorded student round outcomes")
+    students_shortlisted: int = Field(0, description="Distinct students shortlisted")
+    students_selected: int = Field(0, description="Distinct students selected")
 
     # Verified Placement Accounting Metrics (Phase 3.3.4)
     legacy_placed_count: int = Field(0, description="Legacy placed student count")

@@ -1023,10 +1023,10 @@ const usePlacementStore = create((set, get) => ({
   // STATISTICS ACTIONS
   // ============================================
 
-  fetchStats: async () => {
+  fetchStats: async (filters = {}) => {
     set({ isLoading: true, error: null });
     try {
-      const stats = await getPlacementStats();
+      const stats = await getPlacementStats(filters);
       set({ stats, isLoading: false });
       return stats;
     } catch (error) {

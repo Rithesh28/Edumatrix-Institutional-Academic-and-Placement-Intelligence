@@ -7,14 +7,23 @@ Provides REST endpoints for company recruitment circulars:
 - Student listing, search, filtering, and detail view
 """
 
+import os
 import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..api.auth import get_current_user
 from ..models.user import User, UserRole
+from ..models.file import File
+from ..models.profile import StudentProfileExtended
+from ..models.recruitment_circular import (
+    RecruitmentCircular,
+    RecruitmentCircularStatus,
+    RecruitmentCircularAttachment,
+)
 from ..schemas.recruitment_circular import (
     RecruitmentCircularCreate,
     RecruitmentCircularUpdate,
@@ -25,6 +34,7 @@ from ..schemas.recruitment_circular import (
     DriveReportResponse,
 )
 from ..services.recruitment_circular_service import recruitment_circular_service
+from ..services.file_storage.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +235,128 @@ async def remove_attachment(
     except Exception as e:
         logger.error(f"Error removing attachment {attachment_id} from circular {circular_id}: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to remove attachment.")
+
+
+def _verify_attachment_access(
+    db: Session,
+    circular_id: int,
+    attachment_id: int,
+    current_user: User,
+) -> tuple[RecruitmentCircularAttachment, File]:
+    """
+    Verify access authorization for circular attachments:
+    - Officers/Admins: allowed
+    - Students: allowed ONLY if circular is PUBLISHED and student is branch-eligible
+    - Faculty/HODs: 403 Forbidden
+    """
+    if current_user.role in [UserRole.LECTURER, UserRole.HOD]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Academic faculty cannot access recruitment circular files."
+        )
+
+    circular = db.query(RecruitmentCircular).filter(RecruitmentCircular.id == circular_id).first()
+    if not circular:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recruitment circular not found.")
+
+    if current_user.role == UserRole.STUDENT:
+        if circular.status != RecruitmentCircularStatus.PUBLISHED:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Recruitment circular not found or unpublished."
+            )
+        if circular.branch_eligibility and len(circular.branch_eligibility) > 0:
+            s_branch = None
+            profile = db.query(StudentProfileExtended).filter(StudentProfileExtended.user_id == current_user.id).first()
+            if profile and profile.branch:
+                s_branch = profile.branch
+            elif getattr(current_user, "department", None):
+                s_branch = current_user.department
+
+            target_branches = {str(b).strip().lower() for b in circular.branch_eligibility if b}
+            if not s_branch or str(s_branch).strip().lower() not in target_branches:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You are not eligible for this recruitment drive."
+                )
+
+    attachment = db.query(RecruitmentCircularAttachment).filter(
+        RecruitmentCircularAttachment.id == attachment_id,
+        RecruitmentCircularAttachment.circular_id == circular_id,
+    ).first()
+    if not attachment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found on this circular.")
+
+    file_record = db.query(File).filter(File.id == attachment.file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attached file not found.")
+
+    return attachment, file_record
+
+
+@router.get("/{circular_id}/attachments/{attachment_id}/download")
+async def download_circular_attachment(
+    circular_id: int,
+    attachment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Explicit, secure download route for published circular attachments.
+    Enforces student branch eligibility and draft concealment.
+    """
+    attachment, file_record = _verify_attachment_access(db, circular_id, attachment_id, current_user)
+
+    try:
+        content_stream, file_size, content_type = minio_client.get_file_stream(
+            file_record.bucket, file_record.object_key
+        )
+    except Exception as e:
+        logger.error(f"Error fetching circular attachment from storage: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not retrieve file")
+
+    safe_filename = os.path.basename(file_record.filename).replace('"', '')
+    return StreamingResponse(
+        content_stream,
+        media_type=content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Content-Length": str(file_size) if file_size else "",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        }
+    )
+
+
+@router.get("/{circular_id}/attachments/{attachment_id}/preview")
+async def preview_circular_attachment(
+    circular_id: int,
+    attachment_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Explicit, secure inline preview route for published circular attachments.
+    """
+    attachment, file_record = _verify_attachment_access(db, circular_id, attachment_id, current_user)
+
+    try:
+        content_stream, file_size, content_type = minio_client.get_file_stream(
+            file_record.bucket, file_record.object_key
+        )
+    except Exception as e:
+        logger.error(f"Error previewing circular attachment from storage: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not retrieve file")
+
+    safe_filename = os.path.basename(file_record.filename).replace('"', '')
+    return StreamingResponse(
+        content_stream,
+        media_type=content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'inline; filename="{safe_filename}"',
+            "Content-Length": str(file_size) if file_size else "",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        }
+    )
 
 
 # ============================================

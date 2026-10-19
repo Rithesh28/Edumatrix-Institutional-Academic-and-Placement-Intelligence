@@ -564,6 +564,31 @@ function StudentApplications() {
                     </span>
                   )}
 
+                  {(app.job_deadline || parentJob?.application_deadline) && (
+                    <span className="flex items-center gap-1.5" title="Job Application Deadline">
+                      <Clock className="w-3.5 h-3.5 text-gray-400" />
+                      <span>
+                        Deadline:{' '}
+                        <strong className="text-gray-700 dark:text-gray-300 font-semibold">
+                          {new Date(app.job_deadline || parentJob.application_deadline).toLocaleDateString()}
+                        </strong>
+                      </span>
+                    </span>
+                  )}
+
+                  {(app.job_status || parentJob?.status) && (
+                    <span
+                      className={`px-2 py-0.5 rounded text-[11px] font-semibold ${
+                        (app.job_status || parentJob?.status) === 'open'
+                          ? 'bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
+                      }`}
+                      title={`Job posting status is ${(app.job_status || parentJob?.status)?.toUpperCase()}`}
+                    >
+                      {(app.job_status || parentJob?.status)?.toUpperCase()}
+                    </span>
+                  )}
+
                   {location && (
                     <span className="flex items-center gap-1.5" title="Location">
                       <MapPin className="w-3.5 h-3.5 text-gray-400" />
@@ -605,6 +630,35 @@ function StudentApplications() {
                     </span>
                   )}
                 </div>
+
+                {/* Verified Offer or Recruitment Progression Highlights */}
+                {app.verified_offer && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center justify-between text-xs text-emerald-900 dark:text-emerald-200">
+                    <div className="flex items-center gap-2">
+                      <Award className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>
+                        <strong>Verified Placement Offer Extended:</strong>{' '}
+                        {app.verified_offer.designation || 'Offer Available'}
+                        {app.verified_offer.ctc_lpa ? ` • ${app.verified_offer.ctc_lpa} LPA` : ''}
+                      </span>
+                    </div>
+                    <span className="uppercase text-[10px] font-bold px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 rounded-full">
+                      {app.verified_offer.acceptance_status || 'OFFERED'}
+                    </span>
+                  </div>
+                )}
+
+                {Array.isArray(app.recruitment_progression) && app.recruitment_progression.length > 0 && !app.verified_offer && (
+                  <div className="p-2.5 bg-purple-50/60 dark:bg-purple-950/30 border border-purple-200/60 dark:border-purple-800/50 rounded-xl flex items-center gap-2 text-xs text-purple-900 dark:text-purple-200">
+                    <TrendingUp className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                    <span>
+                      <strong>Latest Round Outcome:</strong>{' '}
+                      Round {app.recruitment_progression[app.recruitment_progression.length - 1].round_number}:{' '}
+                      {app.recruitment_progression[app.recruitment_progression.length - 1].round_name || 'Interview'}{' '}
+                      — <span className="font-semibold uppercase">{app.recruitment_progression[app.recruitment_progression.length - 1].outcome}</span>
+                    </span>
+                  </div>
+                )}
 
                 {/* Candidate Notes if any */}
                 {app.notes && (

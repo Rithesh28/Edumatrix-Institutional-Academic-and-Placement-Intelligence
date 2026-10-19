@@ -210,6 +210,34 @@ class MinIOClient:
         except Exception as e:
             logger.error(f"❌ Failed to get object stream: {e}")
             raise
+
+    def get_file_stream(self, bucket: str, object_key: str):
+        """
+        Get streaming generator, file size, and content type for an object in MinIO.
+        Returns: (stream_generator, file_size, content_type)
+        """
+        try:
+            stat = self.client.stat_object(bucket, object_key)
+            response = self.client.get_object(bucket, object_key)
+
+            def iterfile():
+                try:
+                    while True:
+                        data = response.read(32 * 1024)
+                        if not data:
+                            break
+                        yield data
+                finally:
+                    response.close()
+                    response.release_conn()
+
+            return iterfile(), stat.size, stat.content_type
+        except S3Error as e:
+            logger.error(f"❌ MinIO get_file_stream failed for {bucket}/{object_key}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"❌ MinIO get_file_stream failed: {e}")
+            raise
     
     def delete_file(self, bucket: str, object_key: str) -> bool:
         """

@@ -13,12 +13,15 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile, Form, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..core.database import get_db
 from ..core.config import settings
 from ..api.auth import get_current_placement_officer
 from ..models.user import User
+from ..models.file import File
+from ..models.recruitment_result import RecruitmentResultBatch
 from ..schemas.recruitment_result import (
     RecruitmentResultBatchResponse,
     RecruitmentResultItemResponse,
@@ -30,6 +33,7 @@ from ..schemas.recruitment_result import (
 from ..services.recruitment_result_service import recruitment_result_service
 from ..services.recruitment_progression_service import recruitment_progression_service
 from ..services.file_storage.file_service import file_service
+from ..services.file_storage.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +58,7 @@ async def upload_and_process_result_file(
     db: Session = Depends(get_db),
 ):
     """
-    Upload a result document (CSV, XLSX, XLS, PDF), save it to MinIO,
+    Upload a result document (CSV, XLSX, XLS, PDF, DOCX, TXT), save it to MinIO,
     extract candidate rows, match against active students, and return
     a reviewable result batch.
     
@@ -62,10 +66,11 @@ async def upload_and_process_result_file(
     """
     # Validate extension
     ext = os.path.splitext(file.filename)[1].lower()
-    if ext not in [".csv", ".xlsx", ".xls", ".pdf"]:
+    allowed_exts = [".csv", ".xlsx", ".xls", ".pdf", ".docx", ".doc", ".txt", ".png", ".jpg", ".jpeg"]
+    if ext not in allowed_exts:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file format '{ext}'. Allowed: .csv, .xlsx, .xls, .pdf",
+            detail=f"Unsupported file format '{ext}'. Allowed: {', '.join(allowed_exts)}",
         )
 
     # Check file size
@@ -205,6 +210,44 @@ async def get_batch_details(
     if not batch_data:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result batch not found")
     return batch_data
+
+
+@router.get("/batches/{batch_id}/download")
+async def download_batch_document(
+    batch_id: int,
+    current_user: User = Depends(get_current_placement_officer),
+    db: Session = Depends(get_db),
+):
+    """
+    Download the original uploaded shortlist or result document for a batch.
+    Enforces Placement Officer and Admin authorization.
+    """
+    batch = db.query(RecruitmentResultBatch).filter(RecruitmentResultBatch.id == batch_id).first()
+    if not batch:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result batch not found")
+
+    file_record = db.query(File).filter(File.id == batch.file_id).first()
+    if not file_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Batch source file not found")
+
+    try:
+        content_stream, file_size, content_type = minio_client.get_file_stream(
+            file_record.bucket, file_record.object_key
+        )
+    except Exception as e:
+        logger.error(f"Error fetching batch file {batch.file_id} from storage: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not retrieve file content")
+
+    safe_filename = os.path.basename(file_record.filename).replace('"', '')
+    return StreamingResponse(
+        content_stream,
+        media_type=content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Content-Length": str(file_size) if file_size else "",
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        }
+    )
 
 
 # =============================================================================

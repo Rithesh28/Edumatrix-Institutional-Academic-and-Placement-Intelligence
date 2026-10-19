@@ -172,6 +172,21 @@ class RecruitmentResultService:
         elif circular and circular.branch_eligibility and isinstance(circular.branch_eligibility, (list, tuple)):
             job_branches = [str(b) for b in circular.branch_eligibility if b]
 
+        # Idempotency check: if exact same file, company, and round already processed
+        existing_batch = (
+            db.query(RecruitmentResultBatch)
+            .filter(
+                RecruitmentResultBatch.company_id == company_id,
+                RecruitmentResultBatch.file_id == file_id,
+                RecruitmentResultBatch.round_name == round_name.strip(),
+                RecruitmentResultBatch.status != RecruitmentResultBatchStatus.ARCHIVED,
+            )
+            .first()
+        )
+        if existing_batch:
+            logger.info(f"Returning existing result batch ID {existing_batch.id} (idempotent upload).")
+            return existing_batch
+
         # 7. Create Batch record
         batch = RecruitmentResultBatch(
             company_id=company_id,
@@ -192,10 +207,11 @@ class RecruitmentResultService:
         db.add(batch)
         db.flush()  # assign batch.id
 
+        seen_matched_students = set()
         matched_count = 0
         ambiguous_count = 0
 
-        # 7. Match candidate rows against students
+        # 8. Match candidate rows against students
         for row in rows:
             match_res = recruitment_result_matcher.match_row(
                 db=db,
@@ -207,6 +223,18 @@ class RecruitmentResultService:
             )
 
             rev_status = match_res["review_status"]
+            matched_sid = match_res.get("matched_student_id")
+            evidence = dict(match_res.get("match_evidence") or {})
+
+            # Check for candidate duplicates within this batch
+            if matched_sid:
+                if matched_sid in seen_matched_students:
+                    rev_status = RecruitmentResultReviewState.AMBIGUOUS
+                    evidence["is_duplicate_in_file"] = True
+                    evidence["duplicate_warning"] = "Student matched in a previous row within this file. Requires review."
+                else:
+                    seen_matched_students.add(matched_sid)
+
             if rev_status == RecruitmentResultReviewState.MATCHED:
                 matched_count += 1
             elif rev_status == RecruitmentResultReviewState.AMBIGUOUS:
@@ -230,10 +258,10 @@ class RecruitmentResultService:
                 extracted_status_raw=row.get("extracted_status_raw"),
                 extracted_remarks=row.get("extracted_remarks"),
                 normalized_status=norm_status_enum,
-                matched_student_id=match_res.get("matched_student_id"),
+                matched_student_id=matched_sid,
                 match_confidence=match_res.get("match_confidence", 0.0),
                 match_method=match_res.get("match_method"),
-                match_evidence=match_res.get("match_evidence"),
+                match_evidence=evidence,
                 review_status=rev_status,
                 notification_sent=False,
             )
@@ -470,23 +498,47 @@ class RecruitmentResultService:
             }
             item.match_evidence = evidence
 
-            # Clear or update state
+            # Optional review state specification
             if review_status:
                 norm_rev = review_status.lower()
                 if norm_rev in ["unmatched", "unresolved"]:
-                    rev_enum = RecruitmentResultReviewState.UNRESOLVED
-                elif norm_rev in ["resolved", "matched"]:
-                    rev_enum = RecruitmentResultReviewState.MATCHED
-                else:
-                    try:
-                        rev_enum = RecruitmentResultReviewState(norm_rev)
-                    except ValueError:
-                        raise ValueError(f"Invalid review state '{review_status}'.")
-                item.review_status = rev_enum
-                if rev_enum in [RecruitmentResultReviewState.UNRESOLVED, RecruitmentResultReviewState.IGNORED]:
+                    item.review_status = RecruitmentResultReviewState.UNRESOLVED
                     item.matched_student_id = None
                     item.match_confidence = 0.0
                     item.match_method = "MANUAL_CLEARED"
+                elif norm_rev in ["resolved", "matched"]:
+                    item.review_status = RecruitmentResultReviewState.MATCHED
+                elif norm_rev == "ignored":
+                    item.review_status = RecruitmentResultReviewState.IGNORED
+                elif norm_rev == "ambiguous":
+                    item.review_status = RecruitmentResultReviewState.AMBIGUOUS
+                else:
+                    try:
+                        item.review_status = RecruitmentResultReviewState(norm_rev)
+                    except ValueError:
+                        raise ValueError(f"Invalid review state '{review_status}'.")
+        else:
+            # student_id is None: either clearing student match or setting review status
+            if review_status:
+                norm_rev = review_status.lower()
+                if norm_rev in ["unmatched", "unresolved"]:
+                    item.matched_student_id = None
+                    item.match_confidence = 0.0
+                    item.match_method = "MANUAL_CLEARED"
+                    item.review_status = RecruitmentResultReviewState.UNRESOLVED
+                elif norm_rev == "ignored":
+                    item.review_status = RecruitmentResultReviewState.IGNORED
+                elif norm_rev == "pending":
+                    item.review_status = RecruitmentResultReviewState.PENDING
+                elif norm_rev in ["resolved", "matched"]:
+                    if not item.matched_student_id:
+                        raise ValueError("Cannot set status to MATCHED without a matched student.")
+                    item.review_status = RecruitmentResultReviewState.MATCHED
+                else:
+                    try:
+                        item.review_status = RecruitmentResultReviewState(norm_rev)
+                    except ValueError:
+                        raise ValueError(f"Invalid review state '{review_status}'.")
             else:
                 item.matched_student_id = None
                 item.match_confidence = 0.0
