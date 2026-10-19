@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 
 from ..core.database import get_db
-from ..api.auth import get_current_user
+from ..api.auth import get_current_user, get_current_user_flexible
 from ..models.user import User, UserRole
 from ..models.file import File, FileStatus, FileType
 from ..models.file_version import FileVersion
@@ -354,7 +354,7 @@ async def get_file(
 @router.get("/{file_id}/download")
 async def download_file(
     file_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_flexible),
     db: Session = Depends(get_db)
 ):
     """Download a file."""
@@ -371,21 +371,27 @@ async def download_file(
         )
     
     # Get file content
-    result = file_service.download_file(db, file_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="File content not found")
+    try:
+        result = file_service.download_file(db, file_id)
+    except Exception as e:
+        logger.error(f"Error downloading file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="File content could not be retrieved from storage")
+
+    if not result or not result.get('content'):
+        raise HTTPException(status_code=404, detail="File content not found in storage")
     
-    # Return file as streaming response
     content = result['content']
-    filename = result['filename']
-    mime_type = result['mime_type']
+    filename = result.get('filename') or 'file'
+    safe_filename = os.path.basename(filename).replace('"', '')
+    mime_type = result.get('mime_type') or 'application/octet-stream'
     
     return Response(
         content=content,
         media_type=mime_type,
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(content))
+            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Content-Length": str(len(content)),
+            "Access-Control-Expose-Headers": "Content-Disposition",
         }
     )
 
@@ -393,7 +399,7 @@ async def download_file(
 @router.get("/{file_id}/preview")
 async def preview_file(
     file_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_flexible),
     db: Session = Depends(get_db)
 ):
     """Preview a file (inline display)."""
@@ -410,21 +416,28 @@ async def preview_file(
         )
     
     # Get file content
-    result = file_service.download_file(db, file_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="File content not found")
+    try:
+        result = file_service.download_file(db, file_id)
+    except Exception as e:
+        logger.error(f"Error previewing file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="File content could not be retrieved from storage")
+
+    if not result or not result.get('content'):
+        raise HTTPException(status_code=404, detail="File content not found in storage")
     
     content = result['content']
-    filename = result['filename']
-    mime_type = result['mime_type']
+    filename = result.get('filename') or 'file'
+    safe_filename = os.path.basename(filename).replace('"', '')
+    mime_type = result.get('mime_type') or 'application/octet-stream'
     
-    # For images and PDFs, display inline
-    if mime_type.startswith('image/') or mime_type == 'application/pdf':
+    # For images, PDFs, and text display inline
+    if mime_type.startswith('image/') or mime_type == 'application/pdf' or mime_type.startswith('text/'):
         return Response(
             content=content,
             media_type=mime_type,
             headers={
-                "Content-Disposition": f'inline; filename="{filename}"'
+                "Content-Disposition": f'inline; filename="{safe_filename}"',
+                "Access-Control-Expose-Headers": "Content-Disposition",
             }
         )
     
@@ -433,7 +446,8 @@ async def preview_file(
         content=content,
         media_type=mime_type,
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
+            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition",
         }
     )
 

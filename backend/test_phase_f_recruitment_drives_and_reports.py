@@ -295,8 +295,10 @@ class TestPhaseFRecruitmentDrivesAndReports(unittest.TestCase):
         def override_get_current_user():
             return self.current_user
 
+        from app.api.auth import get_current_user, get_current_user_flexible
         app.dependency_overrides[get_db] = override_get_db
         app.dependency_overrides[get_current_user] = override_get_current_user
+        app.dependency_overrides[get_current_user_flexible] = override_get_current_user
         self.client = TestClient(app)
 
     def tearDown(self):

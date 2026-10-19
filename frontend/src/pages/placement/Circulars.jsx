@@ -267,16 +267,6 @@ const Circulars = () => {
             </button>
           )}
 
-          {isPrivileged && (
-            <button
-              onClick={() => navigate('/placement/results')}
-              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 border border-gray-200 dark:border-gray-700 rounded-lg text-sm font-semibold shadow-sm transition-colors cursor-pointer"
-              title="Process recruitment round results, shortlists, and student matches"
-            >
-              <ListChecks className="w-4 h-4 text-indigo-500" />
-              <span>Shortlists & Results</span>
-            </button>
-          )}
 
           <button
             onClick={() => navigate('/placement/circulars/new')}
@@ -571,12 +561,10 @@ const Circulars = () => {
                         {circ.company_name || 'Company'}
                       </span>
 
-                      {circ.drive_date && (
-                        <span className="flex items-center gap-1">
-                          <Calendar className="w-3.5 h-3.5 text-gray-400" />
-                          Drive: {new Date(circ.drive_date).toLocaleDateString()}
-                        </span>
-                      )}
+                      <span className="flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5 text-gray-400" />
+                        Drive: {circ.drive_date ? new Date(circ.drive_date).toLocaleDateString() : 'Not specified'}
+                      </span>
 
                       {circ.application_deadline && (
                         <span className="flex items-center gap-1">

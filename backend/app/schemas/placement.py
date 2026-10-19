@@ -138,11 +138,20 @@ class JobAttachmentResponse(BaseModel):
     id: int
     file_id: UUID
     filename: Optional[str] = None
+    file_name: Optional[str] = None
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
     created_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def set_file_name_alias(self):
+        if not self.file_name and self.filename:
+            self.file_name = self.filename
+        elif not self.filename and self.file_name:
+            self.filename = self.file_name
+        return self
 
 
 class JobPostingBase(BaseModel):
@@ -167,6 +176,13 @@ class JobPostingBase(BaseModel):
     @classmethod
     def check_application_url(cls, v: Optional[str]) -> Optional[str]:
         return validate_http_or_https_url(v)
+
+    @field_validator("application_deadline", "drive_date", mode="before")
+    @classmethod
+    def clean_optional_datetimes(cls, v: Any) -> Optional[Any]:
+        if v == "" or (isinstance(v, str) and not v.strip()):
+            return None
+        return v
 
 
 class JobPostingCreate(JobPostingBase):
@@ -198,6 +214,13 @@ class JobPostingUpdate(BaseModel):
     @classmethod
     def check_application_url(cls, v: Optional[str]) -> Optional[str]:
         return validate_http_or_https_url(v)
+
+    @field_validator("application_deadline", "drive_date", mode="before")
+    @classmethod
+    def clean_optional_datetimes(cls, v: Any) -> Optional[Any]:
+        if v == "" or (isinstance(v, str) and not v.strip()):
+            return None
+        return v
 
 
 class JobPostingResponse(JobPostingBase):

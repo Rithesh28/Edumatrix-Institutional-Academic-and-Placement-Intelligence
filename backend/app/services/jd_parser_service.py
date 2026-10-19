@@ -36,6 +36,12 @@ class JdParseResult(dict):
     and object-like ergonomics.
     """
     def __getattr__(self, name: str) -> Any:
+        if name == "min_cgpa":
+            return dict.get(self, "min_cgpa", dict.get(self, "cgpa_criteria"))
+        if name == "cgpa_criteria":
+            return dict.get(self, "cgpa_criteria", dict.get(self, "min_cgpa"))
+        if name in ("title", "job_title"):
+            return dict.get(self, "title", dict.get(self, "job_title"))
         try:
             return self[name]
         except KeyError:
@@ -43,6 +49,51 @@ class JdParseResult(dict):
 
     def __setattr__(self, name: str, value: Any) -> None:
         self[name] = value
+
+    def __getitem__(self, key: str) -> Any:
+        if key == "min_cgpa":
+            val = dict.get(self, "min_cgpa")
+            if val is not None:
+                return val
+            val = dict.get(self, "cgpa_criteria")
+            if val is not None:
+                return val
+        elif key == "cgpa_criteria":
+            val = dict.get(self, "cgpa_criteria")
+            if val is not None:
+                return val
+            val = dict.get(self, "min_cgpa")
+            if val is not None:
+                return val
+        elif key in ("title", "job_title"):
+            val = dict.get(self, "title")
+            if val is not None:
+                return val
+            val = dict.get(self, "job_title")
+            if val is not None:
+                return val
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key == "min_cgpa":
+            val = dict.get(self, "min_cgpa")
+            if val is not None:
+                return val
+            val = dict.get(self, "cgpa_criteria")
+            return val if val is not None else default
+        elif key == "cgpa_criteria":
+            val = dict.get(self, "cgpa_criteria")
+            if val is not None:
+                return val
+            val = dict.get(self, "min_cgpa")
+            return val if val is not None else default
+        elif key in ("title", "job_title"):
+            val = dict.get(self, "title")
+            if val is not None:
+                return val
+            val = dict.get(self, "job_title")
+            return val if val is not None else default
+        return super().get(key, default)
 
 
 class JdParserService:
@@ -515,9 +566,11 @@ class JdParserService:
 
         # 1. CGPA Extraction (Explicit CGPA/GPA context only)
         cgpa_patterns = [
-            r'(?:cgpa|gpa|cutoff)[\s:=><]+([0-9]+(?:\.[0-9]+)?)\s*(?:/\s*10)?',
+            r'(?:minimum\s+|min\s+)?(?:cgpa|gpa|cutoff)[\s:=><\-–—]+([0-9]+(?:\.[0-9]+)?)(?:\s*(?:and\s*above|or\s*above|\+|/\s*10))?',
+            r'(?:cgpa|gpa)\s+(?:of\s+|is\s+|>=|≥)?\s*([0-9]+(?:\.[0-9]+)?)(?:\s*(?:and\s*above|or\s*above|\+|/\s*10))?',
             r'([0-9]+(?:\.[0-9]+)?)\s*(?:and\s*above|or\s*above|\+)?\s*(?:cgpa|gpa)',
-            r'minimum\s+([0-9]+(?:\.[0-9]+)?)\s*(?:in\s+)?cgpa'
+            r'minimum\s+([0-9]+(?:\.[0-9]+)?)\s*(?:in\s+)?(?:cgpa|gpa)',
+            r'(?:minimum|min)\s+(?:cgpa|gpa)[\s:=><\-–—]+([0-9]+(?:\.[0-9]+)?)'
         ]
         for p in cgpa_patterns:
             m = re.search(p, text, re.IGNORECASE)
@@ -844,20 +897,31 @@ class JdParserService:
             "staged_compensation": []
         }
 
-        # 1. Detect Staged Compensation (Stipend + Post-conversion CTC)
+        # 1. Detect Staged Compensation (Stipend + Post-conversion / Annual CTC)
         stipend_match = re.search(
-            r'(?:stipend(?:\s*during\s*(?:internship|training))?|internship\s*stipend)(?:[\s:\-–—|]+|\s+of\s+)([₹Rs\.\s0-9,]+(?:\s*(?:\/|per)\s*(?:month|mo|pm))?)',
+            r'(?:stipend(?:\s*during\s*(?:internship|training))?|internship\s*stipend)(?:[\s:\-–—|]+|\s+of\s+)([₹RsINR\.\s0-9,]+(?:\s*(?:\/|per)\s*(?:month|mo|pm))?)',
             text,
             re.IGNORECASE
         )
         ctc_match = re.search(
-            r'(?:(?:full[\s\-]*time\s*)?(?:ctc|package|salary(?:\s*range)?)|post\s*(?:completion\s*of\s*)?internship|upon\s*(?:full[\s\-]*time\s*)?(?:absorption|confirmation))(?:[\s:\-–—|]+|(?:\s+(?:offered\s+)?(?:is|of)\s+))([₹Rs\.\s0-9,\-]+(?:lpa|lakhs?|lac|inr|per\s*annum|pa)?)',
+            r'(?:(?:annual|full[\s\-]*time)\s+)?(?:ctc|package|salary(?:\s*range)?|gross|fixed|remuneration|post\s*(?:completion\s*of\s*)?internship|upon\s*(?:full[\s\-]*time\s*)?(?:absorption|confirmation))(?:[\s:\-–—|]+|(?:\s+(?:offered\s+)?(?:is|of)\s+))([₹RsINR\.\s0-9,\-–—to]+?(?:lpa|lakhs?(?:\s*(?:per\s*annum|pa))?|lac|inr|per\s*annum|pa)\b)',
             text,
             re.IGNORECASE
         )
 
         stipend_val = stipend_match.group(1).split("\n")[0].strip() if stipend_match else None
         ctc_val = ctc_match.group(1).split("\n")[0].strip() if ctc_match else None
+
+        # Dedicated fallback for explicit CTC range with INR / Lakhs per annum
+        if not ctc_val:
+            ctc_range_fallback = re.search(
+                r'(?:(?:annual\s+)?(?:ctc|package|salary)[\s:\-–—|]*)?(?:inr|rs\.?|₹)?\s*([0-9]+(?:\.[0-9]+)?)\s*[\-–—to\s]+\s*(?:inr|rs\.?|₹)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:lpa|lakhs?(?:\s*(?:per\s*annum|pa))?|lac)',
+                text,
+                re.IGNORECASE
+            )
+            if ctc_range_fallback:
+                low_c, high_c = ctc_range_fallback.group(1), ctc_range_fallback.group(2)
+                ctc_val = f"INR {low_c} - {high_c} Lakhs per annum"
 
         # Clean trailing punctuation
         if stipend_val:
@@ -891,16 +955,19 @@ class JdParserService:
             if intern_duration:
                 stipend_formatted += f" ({intern_duration})"
 
-            compensation_details["stipend"] = stipend_formatted
+            stipend_display = stipend_val if "month" in stipend_val.lower() else stipend_formatted
+            compensation_details["stipend"] = stipend_display
             compensation_details["full_time_ctc"] = ctc_val
+            compensation_details["annual_ctc"] = ctc_val
             compensation_details["staged_compensation"] = [
-                {"stage": f"Internship ({intern_duration or 'Period'})", "amount": stipend_formatted},
+                {"stage": f"Internship ({intern_duration or 'Period'})", "amount": stipend_display},
                 {"stage": "Full Time / Post-Conversion", "amount": ctc_val}
             ]
-            salary_range = f"Stipend: {stipend_formatted} → Full Time CTC: {ctc_val}"
-            evidence["salary_range"] = salary_range
+            salary_range = ctc_val
+            evidence["salary_range"] = ctc_val
+            evidence["stipend"] = stipend_display
             review_flags.append(
-                f"Staged compensation detected ({stipend_formatted} internship stipend, followed by {ctc_val} full-time CTC). Preserved as progression stages."
+                f"Staged compensation detected ({stipend_display} internship stipend, followed by {ctc_val} full-time CTC). Preserved as distinct compensation details."
             )
             return salary_range, compensation_details
 
@@ -931,7 +998,7 @@ class JdParserService:
 
         # 3. Standard CTC / Salary Range (e.g. ₹8-12 LPA, 6.5 LPA)
         match_lpa_range = re.search(
-            r'([₹Rs\.\s0-9]+(?:\.[0-9]+)?\s*[\-–—to\s]+\s*[₹Rs\.\s0-9]+(?:\.[0-9]+)?\s*(?:lpa|lakhs?|lac))',
+            r'([₹RsINR\.\s0-9]+(?:\.[0-9]+)?\s*[\-–—to\s]+\s*[₹RsINR\.\s0-9]+(?:\.[0-9]+)?\s*(?:lpa|lakhs?(?:\s*(?:per\s*annum|pa))?|lac))',
             text,
             re.IGNORECASE
         )
@@ -943,7 +1010,7 @@ class JdParserService:
 
         # Single LPA value
         match_single_lpa = re.search(
-            r'([₹Rs\.\s0-9]+(?:\.[0-9]+)?\s*(?:lpa|lakhs?|lac))',
+            r'([₹RsINR\.\s0-9]+(?:\.[0-9]+)?\s*(?:lpa|lakhs?(?:\s*(?:per\s*annum|pa))?|lac))',
             text,
             re.IGNORECASE
         )
@@ -996,7 +1063,7 @@ class JdParserService:
                 raw_snippet = dm.group(1).strip()
                 evidence["application_deadline"] = dm.group(0).strip()
                 # Check for year presence
-                has_year = bool(re.search(r'\b202[4-9]\b', raw_snippet))
+                has_year = bool(re.search(r'\b20[2-9][0-9]\b', raw_snippet))
                 if not has_year:
                     review_flags.append(
                         f"Incomplete date: Missing year in deadline expression '{raw_snippet}'. Placement Officer confirmation required."
@@ -1016,7 +1083,7 @@ class JdParserService:
             if drm:
                 raw_snippet = drm.group(1).strip()
                 evidence["drive_date"] = drm.group(0).strip()
-                has_year = bool(re.search(r'\b202[4-9]\b', raw_snippet))
+                has_year = bool(re.search(r'\b20[2-9][0-9]\b', raw_snippet))
                 if not has_year:
                     review_flags.append(
                         f"Incomplete date: Missing year in placement drive date '{raw_snippet}'."
@@ -1341,7 +1408,6 @@ class JdParserService:
         "xml.org",
         "localhost",
         "127.0.0.1",
-        "example.com",
         "schema.org",
     }
 
@@ -1401,7 +1467,7 @@ class JdParserService:
                 return score
 
             best_url = max(valid_candidates, key=score_url)
-            if score_url(best_url) > 0 or len(valid_candidates) == 1:
+            if score_url(best_url) > 0:
                 app_url = best_url
                 evidence["application_url"] = app_url
 
@@ -1459,9 +1525,19 @@ class JdParserService:
         per_file_results: List[Dict[str, Any]] = []
 
         for item in files_data:
-            fn = item.get("filename", "unknown")
-            content = item.get("content", b"")
-            fid = item.get("file_id")
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                fn = item[0]
+                content = item[1]
+                fid = item[2] if len(item) > 2 else None
+            elif isinstance(item, dict):
+                fn = item.get("filename", "unknown")
+                content = item.get("content", b"")
+                fid = item.get("file_id")
+            else:
+                continue
+
+            if isinstance(content, str):
+                content = content.encode("utf-8")
 
             try:
                 text = self.extract_text_from_file(content=content, filename=fn)
@@ -1496,8 +1572,8 @@ class JdParserService:
             empty["extracted_files"] = extracted_files_summary
             empty["extraction_status"] = "failed"
             empty["review_flags"] = ["Failed to extract readable text from uploaded documents."]
-            empty["file_ids"] = [item["file_id"] for item in files_data if item.get("file_id")]
-            empty["file_names"] = [item["filename"] for item in files_data if item.get("filename")]
+            empty["file_ids"] = [item["file_id"] for item in files_data if isinstance(item, dict) and item.get("file_id")]
+            empty["file_names"] = [item["filename"] if isinstance(item, dict) else item[0] for item in files_data if (isinstance(item, dict) and item.get("filename")) or isinstance(item, (list, tuple))]
             if empty["file_ids"]:
                 empty["file_id"] = empty["file_ids"][0]
                 empty["file_name"] = empty["file_names"][0]
@@ -1593,23 +1669,96 @@ class JdParserService:
         work_modes = [r["parsed"].get("work_mode") for r in per_file_results if r["parsed"].get("work_mode")]
         chosen_work_mode = work_modes[0] if work_modes else None
 
-        # 5. Salary Range & Compensation Details
-        salary_vals = [(r["filename"], r["parsed"].get("salary_range")) for r in per_file_results if r["parsed"].get("salary_range")]
+        # 5. Salary Range & Compensation Details across multiple files
+        stipend_entries = []
+        ctc_entries = []
+        for r in per_file_results:
+            fn = r["filename"]
+            cd = r["parsed"].get("compensation_details") or {}
+            stip = cd.get("stipend")
+            ctc = cd.get("full_time_ctc")
+            if stip:
+                stipend_entries.append((fn, stip))
+            if ctc:
+                ctc_entries.append((fn, ctc))
+
         chosen_salary = None
-        if salary_vals:
-            chosen_salary = salary_vals[0][1]
-            merged_evidence["salary_range"] = f"[{salary_vals[0][0]}] {chosen_salary}"
-        
-        comp_details = next((r["parsed"].get("compensation_details") for r in per_file_results if r["parsed"].get("compensation_details")), None)
+        comp_details = {
+            "currency": "INR",
+            "stipend": None,
+            "full_time_ctc": None,
+            "staged_compensation": []
+        }
+
+        # Check for conflicts among distinct CTC values
+        if ctc_entries:
+            unique_ctcs = {c[1].strip().lower(): c for c in ctc_entries}
+            if len(unique_ctcs) > 1:
+                c1, c2 = ctc_entries[0], ctc_entries[1]
+                merged_review_flags.append(
+                    f"Conflicting full-time CTC/salary: '{c1[1]}' ({c1[0]}) vs '{c2[1]}' ({c2[0]}). Defaulted to '{c1[1]}'. Please verify."
+                )
+            comp_details["full_time_ctc"] = ctc_entries[0][1]
+            comp_details["annual_ctc"] = ctc_entries[0][1]
+
+        # Check for conflicts among distinct Stipend values
+        if stipend_entries:
+            unique_stipends = {s[1].strip().lower(): s for s in stipend_entries}
+            if len(unique_stipends) > 1:
+                s1, s2 = stipend_entries[0], stipend_entries[1]
+                merged_review_flags.append(
+                    f"Conflicting stipend details: '{s1[1]}' ({s1[0]}) vs '{s2[1]}' ({s2[0]}). Defaulted to '{s1[1]}'. Please verify."
+                )
+            comp_details["stipend"] = stipend_entries[0][1]
+
+        if comp_details["stipend"] and comp_details["full_time_ctc"]:
+            comp_details["staged_compensation"] = [
+                {"stage": "Internship Period", "amount": comp_details["stipend"]},
+                {"stage": "Full Time / Post-Conversion", "amount": comp_details["full_time_ctc"]}
+            ]
+            chosen_salary = comp_details["full_time_ctc"]
+            merged_evidence["salary_range"] = f"Full Time CTC: {chosen_salary}"
+            merged_evidence["stipend"] = comp_details["stipend"]
+        elif comp_details["full_time_ctc"]:
+            chosen_salary = comp_details["full_time_ctc"]
+            merged_evidence["salary_range"] = f"Full Time CTC: {chosen_salary}"
+        elif comp_details["stipend"]:
+            chosen_salary = f"Stipend: {comp_details['stipend']}"
+            merged_evidence["salary_range"] = chosen_salary
+        else:
+            salary_vals = [(r["filename"], r["parsed"].get("salary_range")) for r in per_file_results if r["parsed"].get("salary_range")]
+            if salary_vals:
+                chosen_salary = salary_vals[0][1]
+                merged_evidence["salary_range"] = f"[{salary_vals[0][0]}] {chosen_salary}"
 
         # 6. Deadlines & Important Dates
         deadlines = [(r["filename"], r["parsed"].get("application_deadline")) for r in per_file_results if r["parsed"].get("application_deadline")]
-        chosen_deadline = deadlines[0][1] if deadlines else None
+        chosen_deadline = None
         if deadlines:
+            unique_deadlines = {d[1].strip(): d for d in deadlines}
+            if len(unique_deadlines) > 1:
+                d1, d2 = deadlines[0], deadlines[1]
+                chosen_deadline = d1[1]
+                merged_review_flags.append(
+                    f"Conflicting application_deadline: '{d1[1]}' ({d1[0]}) vs '{d2[1]}' ({d2[0]}). Selected '{chosen_deadline}'. Please verify."
+                )
+            else:
+                chosen_deadline = deadlines[0][1]
             merged_evidence["application_deadline"] = f"[{deadlines[0][0]}] {chosen_deadline}"
 
-        drive_dates = [r["parsed"].get("drive_date") for r in per_file_results if r["parsed"].get("drive_date")]
-        chosen_drive_date = drive_dates[0] if drive_dates else None
+        drive_dates = [(r["filename"], r["parsed"].get("drive_date")) for r in per_file_results if r["parsed"].get("drive_date")]
+        chosen_drive_date = None
+        if drive_dates:
+            unique_drive_dates = {d[1].strip(): d for d in drive_dates}
+            if len(unique_drive_dates) > 1:
+                dd1, dd2 = drive_dates[0], drive_dates[1]
+                chosen_drive_date = dd1[1]
+                merged_review_flags.append(
+                    f"Conflicting drive dates: '{dd1[1]}' ({dd1[0]}) vs '{dd2[1]}' ({dd2[0]}). Selected '{chosen_drive_date}'. Please verify."
+                )
+            else:
+                chosen_drive_date = drive_dates[0][1]
+            merged_evidence["drive_date"] = f"[{drive_dates[0][0]}] {chosen_drive_date}"
 
         joining_dates = [r["parsed"].get("joining_date") for r in per_file_results if r["parsed"].get("joining_date")]
         chosen_joining_date = joining_dates[0] if joining_dates else None
@@ -1647,15 +1796,28 @@ class JdParserService:
 
         # 10. Application URL
         urls = [(r["filename"], r["parsed"].get("application_url")) for r in per_file_results if r["parsed"].get("application_url")]
-        chosen_url = urls[0][1] if urls else None
-        if chosen_url:
+        chosen_url = None
+        if urls:
+            unique_urls = {u[1].strip(): u for u in urls}
+            if len(unique_urls) > 1:
+                u1, u2 = urls[0], urls[1]
+                chosen_url = u1[1]
+                merged_review_flags.append(
+                    f"Conflicting application URLs: '{u1[1]}' ({u1[0]}) vs '{u2[1]}' ({u2[0]}). Selected '{chosen_url}'. Please confirm the correct link."
+                )
+            else:
+                chosen_url = urls[0][1]
             merged_evidence["application_url"] = f"[{urls[0][0]}] {chosen_url}"
 
         instructions_list = [r["parsed"].get("application_instructions") for r in per_file_results if r["parsed"].get("application_instructions")]
         chosen_instructions = instructions_list[0] if instructions_list else None
 
-        # 11. Description combining
-        descriptions = [r["parsed"].get("description") for r in per_file_results if r["parsed"].get("description")]
+        # 11. Description combining without duplicate paragraphs
+        descriptions = []
+        for r in per_file_results:
+            desc = (r["parsed"].get("description") or "").strip()
+            if desc and desc not in descriptions:
+                descriptions.append(desc)
         chosen_description = "\n\n".join(descriptions) if descriptions else ""
 
         # 12. Aggregate Review Flags
@@ -1671,8 +1833,8 @@ class JdParserService:
         else:
             extraction_status = "success"
 
-        all_file_ids = [item["file_id"] for item in files_data if item.get("file_id")]
-        all_file_names = [item["filename"] for item in files_data if item.get("filename")]
+        all_file_ids = [item["file_id"] for item in files_data if isinstance(item, dict) and item.get("file_id")]
+        all_file_names = [item["filename"] if isinstance(item, dict) else item[0] for item in files_data if (isinstance(item, dict) and item.get("filename")) or isinstance(item, (list, tuple))]
 
         return JdParseResult({
             "title": chosen_title,
@@ -1681,6 +1843,7 @@ class JdParserService:
             "preferred_skills": merged_pref_skills,
             "experience_level": per_file_results[0]["parsed"].get("experience_level"),
             "cgpa_criteria": chosen_cgpa,
+            "min_cgpa": chosen_cgpa,
             "branch_eligibility": merged_branches,
             "location": chosen_location,
             "salary_range": chosen_salary,
@@ -1765,6 +1928,10 @@ class JdParserService:
             "field_evidence": {}
         })
 
+    # Alias for convenience
+    parse = parse_jd_text
+
 
 # Global singleton instance
 jd_parser_service = JdParserService()
+

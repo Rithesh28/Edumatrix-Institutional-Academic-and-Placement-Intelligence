@@ -24,7 +24,7 @@ import logging
 
 from ..core.database import get_db
 from ..core.config import settings
-from ..api.auth import get_current_user, get_current_placement_officer
+from ..api.auth import get_current_user, get_current_placement_officer, get_current_user_flexible
 from ..models.user import User, UserRole
 from ..models.company import Company
 from ..models.job_posting import JobPosting, JobStatus, JobPostingAttachment
@@ -308,7 +308,7 @@ async def bulk_delete_jobs(
 async def download_job_file(
     job_id: int,
     file_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_flexible),
     db: Session = Depends(get_db)
 ):
     """
@@ -333,32 +333,39 @@ async def download_job_file(
     if current_user.role == UserRole.STUDENT:
         if job.status != JobStatus.OPEN:
             raise HTTPException(status_code=404, detail="Job posting not found")
-        if job.eligible_branches and len(job.eligible_branches) > 0:
+        if job.branch_eligibility and len(job.branch_eligibility) > 0:
             student_branch = None
             if current_user.student_profile and current_user.student_profile.branch:
                 student_branch = current_user.student_profile.branch
             elif current_user.department:
                 student_branch = current_user.department
-            target_branches = {str(b).strip().lower() for b in job.eligible_branches if b}
+            target_branches = {str(b).strip().lower() for b in job.branch_eligibility if b}
             if not student_branch or str(student_branch).strip().lower() not in target_branches:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: You are not eligible for this job posting.")
     elif current_user.role not in [UserRole.ADMIN, UserRole.PLACEMENT_OFFICER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
-    result = file_service.download_file(db, file_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="File content not found")
+    try:
+        result = file_service.download_file(db, file_id)
+    except Exception as e:
+        logger.error(f"Error downloading job file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="File content could not be retrieved from storage")
+
+    if not result or not result.get('content'):
+        raise HTTPException(status_code=404, detail="File content not found in storage")
 
     content = result['content']
-    filename = result['filename']
-    mime_type = result['mime_type']
+    filename = result.get('filename') or 'job_attachment'
+    safe_filename = os.path.basename(filename).replace('"', '')
+    mime_type = result.get('mime_type') or 'application/octet-stream'
 
     return Response(
         content=content,
         media_type=mime_type,
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Content-Length": str(len(content))
+            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Content-Length": str(len(content)),
+            "Access-Control-Expose-Headers": "Content-Disposition",
         }
     )
 
@@ -367,7 +374,7 @@ async def download_job_file(
 async def preview_job_file(
     job_id: int,
     file_id: UUID,
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_flexible),
     db: Session = Depends(get_db)
 ):
     """
@@ -392,32 +399,47 @@ async def preview_job_file(
     if current_user.role == UserRole.STUDENT:
         if job.status != JobStatus.OPEN:
             raise HTTPException(status_code=404, detail="Job posting not found")
-        if job.eligible_branches and len(job.eligible_branches) > 0:
+        if job.branch_eligibility and len(job.branch_eligibility) > 0:
             student_branch = None
             if current_user.student_profile and current_user.student_profile.branch:
                 student_branch = current_user.student_profile.branch
             elif current_user.department:
                 student_branch = current_user.department
-            target_branches = {str(b).strip().lower() for b in job.eligible_branches if b}
+            target_branches = {str(b).strip().lower() for b in job.branch_eligibility if b}
             if not student_branch or str(student_branch).strip().lower() not in target_branches:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: You are not eligible for this job posting.")
     elif current_user.role not in [UserRole.ADMIN, UserRole.PLACEMENT_OFFICER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
-    result = file_service.download_file(db, file_id)
-    if not result:
-        raise HTTPException(status_code=404, detail="File content not found")
+    try:
+        result = file_service.download_file(db, file_id)
+    except Exception as e:
+        logger.error(f"Error previewing job file {file_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=404, detail="File content could not be retrieved from storage")
+
+    if not result or not result.get('content'):
+        raise HTTPException(status_code=404, detail="File content not found in storage")
 
     content = result['content']
-    filename = result['filename']
-    mime_type = result['mime_type']
+    filename = result.get('filename') or 'job_attachment'
+    safe_filename = os.path.basename(filename).replace('"', '')
+    mime_type = result.get('mime_type') or 'application/octet-stream'
+
+    # Display inline for previewable formats (images, pdf, text)
+    is_inline_preview = (
+        mime_type.startswith('image/') or
+        mime_type == 'application/pdf' or
+        mime_type.startswith('text/')
+    )
+    disposition = "inline" if is_inline_preview else "attachment"
 
     return Response(
         content=content,
         media_type=mime_type,
         headers={
-            "Content-Disposition": f'inline; filename="{filename}"',
-            "Content-Length": str(len(content))
+            "Content-Disposition": f'{disposition}; filename="{safe_filename}"',
+            "Content-Length": str(len(content)),
+            "Access-Control-Expose-Headers": "Content-Disposition",
         }
     )
 

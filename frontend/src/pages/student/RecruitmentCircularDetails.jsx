@@ -17,6 +17,10 @@ import {
   Send,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
+import {
+  getCircularAttachmentDownloadUrl,
+  getCircularAttachmentPreviewUrl,
+} from '../../services/placementService';
 import toast from 'react-hot-toast';
 
 const StudentRecruitmentCircularDetails = () => {
@@ -101,7 +105,7 @@ const StudentRecruitmentCircularDetails = () => {
             <div>
               <span className="text-gray-400 font-medium">Drive / Interview Date</span>
               <p className="font-semibold text-gray-900 dark:text-white mt-0.5">
-                {circ.drive_date ? new Date(circ.drive_date).toLocaleString() : 'TBD / Multi-stage'}
+                {circ.drive_date ? new Date(circ.drive_date).toLocaleString() : 'Not specified'}
               </p>
             </div>
           </div>
@@ -125,7 +129,7 @@ const StudentRecruitmentCircularDetails = () => {
               <p className="font-semibold text-gray-900 dark:text-white mt-0.5">
                 {circ.application_deadline
                   ? new Date(circ.application_deadline).toLocaleString()
-                  : 'Open Until Drive'}
+                  : 'Not specified'}
                 {isDeadlinePassed && ' (Expired)'}
               </p>
             </div>
@@ -295,7 +299,7 @@ const StudentRecruitmentCircularDetails = () => {
                     <Eye className="w-4 h-4" />
                   </button>
                   <a
-                    href={`/api/v1/files/${att.file_id}/download`}
+                    href={getCircularAttachmentDownloadUrl(circ.id, att.id)}
                     target="_blank"
                     rel="noreferrer"
                     download
@@ -334,7 +338,7 @@ const StudentRecruitmentCircularDetails = () => {
 
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-950">
               <iframe
-                src={`/api/v1/files/${previewFile.file_id}/preview`}
+                src={getCircularAttachmentPreviewUrl(circ.id, previewFile.id)}
                 title={previewFile.filename}
                 className="w-full h-[65vh] rounded-lg border border-gray-200 dark:border-gray-800"
               />

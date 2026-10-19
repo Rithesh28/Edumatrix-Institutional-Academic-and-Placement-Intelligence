@@ -100,6 +100,12 @@ class RecruitmentCircularCreate(BaseModel):
     job_posting_ids: Optional[List[int]] = Field(default_factory=list, description="Initial job postings to link")
     attachments: Optional[List[CircularAttachmentCreate]] = Field(default_factory=list, description="Initial attachments")
 
+    @field_validator("application_deadline", "drive_date", mode="before")
+    def clean_empty_dates(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
 
 class RecruitmentCircularUpdate(BaseModel):
     """Schema for updating a recruitment circular draft."""
@@ -110,6 +116,83 @@ class RecruitmentCircularUpdate(BaseModel):
     drive_date: Optional[datetime] = None
     branch_eligibility: Optional[List[str]] = None
     company_id: Optional[int] = None
+
+    @field_validator("application_deadline", "drive_date", mode="before")
+    def clean_empty_dates(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+
+# ============================================
+# REDESIGNED RECRUITMENT DRIVE WORKFLOW SCHEMAS
+# ============================================
+
+class DriveCandidateMatchItem(BaseModel):
+    row_index: int
+    source_filename: str
+    extracted_usn: Optional[str] = None
+    extracted_name: Optional[str] = None
+    extracted_email: Optional[str] = None
+    extracted_branch: Optional[str] = None
+    matched_student_id: Optional[int] = None
+    matched_student_name: Optional[str] = None
+    matched_student_usn: Optional[str] = None
+    matched_student_email: Optional[str] = None
+    matched_student_branch: Optional[str] = None
+    match_confidence: float = 0.0
+    match_method: Optional[str] = None
+    match_evidence: Optional[Any] = None
+    review_status: str  # "matched", "ambiguous", "unmatched"
+    is_duplicate: bool = False
+    is_confirmed: bool = False
+
+
+class DriveCandidateSummary(BaseModel):
+    total: int = 0
+    matched: int = 0
+    ambiguous: int = 0
+    unmatched: int = 0
+    duplicate: int = 0
+
+
+class DriveAttachmentFileInfo(BaseModel):
+    file_id: UUID
+    filename: str
+    file_size: Optional[int] = None
+    content_type: Optional[str] = None
+
+
+class DriveParseShortlistResponse(BaseModel):
+    description: str
+    candidates: List[DriveCandidateMatchItem] = []
+    candidate_summary: DriveCandidateSummary
+    attachment_files: List[DriveAttachmentFileInfo] = []
+
+
+class CreateAndPostDriveRequest(BaseModel):
+    company_id: int
+    title: Optional[str] = None
+    description: str
+    branch_eligibility: List[str] = []
+    linked_job_ids: List[int] = []
+    drive_date: Optional[datetime] = None
+    attachment_file_ids: List[UUID] = []
+    candidates: List[Dict[str, Any]] = []
+
+    @field_validator("drive_date", mode="before")
+    def clean_drive_date(cls, v):
+        if v == "" or v is None:
+            return None
+        return v
+
+
+class CreateAndPostDriveResponse(BaseModel):
+    success: bool
+    circular: "RecruitmentCircularResponse"
+    notified_students_count: int
+    candidates_count: int
+    message: str
 
 
 class RecruitmentCircularResponse(BaseModel):
@@ -211,4 +294,7 @@ class DriveReportResponse(BaseModel):
     offers_summary: DriveOffersSummary
 
     generated_at: datetime
+
+
+CreateAndPostDriveResponse.model_rebuild()
 

@@ -151,6 +151,47 @@ class FileService:
             logger.error(f"❌ File upload failed: {str(e)}")
             db.rollback()
             raise
+
+    def save_file_direct(
+        self,
+        db: Session,
+        file_content: bytes,
+        filename: str,
+        uploader_id: Optional[int] = None,
+        department: str = "Placement Cell",
+        file_type: str = "other",
+        mime_type: Optional[str] = None
+    ) -> File:
+        """Directly save byte content to MinIO and database record."""
+        file_id = uuid.uuid4()
+        bucket = self._get_bucket(file_type)
+        object_key = self._generate_object_key(file_id, filename)
+        
+        # Upload to MinIO
+        minio_client.upload_file(
+            bucket=bucket,
+            object_key=object_key,
+            file_data=file_content,
+            content_type=mime_type or "application/octet-stream"
+        )
+        
+        db_file = File(
+            id=file_id,
+            filename=filename,
+            file_size=len(file_content),
+            mime_type=mime_type or "application/octet-stream",
+            bucket=bucket,
+            object_key=object_key,
+            title=filename,
+            department=department,
+            file_type=file_type,
+            uploaded_by=uploader_id,
+            status=FileStatus.ACTIVE
+        )
+        db.add(db_file)
+        db.commit()
+        db.refresh(db_file)
+        return db_file
     
     def get_file(self, db: Session, file_id: uuid.UUID) -> Optional[File]:
         """Get file by ID."""
@@ -388,6 +429,51 @@ class FileService:
             'total_size_mb': round(total_size / (1024 * 1024), 2),
             'by_type': by_type_dict
         }
+
+    def save_file_direct(
+        self,
+        db: Session,
+        file_content: bytes,
+        filename: str,
+        uploader_id: int,
+        department: str = "Placement Cell",
+        file_type: str = "placement_doc",
+        mime_type: str = "application/octet-stream"
+    ) -> File:
+        """Save file bytes directly to storage and database record."""
+        file_id = uuid.uuid4()
+        bucket = self._get_bucket(file_type)
+        object_key = self._generate_object_key(file_id, filename)
+        
+        try:
+            minio_client.upload_file(
+                bucket=bucket,
+                object_key=object_key,
+                file_data=file_content,
+                content_type=mime_type
+            )
+        except Exception as e:
+            logger.warning(f"MinIO storage direct upload warning for {filename}: {e}")
+            
+        file_record = File(
+            id=file_id,
+            filename=filename,
+            file_size=len(file_content),
+            mime_type=mime_type,
+            bucket=bucket,
+            object_key=object_key,
+            title=filename,
+            department=department,
+            file_type=file_type,
+            uploaded_by=uploader_id,
+            version=1,
+            is_latest=True,
+            status=FileStatus.ACTIVE
+        )
+        db.add(file_record)
+        db.commit()
+        db.refresh(file_record)
+        return file_record
 
 
 # Singleton instance

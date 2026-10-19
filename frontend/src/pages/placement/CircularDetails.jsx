@@ -39,7 +39,11 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
-import { getJobRounds } from '../../services/placementService';
+import {
+  getJobRounds,
+  getCircularAttachmentDownloadUrl,
+  getCircularAttachmentPreviewUrl,
+} from '../../services/placementService';
 import RecruitmentRoundsTab from '../../components/placement/RecruitmentRoundsTab';
 import VerifiedOffersTab from '../../components/placement/VerifiedOffersTab';
 import StudentProgressionModal from '../../components/placement/StudentProgressionModal';
@@ -546,7 +550,7 @@ const CircularDetails = () => {
                 <div>
                   <span className="text-gray-400 font-medium">Drive Date</span>
                   <p className="font-semibold text-gray-900 dark:text-white mt-0.5">
-                    {circ.drive_date ? new Date(circ.drive_date).toLocaleString() : 'TBD / Multiple Dates'}
+                    {circ.drive_date ? new Date(circ.drive_date).toLocaleString() : 'Not specified'}
                   </p>
                 </div>
               </div>
@@ -560,7 +564,7 @@ const CircularDetails = () => {
                   <p className="font-semibold text-gray-900 dark:text-white mt-0.5">
                     {circ.application_deadline
                       ? new Date(circ.application_deadline).toLocaleString()
-                      : 'Open Until Drive'}
+                      : 'Not specified'}
                   </p>
                 </div>
               </div>
@@ -758,7 +762,7 @@ const CircularDetails = () => {
                         <Eye className="w-4 h-4" />
                       </button>
                       <a
-                        href={`/api/v1/files/${att.file_id}/download`}
+                        href={getCircularAttachmentDownloadUrl(circ.id, att.id)}
                         target="_blank"
                         rel="noreferrer"
                         download
@@ -1680,7 +1684,7 @@ const CircularDetails = () => {
 
             <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-950">
               <iframe
-                src={`/api/v1/files/${previewFile.file_id}/preview`}
+                src={getCircularAttachmentPreviewUrl(circ.id, previewFile.id)}
                 title={previewFile.filename}
                 className="w-full h-[65vh] rounded-lg border border-gray-200 dark:border-gray-800"
               />

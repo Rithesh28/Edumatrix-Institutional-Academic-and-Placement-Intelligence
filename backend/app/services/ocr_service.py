@@ -105,6 +105,40 @@ class OCRService:
             logger.error(f"Scanned PDF extraction failed: {e}")
             return f"Scanned PDF Error: {str(e)}"
 
+    def extract_text_from_scanned_pdf_bytes(self, pdf_bytes: bytes) -> str:
+        """
+        Extract text from scanned PDF bytes using pdf2image and Tesseract
+
+        Args:
+            pdf_bytes: Raw bytes of the scanned PDF
+
+        Returns:
+            Extracted text as string, or error string starting with 'Scanned PDF Error:'
+        """
+        try:
+            from pdf2image import convert_from_bytes
+
+            if not pdf_bytes:
+                return "Error: Empty PDF bytes"
+
+            images = convert_from_bytes(pdf_bytes)
+            if not images:
+                return "Error: No pages could be converted from PDF"
+
+            all_text = []
+            for i, image in enumerate(images):
+                text = pytesseract.image_to_string(image)
+                if text and text.strip():
+                    all_text.append(f"--- Page {i+1} ---\n{text.strip()}")
+
+            return "\n\n".join(all_text).strip()
+        except ImportError:
+            return "Error: pdf2image not installed. Please install: pip install pdf2image"
+        except Exception as e:
+            logger.error(f"Scanned PDF extraction from bytes failed: {e}")
+            return f"Scanned PDF Error: {str(e)}"
+
+
 
 # Singleton instance
 ocr_service = OCRService()

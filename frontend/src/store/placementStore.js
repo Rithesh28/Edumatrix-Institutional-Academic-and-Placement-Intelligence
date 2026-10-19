@@ -62,6 +62,8 @@ import {
   getCleanupPreview,
   getDrivesCleanupPreview,
   executeCleanup,
+  parseShortlist,
+  createAndPostDrive,
 } from '../services/placementService';
 import { useAuthStore } from './authStore';
 
@@ -843,6 +845,41 @@ const usePlacementStore = create((set, get) => ({
       throw error;
     }
   },
+
+  parseShortlist: async (formData) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const result = await parseShortlist(formData);
+      set({ isCircularsLoading: false });
+      return result;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
+  createAndPostDrive: async (data) => {
+    set({ isCircularsLoading: true, circularsError: null });
+    try {
+      const result = await createAndPostDrive(data);
+      if (result.circular) {
+        set((state) => ({
+          circulars: [result.circular, ...state.circulars],
+          selectedCircular: result.circular,
+          isCircularsLoading: false,
+        }));
+      } else {
+        set({ isCircularsLoading: false });
+      }
+      return result;
+    } catch (error) {
+      const errorMsg = formatErrorMessage(error);
+      set({ isCircularsLoading: false, circularsError: errorMsg });
+      throw error;
+    }
+  },
+
 
   addCircularAttachment: async (circularId, data) => {
     set({ isCircularsLoading: true, circularsError: null });

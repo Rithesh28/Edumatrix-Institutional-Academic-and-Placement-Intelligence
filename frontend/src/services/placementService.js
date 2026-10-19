@@ -110,11 +110,15 @@ export const uploadJdFile = async (file) => {
 };
 
 export const getJobFileDownloadUrl = (jobId, fileId) => {
-  return `/api/v1/placement/jobs/${jobId}/files/${fileId}/download`;
+  const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+  const base = `/api/v1/placement/jobs/${jobId}/files/${fileId}/download`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 
 export const getJobFilePreviewUrl = (jobId, fileId) => {
-  return `/api/v1/placement/jobs/${jobId}/files/${fileId}/preview`;
+  const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+  const base = `/api/v1/placement/jobs/${jobId}/files/${fileId}/preview`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 
 // ============================================
@@ -268,6 +272,30 @@ export const linkCircularJobs = async (circularId, data) => {
 
 export const unlinkCircularJob = async (circularId, jobPostingId) => {
   const response = await api.delete(`/placement/circulars/${circularId}/jobs/${jobPostingId}`);
+  return response.data;
+};
+
+export const getCircularAttachmentDownloadUrl = (circularId, attachmentId) => {
+  const token = localStorage.getItem('token');
+  const base = `/api/v1/placement/circulars/${circularId}/attachments/${attachmentId}/download`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+};
+
+export const getCircularAttachmentPreviewUrl = (circularId, attachmentId) => {
+  const token = localStorage.getItem('token');
+  const base = `/api/v1/placement/circulars/${circularId}/attachments/${attachmentId}/preview`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+};
+
+export const parseShortlist = async (formData) => {
+  const response = await api.post('/placement/circulars/parse-shortlist', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
+};
+
+export const createAndPostDrive = async (data) => {
+  const response = await api.post('/placement/circulars/create-and-post-drive', data);
   return response.data;
 };
 

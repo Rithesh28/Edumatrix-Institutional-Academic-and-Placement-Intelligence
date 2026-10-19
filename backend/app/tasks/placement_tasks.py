@@ -454,18 +454,22 @@ def check_application_deadlines(self, window_days: int = 3):
 
 
 @shared_task(name="placement_tasks.close_expired_jobs", max_retries=2)
-def close_expired_jobs():
+def close_expired_jobs(db=None):
     """
     Automatically close job postings past their application deadline.
     """
     logger.info("🔄 Closing expired jobs...")
     
-    db = SessionLocal()
+    close_db_on_exit = False
+    if db is None:
+        db = SessionLocal()
+        close_db_on_exit = True
     try:
         now = datetime.utcnow()
         
         expired_jobs = db.query(JobPosting).filter(
             JobPosting.status == JobStatus.OPEN,
+            JobPosting.application_deadline.isnot(None),
             JobPosting.application_deadline < now
         ).all()
         
@@ -476,12 +480,14 @@ def close_expired_jobs():
         
         db.commit()
         logger.info(f"✅ Closed {len(expired_jobs)} expired jobs")
-        
+        return len(expired_jobs)
     except Exception as e:
         logger.error(f"❌ Failed to close expired jobs: {str(e)}")
         db.rollback()
+        raise
     finally:
-        db.close()
+        if close_db_on_exit:
+            db.close()
 
 
 # ============================================

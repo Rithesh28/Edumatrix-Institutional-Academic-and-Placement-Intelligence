@@ -423,6 +423,8 @@ const JobForm = () => {
         file_id: formData.file_id || null,
         attachment_file_ids: formData.attachment_file_ids || [],
         application_url: formData.application_url?.trim() || null,
+        application_deadline: formData.application_deadline?.trim() ? new Date(formData.application_deadline).toISOString() : null,
+        drive_date: formData.drive_date?.trim() ? new Date(formData.drive_date).toISOString() : null,
         cgpa_criteria: formData.cgpa_criteria ? parseFloat(formData.cgpa_criteria) : null,
         required_skills: formData.required_skills || [],
         preferred_skills: formData.preferred_skills || [],
@@ -1234,7 +1236,7 @@ const JobForm = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Application / Registration Deadline
+                Application / Registration Deadline <span className="text-xs font-normal text-gray-500">(Optional)</span>
               </label>
               <input
                 type="datetime-local"
@@ -1246,7 +1248,7 @@ const JobForm = () => {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                Placement Drive Date
+                Placement Drive Date <span className="text-xs font-normal text-gray-500">(Optional)</span>
               </label>
               <input
                 type="datetime-local"
