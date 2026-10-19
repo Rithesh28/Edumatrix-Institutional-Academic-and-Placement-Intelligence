@@ -452,6 +452,11 @@ class StudentEligibility(BaseModel):
     resume_filename: Optional[str] = Field(default=None, description="Filename of resume used")
     skill_sources: Dict[str, List[str]] = Field(default={}, description="Sources of student skills (profile_skills, resume_skills)")
 
+    # Phase D Match Explanations & Granular Status
+    eligibility_status: str = Field(default="eligible", description="Authoritative eligibility status: eligible, ineligible, or incomplete_data")
+    missing_criteria: List[str] = Field(default=[], description="List of missing criteria causing incomplete_data or ineligibility")
+    skill_match_explanations: List[Dict[str, Any]] = Field(default=[], description="Comprehensive explanation entries for all matched skills (exact, synonym, semantic)")
+
 
 class JobMatchRequest(BaseModel):
     """Schema for matching request."""

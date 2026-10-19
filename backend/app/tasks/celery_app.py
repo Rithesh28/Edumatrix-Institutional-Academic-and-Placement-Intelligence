@@ -40,12 +40,17 @@ celery_app.conf.update(
 
 # Configure beat schedule for periodic tasks
 celery_app.conf.beat_schedule = {
-    # Reminder tasks are scheduled dynamically
-    # Add periodic tasks here if needed
-    # 'cleanup-task': {
-    #     'task': 'app.tasks.cleanup',
-    #     'schedule': crontab(hour=2, minute=0),
-    # },
+    # Check for jobs approaching deadline daily at 9:00 AM IST
+    "check-application-deadlines-daily": {
+        "task": "placement_tasks.check_application_deadlines",
+        "schedule": crontab(hour=9, minute=0),
+        "args": (3,),
+    },
+    # Close expired job postings hourly
+    "close-expired-jobs-hourly": {
+        "task": "placement_tasks.close_expired_jobs",
+        "schedule": crontab(minute=0),
+    },
 }
 
 if __name__ == "__main__":

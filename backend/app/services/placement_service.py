@@ -308,27 +308,29 @@ class PlacementService:
         # Notify students only on real transition to OPEN (not on repeated publish of an already-open job)
         if not was_open:
             try:
-                self.notify_students_on_job_publish(db, job)
+                from ..tasks.placement_tasks import dispatch_job_publication_notifications
+                dispatch_job_publication_notifications.delay(job.id)
             except Exception as e:
-                logger.error(f"❌ Failed to dispatch job publication notifications for job {job.id}: {e}", exc_info=True)
+                logger.info(f"Celery dispatch unavailable ({e}); running job-publication notifications synchronously.")
+                try:
+                    self.notify_students_on_job_publish(db, job)
+                except Exception as sync_e:
+                    logger.error(f"❌ Failed to dispatch job publication notifications for job {job.id}: {sync_e}", exc_info=True)
 
         return job
 
     def notify_students_on_job_publish(self, db: Session, job: JobPosting) -> int:
         """
         Notify appropriate students when a job is published (status -> OPEN).
-        Respects branch eligibility targeting if specified, or all active students otherwise.
+        Authoritatively checks eligibility (branch AND CGPA criteria) via job_matching_service.
         Uses event_key to ensure strict idempotency and deduplication.
         Returns the number of notifications created.
         """
-        # 1. Determine eligible branches if configured
-        target_branches: Optional[set] = None
-        if job.branch_eligibility and isinstance(job.branch_eligibility, (list, tuple)) and len(job.branch_eligibility) > 0:
-            target_branches = {
-                str(b).strip().lower() for b in job.branch_eligibility if b and str(b).strip()
-            }
+        if job.status != JobStatus.OPEN:
+            logger.info(f"Skipping publication notification: Job {job.id} is not OPEN (status: {job.status})")
+            return 0
 
-        # 2. Query active students with profile
+        # Query active students with profile
         students = db.query(User).options(
             joinedload(User.student_profile)
         ).filter(
@@ -346,23 +348,21 @@ class PlacementService:
             else:
                 deadline_str = f" • Deadline: {job.application_deadline}"
 
+        loc_str = f" • {job.location}" if job.location else ""
+        salary_str = f" • {job.salary_range}" if job.salary_range else ""
+
         message = (
-            f"{company_name} is hiring for {job.title}{deadline_str}. "
+            f"{company_name} is hiring for {job.title}{loc_str}{salary_str}{deadline_str}. "
             f"Check your skill match and apply via Campus Jobs."
         )
 
         notif_count = 0
         for student in students:
-            # Check branch eligibility if targeted
-            if target_branches:
-                s_branch = None
-                if student.student_profile and student.student_profile.branch:
-                    s_branch = student.student_profile.branch
-                elif student.department:
-                    s_branch = student.department
-
-                if not s_branch or str(s_branch).strip().lower() not in target_branches:
-                    continue
+            profile = student.student_profile
+            # Authoritative eligibility check: only students satisfying hard criteria receive notification
+            elig_res = job_matching_service.check_eligibility(profile, job)
+            if not elig_res.is_eligible:
+                continue
 
             event_key = f"job_publish:{job.id}:student:{student.id}"
 

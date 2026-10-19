@@ -289,9 +289,17 @@ function StudentJobDetails() {
               <span>Eligible to Apply</span>
             </span>
           ) : isEligibilityForCurrentJob && !jobEligibility.is_eligible ? (
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-              <XCircle className="w-3.5 h-3.5" />
-              <span>Ineligible</span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold border ${
+              jobEligibility.eligibility_status === 'incomplete_data'
+                ? 'bg-amber-100 dark:bg-amber-950/70 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                : 'bg-rose-100 dark:bg-rose-950/70 text-rose-800 dark:text-rose-300 border-rose-200 dark:border-rose-800'
+            }`}>
+              {jobEligibility.eligibility_status === 'incomplete_data' ? (
+                <AlertTriangle className="w-3.5 h-3.5" />
+              ) : (
+                <XCircle className="w-3.5 h-3.5" />
+              )}
+              <span>{jobEligibility.eligibility_status === 'incomplete_data' ? 'Profile Incomplete' : 'Ineligible'}</span>
             </span>
           ) : null}
 
@@ -957,6 +965,20 @@ function StudentJobDetails() {
                         <strong>Eligible to Apply:</strong> You meet all mandatory academic eligibility requirements for this drive.
                       </div>
                     </div>
+                  ) : jobEligibility.eligibility_status === 'incomplete_data' ? (
+                    <div className="p-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-xl text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <strong>Incomplete Academic Profile:</strong>
+                        <ul className="list-disc pl-4 mt-1 space-y-0.5">
+                          {jobEligibility.eligibility_reasons?.length > 0 ? (
+                            jobEligibility.eligibility_reasons.map((r, i) => <li key={i}>{r}</li>)
+                          ) : (
+                            <li>Your profile is missing academic criteria needed to determine eligibility. Please update your student profile.</li>
+                          )}
+                        </ul>
+                      </div>
+                    </div>
                   ) : (
                     <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800/80 rounded-xl text-xs text-rose-900 dark:text-rose-200 flex items-start gap-2">
                       <XCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
@@ -1085,6 +1107,24 @@ function StudentJobDetails() {
                           <strong>"{sm.matched_with || sm.student_skill}"</strong> ({Math.round((sm.similarity || 0) * 100)}% similarity)
                         </p>
                       ))}
+                    </div>
+                  )}
+
+                  {/* Match Explanations */}
+                  {jobEligibility.skill_match_explanations?.length > 0 && (
+                    <div className="mt-2 p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-lg border border-gray-200 dark:border-gray-700/60 text-[11px] space-y-1.5 text-gray-800 dark:text-gray-200">
+                      <p className="font-semibold flex items-center gap-1 text-gray-900 dark:text-white">
+                        <Info className="w-3.5 h-3.5 text-blue-500" />
+                        <span>Match Explanations:</span>
+                      </p>
+                      <div className="space-y-1 pl-1">
+                        {jobEligibility.skill_match_explanations.map((exp, idx) => (
+                          <div key={idx} className="flex items-start gap-1.5 text-gray-600 dark:text-gray-300">
+                            <span className="text-blue-500">•</span>
+                            <span>{exp.explanation || `${exp.skill}: matched via ${exp.category}`}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>

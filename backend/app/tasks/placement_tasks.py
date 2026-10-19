@@ -10,9 +10,10 @@ Handles background tasks for placement operations:
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Dict, Any
 from celery import shared_task
+from sqlalchemy.orm import joinedload
 
 from ..core.database import SessionLocal
 from ..models.user import User, UserRole
@@ -22,6 +23,7 @@ from ..models.application import Application, ApplicationStatus
 from ..models.shortlist import Shortlist
 from ..models.notification import Notification
 from ..services.placement_service import placement_service
+from ..services.job_matching_service import job_matching_service
 
 logger = logging.getLogger(__name__)
 
@@ -284,65 +286,169 @@ def generate_placement_report():
 
 
 # ============================================
+# PUBLICATION NOTIFICATION TASK
+# ============================================
+
+@shared_task(name="placement_tasks.dispatch_job_publication_notifications", bind=True, max_retries=3)
+def dispatch_job_publication_notifications(self, job_id: int):
+    """
+    Asynchronously notify eligible students when a job is published.
+    Idempotent and safe against duplicates via event_key.
+    """
+    logger.info(f"📢 Starting async job-publication notifications for job {job_id}")
+    db = SessionLocal()
+    try:
+        job = db.query(JobPosting).filter(JobPosting.id == job_id).first()
+        if not job:
+            logger.warning(f"Job {job_id} not found; skipping publication notifications.")
+            return {"job_id": job_id, "status": "job_not_found"}
+
+        if job.status != JobStatus.OPEN:
+            logger.info(f"Job {job_id} status is {job.status} (not OPEN); skipping publication notifications.")
+            return {"job_id": job_id, "status": "job_not_open"}
+
+        notif_count = placement_service.notify_students_on_job_publish(db, job)
+        logger.info(f"✅ Dispatched {notif_count} publication notifications for job {job_id}")
+        return {
+            "job_id": job_id,
+            "status": "completed",
+            "notifications_created": notif_count
+        }
+    except Exception as e:
+        logger.error(f"❌ Job publication notification failed for job {job_id}: {e}")
+        try:
+            self.retry(countdown=30, exc=e)
+        except Exception:
+            raise
+    finally:
+        db.close()
+
+
+# ============================================
 # DEADLINE & REMINDER TASKS
 # ============================================
 
-@shared_task(name="placement_tasks.check_application_deadlines", max_retries=2)
-def check_application_deadlines():
+@shared_task(name="placement_tasks.check_application_deadlines", bind=True, max_retries=2)
+def check_application_deadlines(self, window_days: int = 3):
     """
-    Check for upcoming application deadlines and send reminders.
+    Check for upcoming application deadlines and send deduplicated reminders
+    exclusively to eligible students who have not yet applied.
     """
-    logger.info("🔄 Checking application deadlines...")
-    
+    logger.info(f"🔄 Checking application deadlines (window: {window_days} days)...")
     db = SessionLocal()
     try:
-        now = datetime.utcnow()
-        # Check deadlines within next 3 days
-        deadline_threshold = now + timedelta(days=3)
-        
-        jobs = db.query(JobPosting).filter(
+        now_utc = datetime.now(timezone.utc)
+        deadline_threshold = now_utc + timedelta(days=window_days)
+
+        # Query open jobs with future deadlines within window
+        jobs = db.query(JobPosting).options(
+            joinedload(JobPosting.company)
+        ).filter(
             JobPosting.status == JobStatus.OPEN,
+            JobPosting.application_deadline.isnot(None),
             JobPosting.application_deadline <= deadline_threshold,
-            JobPosting.application_deadline >= now
+            JobPosting.application_deadline >= now_utc
         ).all()
-        
+
+        total_notifications_sent = 0
+
+        # Query all active students with profile loaded once
+        students = db.query(User).options(
+            joinedload(User.student_profile)
+        ).filter(
+            User.role == UserRole.STUDENT,
+            User.is_active == True
+        ).all()
+
+        date_bucket = now_utc.strftime("%Y-%m-%d")
+
         for job in jobs:
-            days_left = (job.application_deadline - now).days
-            if days_left < 0:
+            deadline = job.application_deadline
+            if deadline.tzinfo is None:
+                deadline = deadline.replace(tzinfo=timezone.utc)
+
+            remaining = (deadline - now_utc).total_seconds()
+            if remaining < 0:
                 continue
-            
-            # Get students who haven't applied
-            applied_student_ids = db.query(Application.student_id).filter(
-                Application.job_posting_id == job.id
-            ).all()
-            applied_ids = [a[0] for a in applied_student_ids]
-            
-            students = db.query(User).filter(
-                User.role == UserRole.STUDENT,
-                User.id.notin_(applied_ids) if applied_ids else True
-            ).all()
-            
-            company_name = job.company.name if job.company else "Unknown"
-            
+
+            days_left = max(0, int(remaining // 86400))
+            hours_left = max(0, int(remaining // 3600))
+
+            if days_left == 0:
+                timing_str = f"{max(1, hours_left)} hour(s)"
+            elif days_left == 1:
+                timing_str = "1 day"
+            else:
+                timing_str = f"{days_left} days"
+
+            # Query student IDs who already applied for this job
+            applied_student_ids = {
+                r[0] for r in db.query(Application.student_id).filter(
+                    Application.job_posting_id == job.id
+                ).all()
+            }
+
+            company_name = job.company.name if job.company else "Campus Recruiter"
+            title = f"⏰ Deadline Approaching: {job.title} at {company_name}"
+            formatted_deadline = deadline.strftime("%d %b %Y, %I:%M %p")
+            message = (
+                f"Only {timing_str} left to apply for {job.title} at {company_name} "
+                f"(Deadline: {formatted_deadline}). Submit your application before it closes!"
+            )
+
+            job_notifs = 0
             for student in students:
+                # Exclude students who already applied
+                if student.id in applied_student_ids:
+                    continue
+
+                # Authoritative eligibility filter (respects branch and CGPA)
+                profile = student.student_profile
+                elig_res = job_matching_service.check_eligibility(profile, job)
+                if not elig_res.is_eligible:
+                    continue
+
+                event_key = f"job_deadline:{job.id}:student:{student.id}:{date_bucket}"
+
+                existing = db.query(Notification).filter(Notification.event_key == event_key).first()
+                if existing:
+                    continue
+
                 notification = Notification(
                     user_id=student.id,
-                    type="placement",
-                    title=f"⏰ Deadline Approaching: {job.title}",
-                    message=f"Application deadline for {job.title} at {company_name} is in {days_left} days. Apply now!",
+                    type="placement_deadline",
+                    title=title,
+                    message=message,
                     reference_id=job.id,
+                    event_key=event_key,
                     is_read=False
                 )
                 db.add(notification)
-            
-            logger.info(f"📢 Sent deadline reminders for {job.title} to {len(students)} students")
-        
-        db.commit()
-        logger.info(f"✅ Deadline check complete. Found {len(jobs)} upcoming deadlines")
-        
+                job_notifs += 1
+
+            if job_notifs > 0:
+                try:
+                    db.commit()
+                    total_notifications_sent += job_notifs
+                    logger.info(f"📢 Sent {job_notifs} deadline reminders for {job.title} (ID: {job.id})")
+                except Exception as commit_err:
+                    db.rollback()
+                    logger.warning(f"Failed to commit deadline reminders for job {job.id}: {commit_err}")
+
+        logger.info(f"✅ Deadline check complete. Found {len(jobs)} upcoming deadlines, sent {total_notifications_sent} reminders.")
+        return {
+            "jobs_checked": len(jobs),
+            "notifications_sent": total_notifications_sent,
+            "status": "completed"
+        }
+
     except Exception as e:
         logger.error(f"❌ Deadline check failed: {str(e)}")
         db.rollback()
+        try:
+            self.retry(countdown=60, exc=e)
+        except Exception:
+            raise
     finally:
         db.close()
 

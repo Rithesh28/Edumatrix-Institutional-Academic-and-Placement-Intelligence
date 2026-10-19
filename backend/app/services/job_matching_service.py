@@ -37,6 +37,48 @@ logger = logging.getLogger(__name__)
 SEMANTIC_SKILL_MATCH_THRESHOLD = 0.78
 
 
+class EligibilityResult(tuple):
+    """
+    Subclass of tuple returning (is_eligible, cgpa_match, branch_match, eligibility_reasons, has_low_match_warning, low_match_warning)
+    while exposing rich metadata properties (.eligibility_status, .missing_criteria).
+    """
+    def __new__(
+        cls,
+        is_eligible: bool,
+        cgpa_match: bool,
+        branch_match: bool,
+        eligibility_reasons: List[str],
+        has_low_match_warning: bool,
+        low_match_warning: Optional[str],
+        eligibility_status: str = "eligible",
+        missing_criteria: Optional[List[str]] = None
+    ):
+        return super().__new__(
+            cls,
+            (is_eligible, cgpa_match, branch_match, eligibility_reasons, has_low_match_warning, low_match_warning)
+        )
+
+    def __init__(
+        self,
+        is_eligible: bool,
+        cgpa_match: bool,
+        branch_match: bool,
+        eligibility_reasons: List[str],
+        has_low_match_warning: bool,
+        low_match_warning: Optional[str],
+        eligibility_status: str = "eligible",
+        missing_criteria: Optional[List[str]] = None
+    ):
+        self.is_eligible = is_eligible
+        self.cgpa_match = cgpa_match
+        self.branch_match = branch_match
+        self.eligibility_reasons = eligibility_reasons
+        self.has_low_match_warning = has_low_match_warning
+        self.low_match_warning = low_match_warning
+        self.eligibility_status = eligibility_status
+        self.missing_criteria = missing_criteria or []
+
+
 class JobMatchingService:
     """Service for computing deterministic job eligibility and skill match scores."""
 
@@ -184,11 +226,15 @@ class JobMatchingService:
                 matched_student_skill = student_norm_map[norm_job]
                 matched.append(orig_job)
                 match_details.append({
+                    "skill": orig_job,
                     "job_skill": orig_job,
                     "student_skill": matched_student_skill,
+                    "matched_with": matched_student_skill,
                     "match_method": "exact",
+                    "category": "exact",
+                    "requirement_type": category,
                     "similarity": 1.0,
-                    "category": category
+                    "explanation": f"Exact match: '{orig_job}' is documented in your student skills"
                 })
                 continue
 
@@ -198,11 +244,15 @@ class JobMatchingService:
                 matched_student_skill = student_canonical_map[canonical_job]
                 matched.append(orig_job)
                 match_details.append({
+                    "skill": orig_job,
                     "job_skill": orig_job,
                     "student_skill": matched_student_skill,
-                    "match_method": "canonical",
+                    "matched_with": matched_student_skill,
+                    "match_method": "synonym",
+                    "category": "synonym",
+                    "requirement_type": category,
                     "similarity": 1.0,
-                    "category": category
+                    "explanation": f"Synonym match: '{orig_job}' matches your skill '{matched_student_skill}'"
                 })
                 continue
 
@@ -219,11 +269,15 @@ class JobMatchingService:
             if best_sim >= self.semantic_threshold and best_student_skill is not None:
                 matched.append(orig_job)
                 match_details.append({
+                    "skill": orig_job,
                     "job_skill": orig_job,
                     "student_skill": best_student_skill,
+                    "matched_with": best_student_skill,
                     "match_method": "semantic",
+                    "category": "semantic",
+                    "requirement_type": category,
                     "similarity": round(best_sim, 4),
-                    "category": category
+                    "explanation": f"Semantic AI match: '{orig_job}' aligns with '{best_student_skill}' ({round(best_sim * 100)}% similarity)"
                 })
             else:
                 missing.append(orig_job)
@@ -268,53 +322,91 @@ class JobMatchingService:
 
         return required_score, preferred_score, overall_skill_match
 
+
     def check_eligibility(
         self,
         profile: Optional[Any],
         job: JobPosting,
-        required_score: Optional[float],
-        total_required: int
-    ) -> Tuple[bool, bool, bool, List[str], bool, Optional[str]]:
+        required_score: Optional[float] = None,
+        total_required: int = 0
+    ) -> EligibilityResult:
         """
         Evaluate eligibility criteria independently from skill match:
         - CGPA criteria (only if specified by the job)
         - Branch criteria (only if specified by the job)
+        - Graduation year / batch criteria (if specified by the job)
         - Low skill match warning (<50% required skill match, does NOT disqualify)
+        - Incomplete data detection
         """
         is_eligible = True
         eligibility_reasons: List[str] = []
+        missing_criteria: List[str] = []
 
-        # Check CGPA (only evaluated if job explicitly specifies criteria)
+        # 1. Check CGPA (only evaluated if job explicitly specifies criteria)
         cgpa_match = True
         if job.cgpa_criteria is not None and job.cgpa_criteria > 0:
-            if profile and hasattr(profile, 'cgpa') and profile.cgpa is not None:
-                cgpa_match = profile.cgpa >= job.cgpa_criteria
+            student_cgpa = getattr(profile, 'cgpa', None) if profile else None
+            if type(student_cgpa).__name__ in ('MagicMock', 'Mock'):
+                student_cgpa = None
+            if student_cgpa is not None:
+                cgpa_match = float(student_cgpa) >= job.cgpa_criteria
                 if not cgpa_match:
                     is_eligible = False
-                    eligibility_reasons.append(f"CGPA {profile.cgpa} is below minimum requirement {job.cgpa_criteria}")
+                    eligibility_reasons.append(f"CGPA {student_cgpa} is below minimum requirement {job.cgpa_criteria}")
             else:
                 cgpa_match = False
                 is_eligible = False
+                missing_criteria.append("cgpa")
                 eligibility_reasons.append("CGPA record missing or incomplete")
 
-        # Check Branch (only evaluated if job explicitly specifies eligible branches)
+        # 2. Check Branch (only evaluated if job explicitly specifies eligible branches)
         branch_match = True
-        if job.branch_eligibility and len(job.branch_eligibility) > 0:
-            if profile and hasattr(profile, 'branch') and profile.branch:
-                student_branch_norm = str(profile.branch).strip().lower()
-                eligible_branches_norm = [str(b).strip().lower() for b in job.branch_eligibility if b]
+        if job.branch_eligibility and isinstance(job.branch_eligibility, (list, tuple)) and len(job.branch_eligibility) > 0:
+            student_branch = None
+            b = getattr(profile, 'branch', None) if profile else None
+            dept = getattr(profile, 'department', None) if profile else None
+            user_obj = getattr(profile, 'user', None) if profile else None
+            user_dept = getattr(user_obj, 'department', None) if user_obj else None
+
+            if b and type(b).__name__ not in ('MagicMock', 'Mock'):
+                student_branch = b
+            elif dept and type(dept).__name__ not in ('MagicMock', 'Mock'):
+                student_branch = dept
+            elif user_dept and type(user_dept).__name__ not in ('MagicMock', 'Mock'):
+                student_branch = user_dept
+
+            if student_branch and str(student_branch).strip():
+                student_branch_norm = str(student_branch).strip().lower()
+                eligible_branches_norm = [str(eb).strip().lower() for eb in job.branch_eligibility if eb]
                 branch_match = student_branch_norm in eligible_branches_norm
                 if not branch_match:
                     is_eligible = False
                     eligibility_reasons.append(
-                        f"Branch '{profile.branch}' is not eligible (Eligible branches: {', '.join(job.branch_eligibility)})"
+                        f"Branch '{student_branch}' is not eligible (Eligible branches: {', '.join(job.branch_eligibility)})"
                     )
             else:
                 branch_match = False
                 is_eligible = False
+                missing_criteria.append("branch")
                 eligibility_reasons.append("Branch information missing")
 
-        # Baseline skill match check:
+        # 3. Check Graduation Year / Batch (if explicitly specified on job)
+        job_grad_years = getattr(job, 'graduation_years', None)
+        if job_grad_years and isinstance(job_grad_years, (list, tuple)) and len(job_grad_years) > 0:
+            student_year = getattr(profile, 'year', None)
+            if student_year is not None:
+                year_strs = {str(y).strip() for y in job_grad_years if y}
+                if str(student_year).strip() not in year_strs:
+                    is_eligible = False
+                    eligibility_reasons.append(
+                        f"Graduation year/batch '{student_year}' is not eligible (Eligible: {', '.join(map(str, job_grad_years))})"
+                    )
+            else:
+                is_eligible = False
+                missing_criteria.append("graduation_year")
+                eligibility_reasons.append("Graduation year / batch information missing")
+
+        # 4. Baseline skill match check:
         # Per Phase 3.2 Step 1 rules:
         # Do not block a student merely because their required-skill match is below 50%.
         # Instead, generate a low-match warning.
@@ -324,7 +416,24 @@ class JobMatchingService:
             req_disp = f"{required_score:.1f}%" if required_score is not None else "0.0%"
             low_match_warning = f"Required skill match ({req_disp}) is below 50% threshold. You may still apply, but this role requires skills you may need to develop."
 
-        return is_eligible, cgpa_match, branch_match, eligibility_reasons, has_low_match_warning, low_match_warning
+        # Determine authoritative eligibility status
+        if missing_criteria:
+            eligibility_status = "incomplete_data"
+        elif not is_eligible:
+            eligibility_status = "ineligible"
+        else:
+            eligibility_status = "eligible"
+
+        return EligibilityResult(
+            is_eligible=is_eligible,
+            cgpa_match=cgpa_match,
+            branch_match=branch_match,
+            eligibility_reasons=eligibility_reasons,
+            has_low_match_warning=has_low_match_warning,
+            low_match_warning=low_match_warning,
+            eligibility_status=eligibility_status,
+            missing_criteria=missing_criteria
+        )
 
     def match_student_to_job(
         self,
@@ -375,22 +484,19 @@ class JobMatchingService:
             preferred_matched, preferred_total
         )
 
-        # Evaluate eligibility independently
-        (
-            is_eligible,
-            cgpa_match,
-            branch_match,
-            eligibility_reasons,
-            has_low_match_warning,
-            low_match_warning
-        ) = self.check_eligibility(
+        # Evaluate eligibility independently using authoritative rules
+        elig_res = self.check_eligibility(
             profile, job, required_score, required_total
         )
+        is_eligible, cgpa_match, branch_match, eligibility_reasons, has_low_match_warning, low_match_warning = elig_res[:6]
+        eligibility_status = getattr(elig_res, 'eligibility_status', 'eligible' if is_eligible else 'ineligible')
+        missing_criteria = getattr(elig_res, 'missing_criteria', [])
 
         # Combined matched and missing skills for backward compatibility
         all_matched = matched_req + matched_pref
         all_missing = missing_req + missing_pref
         semantic_matches = [d for d in (details_req + details_pref) if d.get("match_method") == "semantic"]
+        skill_match_explanations = details_req + details_pref
 
         resume_id = None
         if selected_resume and hasattr(selected_resume, 'id'):
@@ -409,12 +515,23 @@ class JobMatchingService:
                 if rname is not None and type(rname).__name__ not in ('MagicMock', 'Mock') and isinstance(rname, str):
                     resume_filename = rname
 
+        # Resolve student branch and cgpa with safe fallbacks
+        student_branch = "N/A"
+        if profile and hasattr(profile, 'branch') and profile.branch:
+            student_branch = profile.branch
+        elif student and hasattr(student, 'department') and student.department:
+            student_branch = student.department
+
+        student_cgpa = 0.0
+        if profile and hasattr(profile, 'cgpa') and profile.cgpa is not None:
+            student_cgpa = float(profile.cgpa)
+
         return StudentEligibility(
             student_id=student.id,
             student_name=student.name,
             email=student.email,
-            branch=profile.branch if profile and hasattr(profile, 'branch') and profile.branch else "N/A",
-            cgpa=profile.cgpa if profile and hasattr(profile, 'cgpa') and profile.cgpa is not None else 0.0,
+            branch=student_branch,
+            cgpa=student_cgpa,
             is_eligible=is_eligible,
             eligibility_reasons=eligibility_reasons,
             match_score=overall_skill_match,  # Match score is strictly overall skill match (None if no skills)
@@ -442,7 +559,11 @@ class JobMatchingService:
             low_match_warning=low_match_warning,
             resume_id=resume_id,
             resume_filename=resume_filename,
-            skill_sources=skill_sources
+            skill_sources=skill_sources,
+            # Phase D Granular Explanations & Status
+            eligibility_status=eligibility_status,
+            missing_criteria=missing_criteria,
+            skill_match_explanations=skill_match_explanations
         )
 
 

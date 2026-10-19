@@ -838,6 +838,10 @@ const JobDetails = () => {
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
                               ✓ Eligible
                             </span>
+                          ) : candidate.eligibility_status === 'incomplete_data' ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                              ⚠ Incomplete Profile
+                            </span>
                           ) : (
                             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
                               ✕ Ineligible
@@ -957,6 +961,10 @@ const JobDetails = () => {
                     <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 text-xs font-semibold rounded-full">
                       ✓ Eligible
                     </span>
+                  ) : selectedCandidate.eligibility_status === 'incomplete_data' ? (
+                    <span className="px-2 py-0.5 bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 text-xs font-semibold rounded-full">
+                      ⚠ Profile Incomplete
+                    </span>
                   ) : (
                     <span className="px-2 py-0.5 bg-rose-100 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 text-xs font-semibold rounded-full">
                       ✕ Ineligible
@@ -980,12 +988,19 @@ const JobDetails = () => {
               </button>
             </div>
 
-            {/* Ineligibility Warning if any */}
+            {/* Ineligibility or Incomplete Data Warning if any */}
             {!selectedCandidate.is_eligible && (
-              <div className="mt-4 p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800 rounded-xl text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 mt-0.5" />
+              <div className={`mt-4 p-3 border rounded-xl text-xs flex items-start gap-2 ${
+                selectedCandidate.eligibility_status === 'incomplete_data'
+                  ? 'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+                  : 'bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300'
+              }`}>
+                <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${
+                  selectedCandidate.eligibility_status === 'incomplete_data' ? 'text-amber-600' : 'text-rose-600'
+                }`} />
                 <div>
-                  <strong>Ineligible Candidate:</strong> {selectedCandidate.eligibility_reasons?.join(', ')}
+                  <strong>{selectedCandidate.eligibility_status === 'incomplete_data' ? 'Incomplete Profile Data:' : 'Ineligible Candidate:'}</strong>{' '}
+                  {selectedCandidate.eligibility_reasons?.join(', ')}
                 </div>
               </div>
             )}
