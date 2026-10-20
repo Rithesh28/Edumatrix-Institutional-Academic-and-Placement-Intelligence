@@ -67,7 +67,15 @@ class OCRService:
         """
         try:
             from io import BytesIO
+            from PIL import ImageEnhance
             image = Image.open(BytesIO(image_bytes))
+            
+            # Preprocess if in color
+            if image.mode not in ('L', '1'):
+                image = image.convert('L')
+                enhancer = ImageEnhance.Contrast(image)
+                image = enhancer.enhance(1.8)
+            
             text = pytesseract.image_to_string(image)
             return text.strip()
         except Exception as e:
@@ -107,37 +115,35 @@ class OCRService:
 
     def extract_text_from_scanned_pdf_bytes(self, pdf_bytes: bytes) -> str:
         """
-        Extract text from scanned PDF bytes using pdf2image and Tesseract
-
+        Extract text from scanned PDF bytes using pdf2image and Tesseract OCR
+        
         Args:
-            pdf_bytes: Raw bytes of the scanned PDF
-
+            pdf_bytes: Raw bytes of the PDF file
+            
         Returns:
-            Extracted text as string, or error string starting with 'Scanned PDF Error:'
+            Extracted text as string
         """
         try:
             from pdf2image import convert_from_bytes
-
-            if not pdf_bytes:
-                return "Error: Empty PDF bytes"
-
+            
+            if not pdf_bytes or len(pdf_bytes) == 0:
+                return "Error: PDF file bytes are empty."
+            
             images = convert_from_bytes(pdf_bytes)
             if not images:
-                return "Error: No pages could be converted from PDF"
-
+                return "Error: No rendered pages generated from PDF bytes."
+            
             all_text = []
             for i, image in enumerate(images):
                 text = pytesseract.image_to_string(image)
-                if text and text.strip():
-                    all_text.append(f"--- Page {i+1} ---\n{text.strip()}")
-
+                all_text.append(f"--- Page {i+1} ---\n{text}")
+            
             return "\n\n".join(all_text).strip()
         except ImportError:
             return "Error: pdf2image not installed. Please install: pip install pdf2image"
         except Exception as e:
-            logger.error(f"Scanned PDF extraction from bytes failed: {e}")
+            logger.error(f"Scanned PDF bytes extraction failed: {e}")
             return f"Scanned PDF Error: {str(e)}"
-
 
 
 # Singleton instance

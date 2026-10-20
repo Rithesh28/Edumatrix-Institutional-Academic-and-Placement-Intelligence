@@ -35,7 +35,7 @@ import BatchFileUpload from '../../components/placement/BatchFileUpload';
 import RecruitmentRoundsTab from '../../components/placement/RecruitmentRoundsTab';
 import VerifiedOffersTab from '../../components/placement/VerifiedOffersTab';
 import StudentProgressionModal from '../../components/placement/StudentProgressionModal';
-import { getJobFilePreviewUrl, getJobFileDownloadUrl } from '../../services/placementService';
+import { getJobFilePreviewUrl, getJobFileDownloadUrl, downloadJobFileAuth, previewJobFileAuth } from '../../services/placementService';
 
 const JobDetails = () => {
   const { id } = useParams();
@@ -607,21 +607,20 @@ const JobDetails = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        <a
-                          href={previewUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
+                        <button
+                          type="button"
+                          onClick={() => previewJobFileAuth(selectedJob.id, fid)}
                           className="px-2 py-1 text-[11px] font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400 bg-gray-100 dark:bg-gray-800 rounded hover:bg-gray-200 transition-colors"
                         >
                           Preview
-                        </a>
-                        <a
-                          href={downloadUrl}
-                          download
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadJobFileAuth(selectedJob.id, fid, name)}
                           className="px-2 py-1 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 bg-indigo-50 dark:bg-indigo-950/50 rounded hover:bg-indigo-100 transition-colors"
                         >
                           Download
-                        </a>
+                        </button>
                       </div>
                     </div>
                   );

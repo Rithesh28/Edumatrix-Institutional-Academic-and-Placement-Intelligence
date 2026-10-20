@@ -168,6 +168,7 @@ class DriveParseShortlistResponse(BaseModel):
     candidates: List[DriveCandidateMatchItem] = []
     candidate_summary: DriveCandidateSummary
     attachment_files: List[DriveAttachmentFileInfo] = []
+    extraction_errors: List[str] = []
 
 
 class CreateAndPostDriveRequest(BaseModel):

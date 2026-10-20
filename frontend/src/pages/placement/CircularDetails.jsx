@@ -43,6 +43,7 @@ import {
   getJobRounds,
   getCircularAttachmentDownloadUrl,
   getCircularAttachmentPreviewUrl,
+  downloadCircularAttachmentAuth,
 } from '../../services/placementService';
 import RecruitmentRoundsTab from '../../components/placement/RecruitmentRoundsTab';
 import VerifiedOffersTab from '../../components/placement/VerifiedOffersTab';
@@ -761,16 +762,14 @@ const CircularDetails = () => {
                       >
                         <Eye className="w-4 h-4" />
                       </button>
-                      <a
-                        href={getCircularAttachmentDownloadUrl(circ.id, att.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        download
+                      <button
+                        type="button"
+                        onClick={() => downloadCircularAttachmentAuth(circ.id, att.id, att.filename)}
                         className="p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-lg transition-colors cursor-pointer"
                         title="Download attachment"
                       >
                         <Download className="w-4 h-4" />
-                      </a>
+                      </button>
                     </div>
                   </div>
                 ))}

@@ -109,6 +109,47 @@ export const uploadJdFile = async (file) => {
   return uploadJdFiles([file]);
 };
 
+export const downloadFileBlob = async (url, filename) => {
+  try {
+    const response = await api.get(url, { responseType: 'blob' });
+    const contentType = response.headers['content-type'] || 'application/octet-stream';
+    const blob = new Blob([response.data], { type: contentType });
+    const blobUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = blobUrl;
+    link.setAttribute('download', filename || 'download');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+  } catch (err) {
+    console.error('Authenticated download failed:', err);
+    throw err;
+  }
+};
+
+export const previewFileBlob = async (url) => {
+  try {
+    const response = await api.get(url, { responseType: 'blob' });
+    const contentType = response.headers['content-type'] || 'application/pdf';
+    const blob = new Blob([response.data], { type: contentType });
+    const blobUrl = window.URL.createObjectURL(blob);
+    window.open(blobUrl, '_blank', 'noopener,noreferrer');
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+  } catch (err) {
+    console.error('Authenticated preview failed:', err);
+    throw err;
+  }
+};
+
+export const downloadJobFileAuth = async (jobId, fileId, filename) => {
+  return downloadFileBlob(`/placement/jobs/${jobId}/files/${fileId}/download`, filename);
+};
+
+export const previewJobFileAuth = async (jobId, fileId) => {
+  return previewFileBlob(`/placement/jobs/${jobId}/files/${fileId}/preview`);
+};
+
 export const getJobFileDownloadUrl = (jobId, fileId) => {
   const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
   const base = `/api/v1/placement/jobs/${jobId}/files/${fileId}/download`;
@@ -275,14 +316,22 @@ export const unlinkCircularJob = async (circularId, jobPostingId) => {
   return response.data;
 };
 
+export const downloadCircularAttachmentAuth = async (circularId, attachmentId, filename) => {
+  return downloadFileBlob(`/placement/circulars/${circularId}/attachments/${attachmentId}/download`, filename);
+};
+
+export const previewCircularAttachmentAuth = async (circularId, attachmentId) => {
+  return previewFileBlob(`/placement/circulars/${circularId}/attachments/${attachmentId}/preview`);
+};
+
 export const getCircularAttachmentDownloadUrl = (circularId, attachmentId) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
   const base = `/api/v1/placement/circulars/${circularId}/attachments/${attachmentId}/download`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 
 export const getCircularAttachmentPreviewUrl = (circularId, attachmentId) => {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
   const base = `/api/v1/placement/circulars/${circularId}/attachments/${attachmentId}/preview`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };

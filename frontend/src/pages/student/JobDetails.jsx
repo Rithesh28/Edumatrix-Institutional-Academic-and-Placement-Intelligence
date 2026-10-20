@@ -28,7 +28,7 @@ import usePlacementStore from '../../store/placementStore';
 import { useAuthStore } from '../../store/authStore';
 import StudentVerifiedOfferCard from '../../components/placement/StudentVerifiedOfferCard';
 import StudentRecruitmentTimeline from '../../components/placement/StudentRecruitmentTimeline';
-import { getJobFilePreviewUrl, getJobFileDownloadUrl } from '../../services/placementService';
+import { getJobFilePreviewUrl, getJobFileDownloadUrl, downloadJobFileAuth, previewJobFileAuth } from '../../services/placementService';
 import toast from 'react-hot-toast';
 
 function StudentJobDetails() {
@@ -744,21 +744,20 @@ function StudentJobDetails() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <a
-                            href={previewUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => previewJobFileAuth(selectedJob.id, fid)}
                             className="px-3 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:text-indigo-600 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold"
                           >
                             Preview
-                          </a>
-                          <a
-                            href={downloadUrl}
-                            download
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => downloadJobFileAuth(selectedJob.id, fid, name)}
                             className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold"
                           >
                             Download
-                          </a>
+                          </button>
                         </div>
                       </div>
                     );

@@ -480,6 +480,7 @@ async def parse_shortlist_documents(
     saved_files: List[Dict[str, Any]] = []
     all_extracted_candidates: List[Dict[str, Any]] = []
     extracted_texts: List[str] = []
+    extraction_errors: List[str] = []
 
     for file_upload in files:
         content = await file_upload.read()
@@ -521,11 +522,20 @@ async def parse_shortlist_documents(
         try:
             cand_result = extractor.extract_candidates_from_bytes(content, fn)
             rows = cand_result.get("rows") or cand_result.get("candidates") or []
+            if not rows:
+                extraction_errors.append(f"{fn}: No candidate rows found.")
             for r in rows:
                 r["source_filename"] = fn
                 all_extracted_candidates.append(r)
         except Exception as e:
             logger.warning(f"Candidate extraction failed on {fn}: {e}")
+            extraction_errors.append(f"{fn}: {str(e)}")
+
+    if not all_extracted_candidates and extraction_errors:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Candidate extraction failed: {'; '.join(extraction_errors)}"
+        )
 
     # Fetch active students for matching
     active_students = db.query(User).options(
@@ -663,6 +673,7 @@ async def parse_shortlist_documents(
         candidates=processed_candidates,
         candidate_summary=summary,
         attachment_files=saved_files,
+        extraction_errors=extraction_errors,
     )
 
 

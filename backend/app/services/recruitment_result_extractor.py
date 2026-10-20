@@ -92,45 +92,58 @@ class RecruitmentResultExtractor:
     def _extract_image(self, file_bytes: bytes) -> Dict[str, Any]:
         """Extract candidate rows from image files using OCR."""
         try:
-            from app.services.ocr_service import OCRService
-            ocr = OCRService()
-            text = ocr.extract_text_from_image_bytes(file_bytes)
+            from app.services.ocr_service import ocr_service
+            text = ocr_service.extract_text_from_image_bytes(file_bytes)
         except Exception as e:
-            raise ValueError(f"OCR service failed on image: {str(e)}")
+            raise RecruitmentResultExtractionError(f"OCR service failed on image: {str(e)}")
 
-        if not text or text.startswith("OCR Error:"):
-            raise ValueError(f"Could not extract readable text from image: {text}")
+        if not text or text.startswith("OCR Error:") or text.startswith("Error:"):
+            raise RecruitmentResultExtractionError(f"Could not extract readable text from image: {text}")
 
+        return self._parse_candidates_from_ocr_text(text, source_type="image")
+
+    def _parse_candidates_from_ocr_text(
+        self, text: str, source_type: str = "document", source_page: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Parse structured candidate records from OCR text output.
+        Handles delimited text, aligned column text, and free-form pattern matching.
+        """
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
-            raise ValueError("Image OCR extracted no readable text lines.")
+            raise RecruitmentResultExtractionError(f"{source_type.capitalize()} OCR extracted no readable text lines.")
 
-        # Attempt structured delimiter-based parsing (e.g. CSV-like text inside image)
+        # Filter out generic header/banner lines like "--- Page 1 ---"
+        clean_lines = [l for l in lines if not re.match(r"^---\s*Page\s*\d+\s*---$", l, re.IGNORECASE)]
+        if not clean_lines:
+            raise RecruitmentResultExtractionError(f"{source_type.capitalize()} OCR extracted no readable data lines.")
+
+        # Attempt structured delimiter-based parsing (e.g. CSV-like text inside image/scan)
         for candidate_delim in [",", "\t", ";", "|"]:
-            if candidate_delim in lines[0] and lines[0].count(candidate_delim) >= 1:
-                reader = csv.reader(lines, delimiter=candidate_delim)
+            if candidate_delim in clean_lines[0] and clean_lines[0].count(candidate_delim) >= 1:
+                reader = csv.reader(clean_lines, delimiter=candidate_delim)
                 raw_rows = [row for row in reader if any(cell.strip() for cell in row)]
                 if len(raw_rows) >= 2:
                     header_row = raw_rows[0]
                     data_rows = raw_rows[1:]
-                    return self._build_extracted_result(header_row, data_rows, source_page=1)
+                    return self._build_extracted_result(header_row, data_rows, source_page=source_page)
 
         # Tabular whitespace check: if header line has 2+ columns separated by 2+ spaces
-        tokens_line_0 = re.split(r"\s{2,}|\t", lines[0])
-        if len(tokens_line_0) >= 2 and any(k in lines[0].lower() for k in ["usn", "roll", "name", "email", "status", "candidate"]):
+        tokens_line_0 = re.split(r"\s{2,}|\t", clean_lines[0])
+        if len(tokens_line_0) >= 2 and any(k in clean_lines[0].lower() for k in ["usn", "roll", "name", "email", "status", "candidate"]):
             headers = [t.strip() for t in tokens_line_0 if t.strip()]
             data_rows = []
-            for line in lines[1:]:
+            for line in clean_lines[1:]:
                 parts = [p.strip() for p in re.split(r"\s{2,}|\t", line) if p.strip()]
                 if parts:
                     data_rows.append(parts)
             if data_rows:
-                return self._build_extracted_result(headers, data_rows, source_page=1)
+                return self._build_extracted_result(headers, data_rows, source_page=source_page)
 
         # Free-form line pattern matching for USN / Name / Email / Status
         headers = ["USN", "Name", "Email", "Status"]
         data_rows = []
-        for line in lines:
+        for line in clean_lines:
             # Check email
             email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", line)
             email = email_match.group(0) if email_match else ""
@@ -155,13 +168,17 @@ class RecruitmentResultExtractor:
                     break
 
             name = rem
-            if usn or email or name:
+            # Filter out non-candidate lines (like pure document titles or dates)
+            if usn or email or (name and len(name) >= 3 and not re.match(r"^(shortlist|announcement|candidates|page\s*\d+|date|company)", name, re.IGNORECASE)):
                 data_rows.append([usn, name, email, status])
 
         if not data_rows:
-            raise ValueError("Could not extract any candidate records from the image OCR output.")
+            raise RecruitmentResultExtractionError(
+                f"Could not extract any candidate records from the {source_type} OCR output. "
+                "Please verify that the document contains recognizable student USNs, names, or emails."
+            )
 
-        return self._build_extracted_result(headers, data_rows, source_page=1)
+        return self._build_extracted_result(headers, data_rows, source_page=source_page)
 
 
     # =========================================================================
@@ -352,10 +369,25 @@ class RecruitmentResultExtractor:
             raise ValueError(f"Failed to read PDF table: {str(e)}")
 
         if not all_headers or not extracted_rows:
-            raise ValueError(
-                "Could not extract a structured candidate table from this PDF. "
-                "The PDF might contain scanned images, complex layouts, or non-tabular text. "
-                "Please upload a spreadsheet (.xlsx or .csv) for reliable recruitment results."
+            # Fallback: Attempt OCR extraction on scanned PDF
+            logger.info("PDF contained no selectable tables; attempting scanned PDF OCR extraction...")
+            try:
+                from app.services.ocr_service import ocr_service
+                ocr_text = ocr_service.extract_text_from_scanned_pdf_bytes(file_bytes)
+                if ocr_text and not ocr_text.startswith("Error:") and not ocr_text.startswith("Scanned PDF Error:"):
+                    return self._parse_candidates_from_ocr_text(ocr_text, source_type="scanned_pdf")
+                elif ocr_text and (ocr_text.startswith("Error:") or ocr_text.startswith("Scanned PDF Error:")):
+                    raise RecruitmentResultExtractionError(f"Scanned PDF OCR failed: {ocr_text}")
+            except RecruitmentResultExtractionError:
+                raise
+            except Exception as ocr_err:
+                logger.error(f"OCR fallback on PDF failed: {ocr_err}")
+                raise RecruitmentResultExtractionError(f"Scanned PDF OCR failed: {str(ocr_err)}")
+
+            raise RecruitmentResultExtractionError(
+                "Could not extract candidate records from this PDF. "
+                "The PDF might contain scanned images without recognizable text or complex non-tabular layouts. "
+                "Please upload a searchable text document, spreadsheet (.xlsx, .csv), or clear recruitment scan."
             )
 
         # Build extracted result with page tracking
@@ -486,6 +518,11 @@ class RecruitmentResultExtractor:
                 "extracted_status_raw": extracted_status_raw or None,
                 "extracted_remarks": extracted_remarks or None,
                 "normalized_status": normalized_status,
+                "usn": extracted_usn or None,
+                "name": extracted_name or None,
+                "email": extracted_email or None,
+                "branch": extracted_branch or None,
+                "status": normalized_status,
             })
 
         if not items:

@@ -67,6 +67,36 @@ POSTGRES_BASE_URL = os.environ.get(
 )
 
 
+def make_text_image(text_lines, width=900, height=350):
+    from PIL import Image, ImageDraw, ImageFont
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    font = ImageFont.truetype(font_path, 20) if os.path.exists(font_path) else None
+    img = Image.new("RGB", (width, height), color=(255, 255, 255))
+    d = ImageDraw.Draw(img)
+    y = 25
+    for line in text_lines:
+        d.text((25, y), line, fill=(0, 0, 0), font=font)
+        y += 35
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def make_scanned_pdf(text_lines, width=900, height=350):
+    from PIL import Image, ImageDraw, ImageFont
+    font_path = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+    font = ImageFont.truetype(font_path, 20) if os.path.exists(font_path) else None
+    img = Image.new("RGB", (width, height), color=(255, 255, 255))
+    d = ImageDraw.Draw(img)
+    y = 25
+    for line in text_lines:
+        d.text((25, y), line, fill=(0, 0, 0), font=font)
+        y += 35
+    buf = io.BytesIO()
+    img.save(buf, format="PDF")
+    return buf.getvalue()
+
+
 class TestManageJobsAndRecruitmentDrives(unittest.TestCase):
     """Isolated test suite for Problem 1 (Manage Jobs) and Problem 2 (Recruitment Drives)."""
 
@@ -747,6 +777,217 @@ class TestManageJobsAndRecruitmentDrives(unittest.TestCase):
         self.current_user = self.officer
         res_officer_draft = self.client.get(f"/api/v1/placement/circulars/{draft_circ.id}")
         self.assertEqual(res_officer_draft.status_code, 200)
+
+    def test_ocr_image_and_scanned_pdf_job_extraction(self):
+        """Test OCR extraction from PNG image and scanned PDF for job postings with multi-file aggregation."""
+        # 1. Generate realistic image fixture
+        img_lines = [
+            "Company: Apex Cloud Systems",
+            "Job Title: Senior DevOps Engineer",
+            "Compensation: 14.5 LPA",
+            "Eligibility Criteria: CGPA 7.5 and above",
+            "Required Skills: Kubernetes, Docker, Python, AWS",
+        ]
+        img_bytes = make_text_image(img_lines)
+
+        # Parse standalone image
+        res_img = jd_parser_service.parse_file(target_name="apex_flyer.png", content=img_bytes)
+        self.assertIn("DevOps", res_img.get("title") or res_img.get("job_title", ""))
+        self.assertEqual(res_img.get("min_cgpa"), 7.5)
+        self.assertIn("14.5", str(res_img.get("annual_ctc") or res_img.get("salary_range", "")))
+
+        # 2. Generate scanned PDF fixture
+        pdf_lines = [
+            "Company: Cybernet Dynamics",
+            "Position: Security Analyst",
+            "Annual CTC: Rs 9.0 to 11.0 Lakhs Per Annum",
+            "Academic Cutoff: minimum CGPA: 7.0",
+        ]
+        pdf_bytes = make_scanned_pdf(pdf_lines)
+        res_pdf = jd_parser_service.parse_file(target_name="cybernet_scanned.pdf", content=pdf_bytes)
+        self.assertIn("Security", res_pdf.get("title") or res_pdf.get("job_title", ""))
+        self.assertEqual(res_pdf.get("min_cgpa"), 7.0)
+
+        # 3. Multi-file aggregation with OCR
+        text_supplement = b"Application URL: https://apply.apexcloud.io/careers?ref=campus2026\nApplication Deadline: 2026-12-15"
+        merged = jd_parser_service.parse_multiple_files([
+            ("apex_flyer.png", img_bytes),
+            ("supplement.txt", text_supplement),
+        ])
+        # Preserved title and cgpa from OCR image
+        self.assertIn("DevOps", merged.get("title") or merged.get("job_title", ""))
+        self.assertEqual(merged.get("min_cgpa"), 7.5)
+        # Preserved URL and deadline from text file
+        self.assertIn("apply.apexcloud.io", merged.get("application_url", ""))
+        self.assertIn("2026-12-15", str(merged.get("application_deadline", "")))
+
+        # 4. Unreadable/corrupted file raises clear error and never defaults silently
+        blank_img = make_text_image([""], width=100, height=50)
+        with self.assertRaises(ValueError) as ctx:
+            jd_parser_service.parse_file(target_name="blank.png", content=blank_img)
+        self.assertIn("Failed to extract readable text", str(ctx.exception))
+
+    def test_ocr_image_and_scanned_pdf_shortlist_candidate_extraction(self):
+        """Test candidate shortlist extraction from image and scanned PDF with deterministic matching."""
+        from app.services.recruitment_result_extractor import recruitment_result_extractor
+
+        cand_lines = [
+            "USN, Name, Email, Status",
+            "1MS21CS001, Alice CS Student, student_cs@edumatrix.edu, Shortlisted",
+            "1MS21ME001, Bob Mech Student, student_mech@edumatrix.edu, Shortlisted",
+        ]
+        img_bytes = make_text_image(cand_lines)
+
+        # 1. Extractor directly handles image
+        res_img = recruitment_result_extractor.extract_candidates_from_bytes(img_bytes, "shortlist.png")
+        self.assertTrue(res_img.get("success"))
+        rows = res_img.get("rows", [])
+        self.assertGreaterEqual(len(rows), 2)
+        extracted_usns = [r.get("usn") for r in rows]
+        self.assertIn("1MS21CS001", extracted_usns)
+
+        # 2. Extractor directly handles scanned PDF via OCR fallback
+        pdf_bytes = make_scanned_pdf(cand_lines)
+        res_pdf = recruitment_result_extractor.extract_candidates_from_bytes(pdf_bytes, "shortlist_scan.pdf")
+        self.assertTrue(res_pdf.get("success"))
+        pdf_rows = res_pdf.get("rows", [])
+        self.assertGreaterEqual(len(pdf_rows), 2)
+
+        # 3. API endpoint /placement/circulars/parse-shortlist handles OCR files
+        self.current_user = self.officer
+        response = self.client.post(
+            "/api/v1/placement/circulars/parse-shortlist",
+            files=[
+                ("files", ("shortlist.png", img_bytes, "image/png")),
+            ],
+            data={"company_id": self.company.id},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertGreaterEqual(len(data["candidates"]), 1)
+        # Check matched student
+        alice_match = next((c for c in data["candidates"] if c["extracted_usn"] == "1MS21CS001"), None)
+        self.assertIsNotNone(alice_match)
+        self.assertEqual(alice_match["matched_student_id"], self.student_cs.id)
+        self.assertGreaterEqual(alice_match["match_confidence"], 0.95)
+        self.assertTrue(alice_match["is_confirmed"])
+
+        # 4. Blank/unreadable image raises HTTP 400 with actionable error, never silently 0 candidates
+        blank_img = make_text_image([""], width=100, height=50)
+        err_res = self.client.post(
+            "/api/v1/placement/circulars/parse-shortlist",
+            files=[
+                ("files", ("blank_noise.png", blank_img, "image/png")),
+            ],
+            data={"company_id": self.company.id},
+        )
+        self.assertEqual(err_res.status_code, 400)
+        self.assertIn("Candidate extraction failed", err_res.json()["detail"])
+
+    def test_bearer_token_and_blob_preview_download_rbac(self):
+        """Test authenticated Blob download/preview with Bearer header, student branch RBAC, and clean 404s."""
+        content_bytes = b"%PDF-1.4 Authoritative Secure Binary Content for Job Verification"
+        file_record = FileModel(
+            filename="Confidential_Job_Specs.pdf",
+            file_type=FileType.OTHER,
+            mime_type="application/pdf",
+            file_size=len(content_bytes),
+            bucket="edumatrix-test-files",
+            object_key=f"test_jobs/{uuid.uuid4()}.pdf",
+            department="Placement Cell",
+            status=FileStatus.ACTIVE,
+            uploaded_by=self.officer.id,
+        )
+        self.db.add(file_record)
+        self.db.commit()
+
+        from app.services.file_storage.minio_client import minio_client
+        minio_client.download_file = lambda b, o: content_bytes
+
+        job = JobPosting(
+            company_id=self.company.id,
+            title="Senior Distributed Systems Architect",
+            description="High-throughput systems.",
+            status=JobStatus.OPEN,
+            branch_eligibility=["Computer Science (CSE)"],
+            file_id=file_record.id,
+            created_by=self.officer.id,
+        )
+        self.db.add(job)
+        self.db.commit()
+
+        # A. Placement Officer Access via API (authenticated fetch simulating blob fetch)
+        self.current_user = self.officer
+        res_officer = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{file_record.id}/download")
+        self.assertEqual(res_officer.status_code, 200)
+        self.assertEqual(res_officer.content, content_bytes)
+        self.assertIn("Confidential_Job_Specs.pdf", res_officer.headers.get("content-disposition", ""))
+
+        # B. Eligible CS Student Access
+        self.current_user = self.student_cs
+        res_student_cs = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{file_record.id}/download")
+        self.assertEqual(res_student_cs.status_code, 200)
+        self.assertEqual(res_student_cs.content, content_bytes)
+
+        # C. Ineligible MECH Student Access -> 403 Forbidden
+        self.current_user = self.student_mech
+        res_student_mech = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{file_record.id}/download")
+        self.assertEqual(res_student_mech.status_code, 403)
+
+        # D. Missing storage object returns clean 404 (not 500)
+        def raise_storage_err(b, o):
+            raise Exception("NoSuchKey: Object not found")
+        minio_client.download_file = raise_storage_err
+
+        self.current_user = self.officer
+        res_missing = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{file_record.id}/download")
+        self.assertEqual(res_missing.status_code, 404)
+        self.assertIn("storage", res_missing.json()["detail"].lower())
+
+    def test_date_handling_comprehensive_create_edit_draft_publish(self):
+        """Test create, edit, draft, and publish lifecycle with empty dates, and verify Celery safety."""
+        self.current_user = self.officer
+
+        # 1. Create Job with empty application_deadline and drive_date
+        payload = {
+            "title": "Cloud Operations Specialist",
+            "description": "24/7 cloud reliability engineering.",
+            "company_id": self.company.id,
+            "branch_eligibility": ["Computer Science (CSE)"],
+            "required_skills": ["Python", "AWS", "Docker"],
+            "application_deadline": None,
+            "drive_date": None,
+        }
+        res_create = self.client.post("/api/v1/placement/jobs", json=payload)
+        self.assertEqual(res_create.status_code, 200)
+        job_data = res_create.json()
+        job_id = job_data["id"]
+        self.assertIsNone(job_data["application_deadline"])
+        self.assertIsNone(job_data["drive_date"])
+        self.assertEqual(job_data["status"].lower(), "draft")
+
+        # 2. Edit Job keeping empty strings for dates
+        payload_edit = {
+            "title": "Principal Cloud Operations Specialist",
+            "application_deadline": "",
+            "drive_date": "",
+        }
+        res_edit = self.client.put(f"/api/v1/placement/jobs/{job_id}", json=payload_edit)
+        self.assertEqual(res_edit.status_code, 200)
+        edited_job = res_edit.json()
+        self.assertEqual(edited_job["title"], "Principal Cloud Operations Specialist")
+        self.assertIsNone(edited_job["application_deadline"])
+        self.assertIsNone(edited_job["drive_date"])
+
+        # 3. Publish Job
+        res_pub = self.client.post(f"/api/v1/placement/jobs/{job_id}/publish")
+        self.assertEqual(res_pub.status_code, 200)
+        self.assertEqual(res_pub.json()["status"].lower(), "open")
+
+        # 4. Verify Celery task close_expired_jobs does not close jobs with null deadlines
+        closed_count = close_expired_jobs(db=self.db)
+        db_job = self.db.query(JobPosting).filter(JobPosting.id == job_id).first()
+        self.assertEqual(db_job.status, JobStatus.OPEN)
 
 
 if __name__ == "__main__":

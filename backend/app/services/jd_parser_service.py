@@ -190,6 +190,16 @@ class JdParserService:
     # STAGE A: DOCUMENT INGESTION
     # =========================================================================
 
+    def parse_file(
+        self,
+        file_path: Optional[Union[str, bytes]] = None,
+        content: Optional[Union[bytes, str]] = None,
+        target_name: Optional[str] = None
+    ) -> JdParseResult:
+        """Convenience method to extract text and parse structured requirements from a file."""
+        text = self.extract_text_from_file(file_path=file_path, content=content, filename=target_name)
+        return self.parse_jd_text(text)
+
     def extract_text_from_file(
         self,
         file_path: Optional[Union[str, bytes]] = None,
@@ -229,6 +239,7 @@ class JdParserService:
             )
 
         extracted_text = ""
+        last_ocr_err: Optional[str] = None
 
         # 1. Image OCR handling
         if ext in [".png", ".jpg", ".jpeg"]:
@@ -237,11 +248,16 @@ class JdParserService:
                     ocr_text = self.ocr_service.extract_text_from_image_bytes(content)
                     if ocr_text and "Error:" not in ocr_text and "OCR Error:" not in ocr_text:
                         extracted_text = ocr_text.strip()
+                    elif ocr_text and ("Error:" in ocr_text or "OCR Error:" in ocr_text):
+                        last_ocr_err = ocr_text
                 elif file_path and os.path.exists(file_path):
                     ocr_text = self.ocr_service.extract_text_from_image(file_path)
                     if ocr_text and "Error:" not in ocr_text and "OCR Error:" not in ocr_text:
                         extracted_text = ocr_text.strip()
+                    elif ocr_text and ("Error:" in ocr_text or "OCR Error:" in ocr_text):
+                        last_ocr_err = ocr_text
             except Exception as img_err:
+                last_ocr_err = str(img_err)
                 logger.warning(f"Image OCR extraction failed for {target_name}: {img_err}")
 
         # 2. Primary extraction using text_extractor (for docs, pdfs, sheets, text)
@@ -309,21 +325,19 @@ class JdParserService:
             logger.info("PDF has insufficient selectable text; attempting OCR extraction...")
             try:
                 if content:
-                    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-                        tmp.write(content)
-                        tmp_path = tmp.name
-                    try:
-                        ocr_text = self.ocr_service.extract_text_from_scanned_pdf(tmp_path)
-                        if ocr_text and len(ocr_text.strip()) > 30 and "Error:" not in ocr_text:
-                            extracted_text = ocr_text.strip()
-                    finally:
-                        if os.path.exists(tmp_path):
-                            os.unlink(tmp_path)
+                    ocr_text = self.ocr_service.extract_text_from_scanned_pdf_bytes(content)
+                    if ocr_text and len(ocr_text.strip()) > 30 and "Error:" not in ocr_text and "Scanned PDF Error:" not in ocr_text:
+                        extracted_text = ocr_text.strip()
+                    elif ocr_text and ("Error:" in ocr_text or "Scanned PDF Error:" in ocr_text):
+                        last_ocr_err = ocr_text
                 elif file_path and os.path.exists(file_path):
                     ocr_text = self.ocr_service.extract_text_from_scanned_pdf(file_path)
-                    if ocr_text and len(ocr_text.strip()) > 30 and "Error:" not in ocr_text:
+                    if ocr_text and len(ocr_text.strip()) > 30 and "Error:" not in ocr_text and "Scanned PDF Error:" not in ocr_text:
                         extracted_text = ocr_text.strip()
+                    elif ocr_text and ("Error:" in ocr_text or "Scanned PDF Error:" in ocr_text):
+                        last_ocr_err = ocr_text
             except Exception as ocr_err:
+                last_ocr_err = str(ocr_err)
                 logger.warning(f"OCR fallback attempt encountered an error: {ocr_err}")
 
         # 7. Fallback for raw text bytes (plain text files only)
@@ -334,11 +348,13 @@ class JdParserService:
                 pass
 
         if not extracted_text or len(extracted_text.strip()) < 10:
-            raise ValueError(
-                "Failed to extract readable text from the document. "
-                "The file may be a scanned image without readable text or contains unreadable content. "
+            err_msg = (
+                f"Failed to extract readable text from '{target_name}'. "
+                + (f"OCR failure details: {last_ocr_err}. " if last_ocr_err else "")
+                + "The file may be a scanned image without readable text or contains unreadable content. "
                 "Please upload a searchable text document, recruitment document, or paste the text directly."
             )
+            raise ValueError(err_msg)
 
         return extracted_text
 

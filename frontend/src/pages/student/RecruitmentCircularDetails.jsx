@@ -20,6 +20,7 @@ import usePlacementStore from '../../store/placementStore';
 import {
   getCircularAttachmentDownloadUrl,
   getCircularAttachmentPreviewUrl,
+  downloadCircularAttachmentAuth,
 } from '../../services/placementService';
 import toast from 'react-hot-toast';
 
@@ -298,16 +299,14 @@ const StudentRecruitmentCircularDetails = () => {
                   >
                     <Eye className="w-4 h-4" />
                   </button>
-                  <a
-                    href={getCircularAttachmentDownloadUrl(circ.id, att.id)}
-                    target="_blank"
-                    rel="noreferrer"
-                    download
+                  <button
+                    type="button"
+                    onClick={() => downloadCircularAttachmentAuth(circ.id, att.id, att.filename)}
                     className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition-colors cursor-pointer"
                     title="Download attachment"
                   >
                     <Download className="w-4 h-4" />
-                  </a>
+                  </button>
                 </div>
               </div>
             ))}
