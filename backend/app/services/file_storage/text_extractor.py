@@ -106,6 +106,8 @@ class TextExtractor:
                 return self._extract_pptx(file_path, content)
             elif ext in ['.xlsx', '.xls']:
                 return self._extract_xlsx(file_path, content)
+            elif ext in ['.csv']:
+                return self._extract_csv(file_path, content)
             elif ext in ['.txt']:
                 return self._extract_txt(file_path, content)
             elif ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
@@ -133,39 +135,50 @@ class TextExtractor:
             'text': '',
             'error': None,
             'extractor_used': 'pdfplumber',
-            'metadata': {'page_count': 0}
+            'metadata': {'page_count': 0, 'hyperlinks': []}
         }
         
         try:
-            # Try pdfplumber first (better for tables)
+            # Try pdfplumber first (better for tables and text layout)
             if content:
-                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=True) as tmp:
-                    tmp.write(content)
-                    tmp.flush()
-                    file_path_to_use = tmp.name
+                pdf_target = BytesIO(content)
             else:
-                file_path_to_use = file_path
+                pdf_target = file_path
             
-            with pdfplumber.open(file_path_to_use) as pdf:
+            with pdfplumber.open(pdf_target) as pdf:
                 text_parts = []
+                hyperlinks = []
                 for page in pdf.pages:
                     page_text = page.extract_text()
                     if page_text:
                         text_parts.append(page_text)
+                    # Extract embedded PDF link annotations
+                    if hasattr(page, 'hyperlinks') and page.hyperlinks:
+                        for hl in page.hyperlinks:
+                            if isinstance(hl, dict) and hl.get('uri'):
+                                uri = str(hl['uri']).strip()
+                                if uri.startswith(('http://', 'https://')):
+                                    hyperlinks.append(uri)
                 
+                # Deduplicate hyperlinks
+                hyperlinks = list(dict.fromkeys(hyperlinks))
+                if hyperlinks:
+                    text_parts.append("\n\n--- Document Hyperlinks ---\n" + "\n".join(hyperlinks))
+                    result['metadata']['hyperlinks'] = hyperlinks
+
                 result['text'] = '\n\n'.join(text_parts)
                 result['metadata']['page_count'] = len(pdf.pages)
                 result['success'] = True
                 
                 if result['text'].strip():
-                    logger.info(f"📄 Extracted {len(result['text'])} chars from PDF")
+                    logger.info(f"📄 Extracted {len(result['text'])} chars and {len(hyperlinks)} hyperlinks from PDF (pdfplumber)")
+                    return result
                 else:
                     # Fallback to PyPDF2 if pdfplumber returns empty
-                    logger.warning("pdfplumber returned empty, trying PyPDF2...")
+                    logger.warning("pdfplumber returned empty text, trying PyPDF2...")
                     result = self._extract_pdf_pypdf2(file_path, content)
                     result['extractor_used'] = 'PyPDF2 (fallback)'
-                
-                return result
+                    return result
                 
         except Exception as e:
             logger.warning(f"pdfplumber failed: {str(e)}, trying PyPDF2...")
@@ -178,7 +191,7 @@ class TextExtractor:
             'text': '',
             'error': None,
             'extractor_used': 'PyPDF2',
-            'metadata': {'page_count': 0}
+            'metadata': {'page_count': 0, 'hyperlinks': []}
         }
         
         try:
@@ -189,16 +202,33 @@ class TextExtractor:
                 reader = PyPDF2.PdfReader(file_path)
             
             text_parts = []
+            hyperlinks = []
             for page in reader.pages:
                 page_text = page.extract_text()
                 if page_text:
                     text_parts.append(page_text)
+                # Extract embedded link annotations in PyPDF2
+                try:
+                    if "/Annots" in page:
+                        for annot in page["/Annots"]:
+                            annot_obj = annot.get_object()
+                            if "/A" in annot_obj and "/URI" in annot_obj["/A"]:
+                                uri = str(annot_obj["/A"]["/URI"]).strip()
+                                if uri.startswith(('http://', 'https://')):
+                                    hyperlinks.append(uri)
+                except Exception:
+                    pass
             
+            hyperlinks = list(dict.fromkeys(hyperlinks))
+            if hyperlinks:
+                text_parts.append("\n\n--- Document Hyperlinks ---\n" + "\n".join(hyperlinks))
+                result['metadata']['hyperlinks'] = hyperlinks
+
             result['text'] = '\n\n'.join(text_parts)
             result['metadata']['page_count'] = len(reader.pages)
             result['success'] = True
             
-            logger.info(f"📄 Extracted {len(result['text'])} chars from PDF (PyPDF2)")
+            logger.info(f"📄 Extracted {len(result['text'])} chars and {len(hyperlinks)} hyperlinks from PDF (PyPDF2)")
             return result
             
         except Exception as e:
@@ -206,13 +236,13 @@ class TextExtractor:
             return result
     
     def _extract_docx(self, file_path: str, content: Optional[bytes] = None) -> Dict[str, Any]:
-        """Extract text from DOCX."""
+        """Extract text from DOCX including tables and embedded hyperlinks."""
         result = {
             'success': False,
             'text': '',
             'error': None,
             'extractor_used': 'python-docx',
-            'metadata': {}
+            'metadata': {'paragraph_count': 0, 'table_count': 0, 'hyperlinks': []}
         }
         
         if not DOCX_AVAILABLE:
@@ -234,18 +264,70 @@ class TextExtractor:
             # Extract text from tables
             for table in doc.tables:
                 for row in table.rows:
-                    row_text = ' '.join([cell.text for cell in row.cells if cell.text])
+                    row_text = ' '.join([cell.text.strip() for cell in row.cells if cell.text.strip()])
                     if row_text:
                         text_parts.append(row_text)
             
+            # Extract embedded hyperlinks from document relationships
+            docx_links = []
+            try:
+                for rel in doc.part.rels.values():
+                    rel_type = getattr(rel, 'reltype', '')
+                    if rel_type and 'hyperlink' in rel_type.lower():
+                        target = getattr(rel, 'target_ref', '')
+                        if target and str(target).startswith(('http://', 'https://')):
+                            docx_links.append(str(target).strip())
+            except Exception as hl_err:
+                logger.debug(f"DOCX hyperlink extraction notice: {hl_err}")
+
+            docx_links = list(dict.fromkeys(docx_links))
+            if docx_links:
+                text_parts.append("\n\n--- Document Hyperlinks ---\n" + "\n".join(docx_links))
+                result['metadata']['hyperlinks'] = docx_links
+
             result['text'] = '\n'.join(text_parts)
             result['metadata']['paragraph_count'] = len(doc.paragraphs)
             result['metadata']['table_count'] = len(doc.tables)
             result['success'] = True
             
-            logger.info(f"📄 Extracted {len(result['text'])} chars from DOCX")
+            logger.info(f"📄 Extracted {len(result['text'])} chars and {len(docx_links)} hyperlinks from DOCX")
             return result
             
+        except Exception as e:
+            result['error'] = str(e)
+            return result
+
+    def _extract_csv(self, file_path: str, content: Optional[bytes] = None) -> Dict[str, Any]:
+        """Extract text from CSV files."""
+        result = {
+            'success': False,
+            'text': '',
+            'error': None,
+            'extractor_used': 'pandas/csv',
+            'metadata': {'row_count': 0, 'columns': []}
+        }
+        
+        try:
+            import pandas as pd
+            if content:
+                from io import BytesIO
+                df = pd.read_csv(BytesIO(content))
+            else:
+                df = pd.read_csv(file_path)
+            
+            headers = ' | '.join([str(col) for col in df.columns])
+            lines = [f"Columns: {headers}"]
+            for _, row in df.head(1000).iterrows():
+                row_text = ' | '.join([str(val) if pd.notna(val) else '' for val in row])
+                if row_text.strip():
+                    lines.append(row_text)
+            
+            result['text'] = '\n'.join(lines)
+            result['metadata']['row_count'] = len(df)
+            result['metadata']['columns'] = [str(c) for c in df.columns]
+            result['success'] = True
+            logger.info(f"📄 Extracted {len(result['text'])} chars from CSV ({len(df)} rows)")
+            return result
         except Exception as e:
             result['error'] = str(e)
             return result
