@@ -28,6 +28,26 @@ import {
 import usePlacementStore from '../../store/placementStore';
 import toast from 'react-hot-toast';
 
+// Helper to format ISO / natural date strings safely for HTML <input type="datetime-local"> without calendar-day shift
+const formatForDateTimeLocal = (dateVal) => {
+  if (!dateVal) return '';
+  if (typeof dateVal === 'string') {
+    const s = dateVal.trim();
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) {
+      return s.slice(0, 16);
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+      return `${s}T00:00`;
+    }
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+  }
+  return '';
+};
+
 const JobForm = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -124,8 +144,8 @@ const JobForm = () => {
         location: selectedJob.location || '',
         salary_range: selectedJob.salary_range || '',
         application_url: selectedJob.application_url || '',
-        application_deadline: selectedJob.application_deadline ? selectedJob.application_deadline.slice(0, 16) : '',
-        drive_date: selectedJob.drive_date ? selectedJob.drive_date.slice(0, 16) : '',
+        application_deadline: formatForDateTimeLocal(selectedJob.application_deadline),
+        drive_date: formatForDateTimeLocal(selectedJob.drive_date),
         status: selectedJob.status || 'draft',
         file_id: selectedJob.file_id || null,
         attachment_file_ids: attachedIds,
@@ -323,8 +343,8 @@ const JobForm = () => {
           location: parsed.location || prev.location,
           salary_range: parsed.salary_range || prev.salary_range,
           application_url: parsed.application_url || prev.application_url,
-          application_deadline: parsed.application_deadline ? parsed.application_deadline.slice(0, 16) : prev.application_deadline,
-          drive_date: parsed.drive_date ? parsed.drive_date.slice(0, 16) : prev.drive_date,
+          application_deadline: formatForDateTimeLocal(parsed.application_deadline) || prev.application_deadline,
+          drive_date: formatForDateTimeLocal(parsed.drive_date) || prev.drive_date,
         }));
 
         // Try to match company name if found
@@ -424,8 +444,8 @@ const JobForm = () => {
         file_id: formData.file_id || null,
         attachment_file_ids: formData.attachment_file_ids || [],
         application_url: formData.application_url?.trim() || null,
-        application_deadline: formData.application_deadline?.trim() ? new Date(formData.application_deadline).toISOString() : null,
-        drive_date: formData.drive_date?.trim() ? new Date(formData.drive_date).toISOString() : null,
+        application_deadline: formData.application_deadline?.trim() || null,
+        drive_date: formData.drive_date?.trim() || null,
         cgpa_criteria: formData.cgpa_criteria ? parseFloat(formData.cgpa_criteria) : null,
         required_skills: formData.required_skills || [],
         preferred_skills: formData.preferred_skills || [],
