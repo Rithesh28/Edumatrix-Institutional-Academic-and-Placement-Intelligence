@@ -109,36 +109,138 @@ export const uploadJdFile = async (file) => {
   return uploadJdFiles([file]);
 };
 
-export const downloadFileBlob = async (url, filename) => {
+export const getStoredAuthToken = () => {
+  try {
+    const auth = localStorage.getItem('auth-storage');
+    if (auth) {
+      const parsed = JSON.parse(auth);
+      if (parsed.state?.token) return parsed.state.token;
+    }
+  } catch (_) {}
+  return localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+};
+
+export const downloadFileBlob = async (url, fallbackFilename) => {
   try {
     const response = await api.get(url, { responseType: 'blob' });
-    const contentType = response.headers['content-type'] || 'application/octet-stream';
-    const blob = new Blob([response.data], { type: contentType });
+    
+    // Check if the response is actually an error JSON returned as a blob
+    const contentType = response.headers['content-type'] || '';
+    if (contentType.includes('application/json')) {
+      let errorMsg = 'Failed to download file';
+      try {
+        const text = await response.data.text();
+        const json = JSON.parse(text);
+        if (json.detail) errorMsg = json.detail;
+      } catch (_) {}
+      throw new Error(errorMsg);
+    }
+
+    if (!response.data || (response.data instanceof Blob && response.data.size === 0)) {
+      throw new Error('Downloaded file is empty or missing from storage');
+    }
+
+    // Extract genuine filename from Content-Disposition header if available
+    let downloadName = fallbackFilename;
+    const disposition = response.headers['content-disposition'];
+    if (disposition) {
+      const utf8Match = disposition.match(/filename\*=UTF-8''([^;\n]*)/i);
+      if (utf8Match && utf8Match[1]) {
+        try {
+          downloadName = decodeURIComponent(utf8Match[1]);
+        } catch (_) {}
+      } else {
+        const standardMatch = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (standardMatch && standardMatch[1]) {
+          downloadName = standardMatch[1].replace(/['"]/g, '').trim();
+        }
+      }
+    }
+
+    // Default clean filename fallback
+    if (!downloadName || downloadName === 'Attached Document' || downloadName === 'download') {
+      const ext = contentType.includes('pdf') ? '.pdf' : contentType.includes('jpeg') ? '.jpg' : contentType.includes('png') ? '.png' : '';
+      downloadName = `document_${Date.now()}${ext}`;
+    }
+
+    const blob = new Blob([response.data], { type: contentType || 'application/octet-stream' });
     const blobUrl = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = blobUrl;
-    link.setAttribute('download', filename || 'download');
+    link.setAttribute('download', downloadName);
     document.body.appendChild(link);
     link.click();
     link.remove();
-    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+    setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+    return downloadName;
   } catch (err) {
-    console.error('Authenticated download failed:', err);
-    throw err;
+    let errorDetail = err.message || 'Authenticated download failed';
+    if (err.response?.data instanceof Blob) {
+      try {
+        const text = await err.response.data.text();
+        const json = JSON.parse(text);
+        if (json.detail) errorDetail = json.detail;
+      } catch (_) {}
+    } else if (err.response?.data?.detail) {
+      errorDetail = err.response.data.detail;
+    }
+    const cleanErr = new Error(errorDetail);
+    cleanErr.status = err.response?.status;
+    console.error('Authenticated download failed:', errorDetail);
+    throw cleanErr;
   }
 };
 
 export const previewFileBlob = async (url) => {
   try {
     const response = await api.get(url, { responseType: 'blob' });
-    const contentType = response.headers['content-type'] || 'application/pdf';
-    const blob = new Blob([response.data], { type: contentType });
+    const contentType = response.headers['content-type'] || '';
+
+    // Check if response is error JSON disguised as blob
+    if (contentType.includes('application/json')) {
+      let errorMsg = 'Failed to preview file';
+      try {
+        const text = await response.data.text();
+        const json = JSON.parse(text);
+        if (json.detail) errorMsg = json.detail;
+      } catch (_) {}
+      throw new Error(errorMsg);
+    }
+
+    if (!response.data || (response.data instanceof Blob && response.data.size === 0)) {
+      throw new Error('File content is empty or unavailable in storage');
+    }
+
+    // If file is not previewable in browser, trigger download instead
+    const isPreviewable = (
+      contentType.includes('pdf') ||
+      contentType.startsWith('image/') ||
+      contentType.startsWith('text/')
+    );
+
+    if (!isPreviewable) {
+      return await downloadFileBlob(url);
+    }
+
+    const blob = new Blob([response.data], { type: contentType || 'application/pdf' });
     const blobUrl = window.URL.createObjectURL(blob);
     window.open(blobUrl, '_blank', 'noopener,noreferrer');
     setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
   } catch (err) {
-    console.error('Authenticated preview failed:', err);
-    throw err;
+    let errorDetail = err.message || 'Authenticated preview failed';
+    if (err.response?.data instanceof Blob) {
+      try {
+        const text = await err.response.data.text();
+        const json = JSON.parse(text);
+        if (json.detail) errorDetail = json.detail;
+      } catch (_) {}
+    } else if (err.response?.data?.detail) {
+      errorDetail = err.response.data.detail;
+    }
+    const cleanErr = new Error(errorDetail);
+    cleanErr.status = err.response?.status;
+    console.error('Authenticated preview failed:', errorDetail);
+    throw cleanErr;
   }
 };
 
@@ -151,13 +253,13 @@ export const previewJobFileAuth = async (jobId, fileId) => {
 };
 
 export const getJobFileDownloadUrl = (jobId, fileId) => {
-  const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+  const token = getStoredAuthToken();
   const base = `/api/v1/placement/jobs/${jobId}/files/${fileId}/download`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 
 export const getJobFilePreviewUrl = (jobId, fileId) => {
-  const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+  const token = getStoredAuthToken();
   const base = `/api/v1/placement/jobs/${jobId}/files/${fileId}/preview`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
@@ -325,13 +427,13 @@ export const previewCircularAttachmentAuth = async (circularId, attachmentId) =>
 };
 
 export const getCircularAttachmentDownloadUrl = (circularId, attachmentId) => {
-  const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+  const token = getStoredAuthToken();
   const base = `/api/v1/placement/circulars/${circularId}/attachments/${attachmentId}/download`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 
 export const getCircularAttachmentPreviewUrl = (circularId, attachmentId) => {
-  const token = localStorage.getItem('token') || localStorage.getItem('access_token') || '';
+  const token = getStoredAuthToken();
   const base = `/api/v1/placement/circulars/${circularId}/attachments/${attachmentId}/preview`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };

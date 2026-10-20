@@ -490,6 +490,7 @@ class JdParserService:
             "selection_rounds": selection_rounds,
             "application_instructions": application_instructions,
             "application_url": application_url,
+            "application_url_candidates": [{"url": u} for u in evidence.get("application_url_candidates", [])],
 
             # Traceability & Verification
             "review_flags": review_flags,
@@ -1427,6 +1428,231 @@ class JdParserService:
         "schema.org",
     }
 
+    def _preprocess_text_for_urls(self, text: str) -> str:
+        """
+        Generic preprocessor to repair OCR and PDF layout artifacts in URLs:
+        - Accidental whitespace in protocol (e.g. 'http : //', 'https ://')
+        - Accidental whitespace in domain (e.g. 'forms . gle /', 'docs . google . com / forms /', 'www . ')
+        - Single OCR space after slash or inside path/form IDs (e.g. 'forms.gle/ yP4tpWtmk9VdFFBU8' -> 'forms.gle/yP4tpWtmk9VdFFBU8')
+        - PDF layout line-wrapping of URLs across newlines
+        """
+        if not text:
+            return ""
+
+        t = text
+        # 1. Normalize protocol spacing: "https : / /" or "http ://" -> "https://"
+        t = re.sub(r'\b(https?)\s*:\s*/\s*/\s*', r'\1://', t, flags=re.IGNORECASE)
+
+        # 2. Normalize common domain spacing around dots:
+        t = re.sub(r'(https?://[a-zA-Z0-9_-]+)\s*\.\s*([a-zA-Z0-9_-]+)\s*\.\s*([a-zA-Z]{2,})\s*/\s*', r'\1.\2.\3/', t, flags=re.IGNORECASE)
+        t = re.sub(r'(https?://[a-zA-Z0-9_-]+)\s*\.\s*([a-zA-Z]{2,})\s*/\s*', r'\1.\2/', t, flags=re.IGNORECASE)
+        t = re.sub(r'\b(forms|docs|bit)\s*\.\s*(gle|google|ly)\s*/\s*', r'\1.\2/', t, flags=re.IGNORECASE)
+        t = re.sub(r'\b(docs)\s*\.\s*(google)\s*\.\s*(com)\s*/\s*', r'\1.\2.\3/', t, flags=re.IGNORECASE)
+        t = re.sub(r'\b(www)\s*\.\s*', r'www.', t, flags=re.IGNORECASE)
+
+        # 3. Reconstruct URLs split across line breaks (PDF hard wrap)
+        # Case A: URL ending with hyphen at line break
+        t = re.sub(r'(\bhttps?://[^\s<>"\'`]+)-\s*[\r\n]+\s*([a-zA-Z0-9_/?&=#%~+.-]+)', r'\1\2', t)
+
+        # Case B: URL ending with delimiter or slash before line break
+        t = re.sub(r'(\bhttps?://[^\s<>"\'`]+[/=?&_])\s*[\r\n]+\s*([a-zA-Z0-9_/?&=#%~+.-]+)', r'\1\2', t)
+
+        # Case C: Google forms or short links split across newline
+        t = re.sub(r'(\b(?:https?://)?forms\.gle/)\s*[\r\n]+\s*([a-zA-Z0-9_-]+)', r'\1\2', t)
+
+        # Case D: Generic URL where line break splits a path or query string
+        t = re.sub(r'(\bhttps?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?::\d+)?/[^\s<>"\'`]*)\s*[\r\n]+\s*([/?&=#%][a-zA-Z0-9_/?&=#%~+.-]*)', r'\1\2', t)
+
+        # 4. OCR spacing repairs inside paths:
+        t = re.sub(r'(\b(?:https?://)?forms\.gle/)\s+([a-zA-Z0-9_-]+)', r'\1\2', t)
+        t = re.sub(r'(\bhttps?://[^\s<>"\'`]+/)\s+([a-zA-Z0-9_/?&=#%~+.-]{3,})', r'\1\2', t)
+
+        return t
+
+    def _clean_and_validate_candidate_url(self, raw_url: str) -> Optional[str]:
+        """
+        Clean surrounding brackets and trailing sentence punctuation from candidate URL
+        while strictly preserving valid query parameters, fragments, encoded chars, etc.
+        """
+        if not raw_url:
+            return None
+
+        u = raw_url.strip()
+
+        # Strip surrounding enclosure quotes or angle brackets
+        if (u.startswith('"') and u.endswith('"')) or (u.startswith("'") and u.endswith("'")):
+            u = u[1:-1].strip()
+        if u.startswith('<') and u.endswith('>'):
+            u = u[1:-1].strip()
+        if u.startswith('[') and u.endswith(']'):
+            u = u[1:-1].strip()
+        if u.startswith('(') and u.endswith(')'):
+            u = u[1:-1].strip()
+
+        # Handle scheme prefixes
+        if u.lower().startswith('www.'):
+            u = 'https://' + u
+        elif u.lower().startswith('forms.gle/'):
+            u = 'https://' + u
+        elif u.lower().startswith('bit.ly/'):
+            u = 'https://' + u
+        elif u.lower().startswith('tinyurl.com/'):
+            u = 'https://' + u
+        elif not re.match(r'^https?://', u, re.IGNORECASE):
+            return None
+
+        # Clean trailing sentence punctuation (dots, commas, semicolons, colons)
+        while len(u) > 10:
+            last_char = u[-1]
+            if last_char in ('.', ',', ';', ':', '!', '"', "'", '`', '>', '}'):
+                u = u[:-1]
+            elif last_char == ')':
+                if u.count('(') < u.count(')'):
+                    u = u[:-1]
+                else:
+                    break
+            elif last_char == ']':
+                if u.count('[') < u.count(']'):
+                    u = u[:-1]
+                else:
+                    break
+            elif last_char == '?':
+                if len(u) > 1 and u[-2] in ('/', '.'):
+                    u = u[:-1]
+                else:
+                    break
+            else:
+                break
+
+        # Validate URL structure
+        try:
+            parsed = urlparse(u)
+            if parsed.scheme.lower() not in ('http', 'https'):
+                return None
+            netloc = parsed.netloc.lower().split(':')[0]
+            if not netloc or '.' not in netloc:
+                return None
+            if netloc in self.IGNORED_URL_HOSTS or any(netloc.endswith('.' + ign) for ign in self.IGNORED_URL_HOSTS):
+                return None
+            path_lower = parsed.path.lower()
+            if any(path_lower.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js', '.woff', '.ico', '.mp4']):
+                return None
+            return u
+        except Exception:
+            return None
+
+    def _score_url_context(self, url: str, text: str) -> Tuple[int, str]:
+        """
+        Score a URL candidate based on its structure and surrounding text context.
+        Returns (score, context_snippet).
+        Higher score indicates strong evidence of being the external application/registration link.
+        """
+        u_lower = url.lower()
+        score = 0
+
+        # Form provider intrinsic weight
+        if any(f in u_lower for f in ["forms.gle", "docs.google.com/forms", "typeform.com", "jotform.com", "surveymonkey.com", "airtable.com"]):
+            score += 35
+        # Portal / career path intrinsic weight
+        if any(k in u_lower for k in ["/apply", "/application", "/register", "/registration", "/careers", "/career", "/jobs", "/job/", "/openings", "/recruitment"]):
+            score += 25
+        if any(s in u_lower for s in ["bit.ly/", "tinyurl.com/"]):
+            score += 15
+
+        # Check if URL is just a bare company root homepage (e.g., https://company.com or https://www.company.com/)
+        try:
+            parsed = urlparse(url)
+            path = parsed.path.strip('/')
+            if not path and not parsed.query:
+                score -= 15
+        except Exception:
+            pass
+
+        # Context window signals
+        context_snippet = ""
+        u_idx = text.find(url)
+        if u_idx == -1:
+            try:
+                parsed = urlparse(url)
+                if parsed.path and len(parsed.path) > 3:
+                    u_idx = text.find(parsed.path)
+            except Exception:
+                pass
+
+        if u_idx != -1:
+            start = max(0, u_idx - 250)
+            end = min(len(text), u_idx + len(url) + 150)
+            window = text[start:end]
+            context_snippet = window.replace('\n', ' ').strip()
+            w_lower = window.lower()
+
+            # Strong explicit application/registration phrases
+            if any(p in w_lower for p in [
+                "registration link", "application link", "apply link", "registration url",
+                "application url", "link to apply", "link for registration", "form link",
+                "apply here", "register here", "interested candidates register", "google form link"
+            ]):
+                score += 40
+            elif any(p in w_lower for p in [
+                "register", "registration", "apply", "application", "how to apply",
+                "interested candidates", "apply online", "submit application", "fill the form"
+            ]):
+                score += 25
+            elif any(p in w_lower for p in ["career", "portal", "recruitment", "submission", "shortlist"]):
+                score += 10
+
+            # Negative signals (informational / corporate / contact)
+            if any(p in w_lower for p in ["company website", "visit our website", "about us", "official website", "web:"]):
+                score -= 20
+            if any(p in w_lower for p in ["privacy policy", "terms of service", "unsubscribe", "contact us at"]):
+                score -= 30
+
+        return score, context_snippet
+
+    def _extract_all_application_urls(self, text: str) -> List[Dict[str, Any]]:
+        """
+        Extract, reconstruct, score, and rank all valid candidate URLs from text.
+        Eliminates truncated prefixes and returns list sorted by score descending.
+        """
+        prep_text = self._preprocess_text_for_urls(text)
+        
+        # Regex matching generic URLs across text
+        raw_matches = re.findall(
+            r'(?<![a-zA-Z0-9])(?:https?://|www\.|forms\.gle/|docs\.google\.com/forms/|bit\.ly/|tinyurl\.com/)[^\s<>"\'`]+',
+            prep_text,
+            re.IGNORECASE
+        )
+
+        candidates_map = {}
+        for rm in raw_matches:
+            cleaned = self._clean_and_validate_candidate_url(rm)
+            if cleaned and cleaned not in candidates_map:
+                score, snippet = self._score_url_context(cleaned, prep_text)
+                candidates_map[cleaned] = {
+                    "url": cleaned,
+                    "score": score,
+                    "context": snippet
+                }
+
+        candidates = list(candidates_map.values())
+
+        # Discard truncated prefixes:
+        # If url A is a strict prefix of url B (e.g. 'https://forms.gle/yP4tp' vs 'https://forms.gle/yP4tpWtmk9VdFFBU8'),
+        # discard the truncated prefix.
+        filtered = []
+        for c in candidates:
+            url_c = c["url"]
+            is_prefix = any(
+                other["url"] != url_c and other["url"].startswith(url_c)
+                for other in candidates
+            )
+            if not is_prefix:
+                filtered.append(c)
+
+        # Sort by score descending, then length descending
+        filtered.sort(key=lambda x: (x["score"], len(x["url"])), reverse=True)
+        return filtered
+
     def _extract_application_url_and_instructions(
         self,
         text: str,
@@ -1440,54 +1666,15 @@ class JdParserService:
         app_url: Optional[str] = None
         instructions: Optional[str] = None
 
-        # 1. Candidate URL extraction
-        raw_candidates = []
-        for m in re.finditer(r'(?:https?://|www\.|forms\.gle/)[^\s<>"\'\`,;)]+', text, re.IGNORECASE):
-            raw_url = m.group(0)
-            cleaned = re.sub(r'[.,;:)>\]"\'`]+$', '', raw_url)
-            if cleaned.lower().startswith('www.'):
-                cleaned = 'https://' + cleaned
-            elif cleaned.lower().startswith('forms.gle/'):
-                cleaned = 'https://' + cleaned
-            raw_candidates.append(cleaned)
+        candidates = self._extract_all_application_urls(text)
+        valid_app_candidates = [c for c in candidates if c["score"] > 0]
+        evidence["application_url_candidates"] = [c["url"] for c in valid_app_candidates]
 
-        valid_candidates = []
-        for u in raw_candidates:
-            try:
-                parsed = urlparse(u)
-                if parsed.scheme.lower() not in ('http', 'https'):
-                    continue
-                netloc = parsed.netloc.lower().split(':')[0]
-                if not netloc or '.' not in netloc:
-                    continue
-                if netloc in self.IGNORED_URL_HOSTS or any(netloc.endswith('.' + ign) for ign in self.IGNORED_URL_HOSTS):
-                    continue
-                path_lower = parsed.path.lower()
-                if any(path_lower.endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.css', '.js', '.woff']):
-                    continue
-                valid_candidates.append(u)
-            except Exception:
-                continue
+        if valid_app_candidates:
+            app_url = valid_app_candidates[0]["url"]
+            evidence["application_url"] = app_url
 
-        if valid_candidates:
-            def score_url(u: str) -> int:
-                score = 0
-                u_lower = u.lower()
-                if any(k in u_lower for k in ["apply", "career", "job", "portal", "recruit", "form", "forms.gle"]):
-                    score += 15
-                u_idx = text.find(u)
-                if u_idx != -1:
-                    window = text[max(0, u_idx - 120):min(len(text), u_idx + len(u) + 120)].lower()
-                    if any(k in window for k in ["apply", "application", "register", "registration", "portal", "submit", "link", "url", "form"]):
-                        score += 10
-                return score
-
-            best_url = max(valid_candidates, key=score_url)
-            if score_url(best_url) > 0:
-                app_url = best_url
-                evidence["application_url"] = app_url
-
-        # 2. Application instructions extraction
+        # Application instructions extraction
         instruction_patterns = [
             r'(?:how\s*to\s*apply|application\s*(?:process|procedure|instructions?|steps?|method)|mode\s*of\s*application)[\s:\-–—|]+([^\n\r]+(?:\n[^\n\r]+){0,2})',
             r'(?:apply\s*(?:online|at|via|through)[\s:\-–—]+[^\n\r]+)',
@@ -1810,20 +1997,67 @@ class JdParserService:
         merged_degrees = list(dict.fromkeys(all_degrees))
         merged_batches = list(dict.fromkeys(all_batches))
 
-        # 10. Application URL
-        urls = [(r["filename"], r["parsed"].get("application_url")) for r in per_file_results if r["parsed"].get("application_url")]
+        # 10. Application URL and Multi-Document Candidate Aggregation
+        all_url_candidates: List[Dict[str, Any]] = []
+        seen_candidate_urls = set()
+
+        for r in per_file_results:
+            fn = r["filename"]
+            file_candidates = r["parsed"].get("application_url_candidates") or []
+            file_app_url = r["parsed"].get("application_url")
+            if file_app_url and not any(fc.get("url") == file_app_url for fc in file_candidates if isinstance(fc, dict)):
+                file_candidates.append({
+                    "url": file_app_url,
+                    "source_file": fn,
+                    "score": 30,
+                    "context": r["parsed"].get("field_evidence", {}).get("application_url", "")
+                })
+
+            for fc in file_candidates:
+                u = fc.get("url", "").strip() if isinstance(fc, dict) else str(fc).strip()
+                if u and u not in seen_candidate_urls:
+                    seen_candidate_urls.add(u)
+                    all_url_candidates.append({
+                        "url": u,
+                        "source_file": fc.get("source_file") or fn if isinstance(fc, dict) else fn,
+                        "score": fc.get("score", 30) if isinstance(fc, dict) else 30,
+                        "context": fc.get("context", "") if isinstance(fc, dict) else ""
+                    })
+
+        # Discard truncated prefixes across multiple files:
+        # If url A is a strict prefix of url B, discard the incomplete prefix
+        filtered_url_candidates = []
+        for c in all_url_candidates:
+            u = c["url"]
+            is_prefix = any(
+                other["url"] != u and other["url"].startswith(u)
+                for other in all_url_candidates
+            )
+            if not is_prefix:
+                filtered_url_candidates.append(c)
+
+        # Sort candidates by score descending, then length descending
+        filtered_url_candidates.sort(key=lambda x: (x["score"], len(x["url"])), reverse=True)
+
         chosen_url = None
-        if urls:
-            unique_urls = {u[1].strip(): u for u in urls}
-            if len(unique_urls) > 1:
-                u1, u2 = urls[0], urls[1]
-                chosen_url = u1[1]
-                merged_review_flags.append(
-                    f"Conflicting application URLs: '{u1[1]}' ({u1[0]}) vs '{u2[1]}' ({u2[0]}). Selected '{chosen_url}'. Please confirm the correct link."
-                )
-            else:
-                chosen_url = urls[0][1]
-            merged_evidence["application_url"] = f"[{urls[0][0]}] {chosen_url}"
+        if filtered_url_candidates:
+            top_cand = filtered_url_candidates[0]
+            if top_cand["score"] > 0:
+                chosen_url = top_cand["url"]
+                merged_evidence["application_url"] = f"[{top_cand['source_file']}] {chosen_url}"
+
+            valid_candidates = [c for c in filtered_url_candidates if c["score"] > 0]
+            if len(valid_candidates) > 1:
+                top1 = valid_candidates[0]
+                top2 = valid_candidates[1]
+                if abs(top1["score"] - top2["score"]) < 15 and top1["url"] != top2["url"]:
+                    merged_review_flags.append(
+                        f"Multiple plausible application URLs detected: '{top1['url']}' ({top1['source_file']}) vs '{top2['url']}' ({top2['source_file']}). Pre-selected '{chosen_url}'. Please confirm the correct link."
+                    )
+        else:
+            merged_review_flags.append(
+                "No external application URL detected in the uploaded documents. If students must apply externally, please enter the link manually."
+            )
 
         instructions_list = [r["parsed"].get("application_instructions") for r in per_file_results if r["parsed"].get("application_instructions")]
         chosen_instructions = instructions_list[0] if instructions_list else None
@@ -1881,6 +2115,7 @@ class JdParserService:
             "selection_rounds": list(dict.fromkeys(sum([r["parsed"].get("selection_rounds") or [] for r in per_file_results], []))),
             "application_instructions": chosen_instructions,
             "application_url": chosen_url,
+            "application_url_candidates": filtered_url_candidates,
 
             # File persistence and multi-document tracking
             "file_id": all_file_ids[0] if all_file_ids else None,
@@ -1934,6 +2169,7 @@ class JdParserService:
             "selection_rounds": [],
             "application_instructions": None,
             "application_url": None,
+            "application_url_candidates": [],
             "file_id": None,
             "file_name": None,
             "file_ids": [],

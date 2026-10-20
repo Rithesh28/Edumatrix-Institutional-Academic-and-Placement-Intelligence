@@ -989,6 +989,265 @@ class TestManageJobsAndRecruitmentDrives(unittest.TestCase):
         db_job = self.db.query(JobPosting).filter(JobPosting.id == job_id).first()
         self.assertEqual(db_job.status, JobStatus.OPEN)
 
+    def test_generic_url_extraction_patterns_and_repair(self):
+        """Test generic extraction across varied URL formats, Google forms, query strings, and OCR line wraps."""
+        # A. Long URL with complex query strings, fragments, and percent-encoding
+        doc_a = (
+            "Recruitment Announcement for 2026 Batch.\n"
+            "Role: Systems Engineer\n"
+            "Official Application Link: "
+            "https://portal.enterprise-hiring.org/careers/v2/openings/10892?dept=engineering&source=campus_drive&token=abc%20123#apply-step-1\n"
+            "Eligibility: 7.0 CGPA"
+        )
+        parsed_a = jd_parser_service.parse_jd_text(doc_a)
+        self.assertEqual(
+            parsed_a["application_url"],
+            "https://portal.enterprise-hiring.org/careers/v2/openings/10892?dept=engineering&source=campus_drive&token=abc%20123#apply-step-1"
+        )
+
+        # B. Long Google Forms link with form ID and query params
+        doc_b = (
+            "Registration Form for Campus Hiring:\n"
+            "https://docs.google.com/forms/d/e/1FAIpQLSd9W8V7U_m-kXyZ1234567890abcdefghijklmnopqrstuvwxyz/viewform?usp=sf_link\n"
+            "Please register before Friday."
+        )
+        parsed_b = jd_parser_service.parse_jd_text(doc_b)
+        self.assertEqual(
+            parsed_b["application_url"],
+            "https://docs.google.com/forms/d/e/1FAIpQLSd9W8V7U_m-kXyZ1234567890abcdefghijklmnopqrstuvwxyz/viewform?usp=sf_link"
+        )
+
+        # C. Trailing punctuation and surrounding brackets cleaning
+        doc_c = (
+            "Important: (Register at: https://forms.gle/xK9LmP4qRstUVwXYZ.)\n"
+            "Secondary Link: <https://company.careers.com/apply/job-999;>\n"
+        )
+        parsed_c = jd_parser_service.parse_jd_text(doc_c)
+        # Should cleanly strip trailing period and parenthesis without damaging the form code
+        self.assertEqual(parsed_c["application_url"], "https://forms.gle/xK9LmP4qRstUVwXYZ")
+
+        # D. Line break reconstruction across PDF/OCR wraps
+        doc_d = (
+            "Apply Online: https://careers.globaltech.com/apply/\n"
+            "positions/2026-software-engineer?src=uni\n"
+            "Company: GlobalTech"
+        )
+        parsed_d = jd_parser_service.parse_jd_text(doc_d)
+        self.assertEqual(
+            parsed_d["application_url"],
+            "https://careers.globaltech.com/apply/positions/2026-software-engineer?src=uni"
+        )
+
+        # E. OCR spacing repair inside Google Forms ID and protocol
+        doc_e = (
+            "Registration URL:\n"
+            "https : // forms . gle / yP4tpWtmk9VdFFBU8\n"
+            "Mandatory for all students."
+        )
+        parsed_e = jd_parser_service.parse_jd_text(doc_e)
+        self.assertEqual(parsed_e["application_url"], "https://forms.gle/yP4tpWtmk9VdFFBU8")
+
+    def test_url_candidate_scoring_and_context_disambiguation(self):
+        """Test that company homepage and privacy links are rejected in favor of the real registration URL."""
+        mixed_doc = (
+            "Company: MegaTech Solutions\n"
+            "Visit our company website: https://www.megatech.io\n"
+            "Read our privacy policy at https://www.megatech.io/legal/privacy-policy for details.\n"
+            "Interested candidates must submit registration here: https://forms.gle/MegaTechDrive2026\n"
+            "Required Skills: Python, Docker\n"
+        )
+        parsed = jd_parser_service.parse_jd_text(mixed_doc)
+        # Top selected application URL must be the registration form, not the corporate homepage
+        self.assertEqual(parsed["application_url"], "https://forms.gle/MegaTechDrive2026")
+        
+        # Verify candidate scoring preserved all links
+        candidates = parsed["application_url_candidates"]
+        urls = [c["url"] for c in candidates]
+        self.assertIn("https://forms.gle/MegaTechDrive2026", urls)
+
+    def test_multi_file_url_prefix_deduplication_and_conflict_flagging(self):
+        """Test multi-file aggregation eliminates truncated prefixes and flags conflicts between distinct links."""
+        # Scenario 1: File 1 has truncated prefix (from partial OCR), File 2 has complete URL
+        file_1 = {
+            "filename": "notice_scan.png",
+            "content": b"Job: Software Dev\nApply link: https://forms.gle/yP4tp",
+            "file_id": uuid.uuid4()
+        }
+        file_2 = {
+            "filename": "email_circular.txt",
+            "content": b"Official Form: https://forms.gle/yP4tpWtmk9VdFFBU8\nEligible: CSE",
+            "file_id": uuid.uuid4()
+        }
+        merged_res = jd_parser_service.parse_multiple_files([file_1, file_2])
+        # The truncated prefix must be eliminated; full URL must be selected
+        self.assertEqual(merged_res["application_url"], "https://forms.gle/yP4tpWtmk9VdFFBU8")
+        candidates = [c["url"] for c in merged_res["application_url_candidates"]]
+        self.assertNotIn("https://forms.gle/yP4tp", candidates)
+        self.assertIn("https://forms.gle/yP4tpWtmk9VdFFBU8", candidates)
+
+        # Scenario 2: Two distinct plausible application URLs trigger conflict review flag
+        file_a = {
+            "filename": "form_notice.txt",
+            "content": b"Registration link: https://forms.gle/DriveBatchA\nTitle: Dev",
+            "file_id": uuid.uuid4()
+        }
+        file_b = {
+            "filename": "portal_notice.txt",
+            "content": b"Apply at company portal: https://megacorp.careers/apply/2026\nTitle: Dev",
+            "file_id": uuid.uuid4()
+        }
+        conflict_res = jd_parser_service.parse_multiple_files([file_a, file_b])
+        cand_urls = [c["url"] for c in conflict_res["application_url_candidates"]]
+        self.assertIn("https://forms.gle/DriveBatchA", cand_urls)
+        self.assertIn("https://megacorp.careers/apply/2026", cand_urls)
+        # Review flags must contain conflict warning
+        flags_text = " ".join(conflict_res["review_flags"])
+        self.assertIn("Multiple plausible application URLs detected", flags_text)
+
+    def test_url_persistence_create_edit_draft_publish_and_student_readback(self):
+        """Verify application URL survives draft creation, editing, publishing, and student readback."""
+        self.current_user = self.officer
+        initial_url = "https://forms.gle/InitialDraftLink12345"
+        updated_url = "https://forms.gle/UpdatedCompleteRegistrationLink67890"
+
+        # 1. Create Draft Job
+        create_payload = {
+            "company_id": self.company.id,
+            "title": "Full Stack Cloud Engineer",
+            "description": "Enterprise cloud services.",
+            "branch_eligibility": ["Computer Science (CSE)"],
+            "required_skills": ["Node.js", "React", "PostgreSQL"],
+            "application_url": initial_url,
+            "status": "draft",
+        }
+        res_create = self.client.post("/api/v1/placement/jobs", json=create_payload)
+        self.assertEqual(res_create.status_code, 200)
+        job_id = res_create.json()["id"]
+        self.assertEqual(res_create.json()["application_url"], initial_url)
+
+        # 2. Edit Job with updated URL
+        edit_payload = {
+            "application_url": updated_url
+        }
+        res_edit = self.client.put(f"/api/v1/placement/jobs/{job_id}", json=edit_payload)
+        self.assertEqual(res_edit.status_code, 200)
+        self.assertEqual(res_edit.json()["application_url"], updated_url)
+
+        # 3. Publish Job
+        res_pub = self.client.post(f"/api/v1/placement/jobs/{job_id}/publish")
+        self.assertEqual(res_pub.status_code, 200)
+        self.assertEqual(res_pub.json()["status"], "open")
+        self.assertEqual(res_pub.json()["application_url"], updated_url)
+
+        # 4. Student Readback
+        self.current_user = self.student_cs
+        res_student = self.client.get(f"/api/v1/placement/jobs/{job_id}")
+        self.assertEqual(res_student.status_code, 200)
+        student_data = res_student.json()
+        self.assertEqual(student_data["application_url"], updated_url)
+
+    def test_attachment_download_exact_bytes_and_filename_rfc6266(self):
+        """Test attachment metadata, exact binary download, RFC 6266 headers, and preview behavior."""
+        # 1. Create two genuine test files in DB & storage mock
+        pdf_bytes = b"%PDF-1.5 Genuine PDF Specification Document Bytes 0xDEADBEEF"
+        png_bytes = b"\x89PNG\r\n\x1a\nGenuine PNG Image Poster Bytes 0xCAFEBABE"
+
+        file_pdf = FileModel(
+            filename="Official JD Brochure (1).pdf",
+            file_type=FileType.OTHER,
+            mime_type="application/pdf",
+            file_size=len(pdf_bytes),
+            bucket="edumatrix-test-files",
+            object_key=f"jobs/test_{uuid.uuid4()}.pdf",
+            department="Placement Cell",
+            status=FileStatus.ACTIVE,
+            uploaded_by=self.officer.id,
+        )
+        file_png = FileModel(
+            filename="Recruitment Poster 2026.png",
+            file_type=FileType.OTHER,
+            mime_type="image/png",
+            file_size=len(png_bytes),
+            bucket="edumatrix-test-files",
+            object_key=f"jobs/test_{uuid.uuid4()}.png",
+            department="Placement Cell",
+            status=FileStatus.ACTIVE,
+            uploaded_by=self.officer.id,
+        )
+        self.db.add_all([file_pdf, file_png])
+        self.db.commit()
+
+        # Mock MinIO storage to return exact bytes by object key
+        storage_map = {
+            file_pdf.object_key: pdf_bytes,
+            file_png.object_key: png_bytes,
+        }
+        from app.services.file_storage.minio_client import minio_client
+        minio_client.download_file = lambda b, o: storage_map.get(o, b"")
+
+        # Create Job with both attachments
+        job = JobPosting(
+            company_id=self.company.id,
+            title="DevOps Lead Engineer",
+            description="Infrastructure automation.",
+            status=JobStatus.OPEN,
+            branch_eligibility=["Computer Science (CSE)"],
+            created_by=self.officer.id,
+        )
+        self.db.add(job)
+        self.db.commit()
+
+        att_pdf = JobPostingAttachment(job_posting_id=job.id, file_id=file_pdf.id, display_order=0)
+        att_png = JobPostingAttachment(job_posting_id=job.id, file_id=file_png.id, display_order=1)
+        self.db.add_all([att_pdf, att_png])
+        self.db.commit()
+
+        # 2. Verify GET /jobs/{id} returns genuine filename and file_size (not null or 'Attached Document')
+        self.current_user = self.student_cs
+        res_job = self.client.get(f"/api/v1/placement/jobs/{job.id}")
+        self.assertEqual(res_job.status_code, 200)
+        atts = res_job.json()["attachments"]
+        self.assertEqual(len(atts), 2)
+        self.assertEqual(atts[0]["filename"], "Official JD Brochure (1).pdf")
+        self.assertEqual(atts[0]["file_size"], len(pdf_bytes))
+        self.assertEqual(atts[0]["mime_type"], "application/pdf")
+        self.assertEqual(atts[1]["filename"], "Recruitment Poster 2026.png")
+        self.assertEqual(atts[1]["file_size"], len(png_bytes))
+
+        # 3. Test Download: Returns exact bytes, Content-Type, and RFC 6266 Content-Disposition
+        res_dl = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{file_pdf.id}/download")
+        self.assertEqual(res_dl.status_code, 200)
+        self.assertEqual(res_dl.content, pdf_bytes)
+        self.assertEqual(res_dl.headers.get("content-type"), "application/pdf")
+        cd_header = res_dl.headers.get("content-disposition", "")
+        self.assertIn("Official JD Brochure (1).pdf", cd_header)
+        self.assertIn("filename*=", cd_header)
+
+        # 4. Test Preview: Returns image bytes with image/png MIME type
+        res_prev = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{file_png.id}/preview")
+        self.assertEqual(res_prev.status_code, 200)
+        self.assertEqual(res_prev.content, png_bytes)
+        self.assertEqual(res_prev.headers.get("content-type"), "image/png")
+
+        # 5. Test Access by integer attachment ID (supporting either UUID or attachment ID)
+        res_att_id = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{att_pdf.id}/download")
+        self.assertEqual(res_att_id.status_code, 200)
+        self.assertEqual(res_att_id.content, pdf_bytes)
+
+        # 6. Test Ineligible Student Access -> 403 Forbidden
+        self.current_user = self.student_mech
+        res_inelig = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{file_pdf.id}/download")
+        self.assertEqual(res_inelig.status_code, 403)
+        self.assertIn("application/json", res_inelig.headers.get("content-type", ""))
+
+        # 7. Test Missing File in Storage -> 404 with JSON detail, not binary garbage
+        minio_client.download_file = lambda b, o: None
+        self.current_user = self.officer
+        res_err = self.client.get(f"/api/v1/placement/jobs/{job.id}/files/{file_pdf.id}/download")
+        self.assertEqual(res_err.status_code, 404)
+        self.assertIn("application/json", res_err.headers.get("content-type", ""))
+        self.assertIn("detail", res_err.json())
+
 
 if __name__ == "__main__":
     unittest.main()

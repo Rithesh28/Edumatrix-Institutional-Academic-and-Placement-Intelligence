@@ -569,6 +569,7 @@ class JdParseResponse(BaseModel):
     selection_rounds: List[str] = Field(default=[], description="Selection / interview rounds")
     application_instructions: Optional[str] = Field(None, description="Instructions or portal link for applying")
     application_url: Optional[str] = Field(None, description="Extracted external application URL (http/https)")
+    application_url_candidates: List[Dict[str, Any]] = Field(default=[], description="Detected candidate application links with context and score")
     
     # File Persistence and Multi-Document Linkage (Phase C)
     file_id: Optional[UUID] = Field(None, description="Persisted primary File ID in files table")

@@ -66,6 +66,26 @@ function StudentJobDetails() {
   const [candidateNotes, setCandidateNotes] = useState('');
   const [submittedApplication, setSubmittedApplication] = useState(null);
 
+  const handlePreviewJobFile = async (jobId, fid, filename) => {
+    const toastId = toast.loading(`Opening preview for ${filename || 'document'}...`);
+    try {
+      await previewJobFileAuth(jobId, fid);
+      toast.success('Preview opened', { id: toastId });
+    } catch (err) {
+      toast.error(err.message || 'Failed to preview file', { id: toastId });
+    }
+  };
+
+  const handleDownloadJobFile = async (jobId, fid, filename) => {
+    const toastId = toast.loading(`Downloading ${filename || 'document'}...`);
+    try {
+      const downloadedAs = await downloadJobFileAuth(jobId, fid, filename);
+      toast.success(`Downloaded ${downloadedAs || filename}`, { id: toastId });
+    } catch (err) {
+      toast.error(err.message || 'Failed to download file', { id: toastId });
+    }
+  };
+
   const jobIdNum = useMemo(() => (id ? parseInt(id, 10) : null), [id]);
 
   // Load Job and Eligibility data on mount / ID change
@@ -746,15 +766,15 @@ function StudentJobDetails() {
                         <div className="flex items-center gap-2 shrink-0">
                           <button
                             type="button"
-                            onClick={() => previewJobFileAuth(selectedJob.id, fid)}
-                            className="px-3 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:text-indigo-600 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold"
+                            onClick={() => handlePreviewJobFile(selectedJob.id, fid, name)}
+                            className="px-3 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:text-indigo-600 border border-gray-200 dark:border-gray-700 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
                           >
                             Preview
                           </button>
                           <button
                             type="button"
-                            onClick={() => downloadJobFileAuth(selectedJob.id, fid, name)}
-                            className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold"
+                            onClick={() => handleDownloadJobFile(selectedJob.id, fid, name)}
+                            className="px-3 py-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 border border-indigo-200 dark:border-indigo-800 rounded-lg text-xs font-semibold cursor-pointer transition-colors"
                           >
                             Download
                           </button>

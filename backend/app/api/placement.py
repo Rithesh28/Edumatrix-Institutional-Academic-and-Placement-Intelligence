@@ -307,7 +307,7 @@ async def bulk_delete_jobs(
 @router.get("/jobs/{job_id}/files/{file_id}/download")
 async def download_job_file(
     job_id: int,
-    file_id: UUID,
+    file_id: str,
     current_user: User = Depends(get_current_user_flexible),
     db: Session = Depends(get_db)
 ):
@@ -316,10 +316,24 @@ async def download_job_file(
     Enforces RBAC:
     - Admins and Placement Officers have full access.
     - Students have access only if the job is OPEN and matches their branch eligibility.
+    Supports either file UUID or attachment integer ID.
     """
     job = placement_service.get_job_posting(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job posting not found")
+
+    # Resolve target file UUID (supporting either UUID or attachment integer ID)
+    target_file_id: Optional[UUID] = None
+    try:
+        target_file_id = UUID(str(file_id))
+    except (ValueError, AttributeError):
+        pass
+
+    if not target_file_id and job.attachments:
+        for att in job.attachments:
+            if str(att.id) == str(file_id):
+                target_file_id = att.file_id
+                break
 
     attached_ids = []
     if job.file_id:
@@ -327,7 +341,7 @@ async def download_job_file(
     if job.attachments:
         attached_ids.extend([att.file_id for att in job.attachments])
 
-    if file_id not in attached_ids:
+    if not target_file_id or target_file_id not in attached_ids:
         raise HTTPException(status_code=404, detail="File is not attached to this job posting")
 
     if current_user.role == UserRole.STUDENT:
@@ -346,24 +360,27 @@ async def download_job_file(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
     try:
-        result = file_service.download_file(db, file_id)
+        result = file_service.download_file(db, target_file_id)
     except Exception as e:
-        logger.error(f"Error downloading job file {file_id}: {e}", exc_info=True)
+        logger.error(f"Error downloading job file {target_file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=404, detail="File content could not be retrieved from storage")
 
     if not result or not result.get('content'):
         raise HTTPException(status_code=404, detail="File content not found in storage")
 
+    from urllib.parse import quote
     content = result['content']
     filename = result.get('filename') or 'job_attachment'
     safe_filename = os.path.basename(filename).replace('"', '')
+    safe_ascii_filename = safe_filename.encode('ascii', 'ignore').decode('ascii') or 'job_attachment'
+    encoded_filename = quote(safe_filename)
     mime_type = result.get('mime_type') or 'application/octet-stream'
 
     return Response(
         content=content,
         media_type=mime_type,
         headers={
-            "Content-Disposition": f'attachment; filename="{safe_filename}"',
+            "Content-Disposition": f'attachment; filename="{safe_ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}',
             "Content-Length": str(len(content)),
             "Access-Control-Expose-Headers": "Content-Disposition",
         }
@@ -373,7 +390,7 @@ async def download_job_file(
 @router.get("/jobs/{job_id}/files/{file_id}/preview")
 async def preview_job_file(
     job_id: int,
-    file_id: UUID,
+    file_id: str,
     current_user: User = Depends(get_current_user_flexible),
     db: Session = Depends(get_db)
 ):
@@ -382,10 +399,24 @@ async def preview_job_file(
     Enforces RBAC:
     - Admins and Placement Officers have full access.
     - Students have access only if the job is OPEN and matches their branch eligibility.
+    Supports either file UUID or attachment integer ID.
     """
     job = placement_service.get_job_posting(db, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job posting not found")
+
+    # Resolve target file UUID (supporting either UUID or attachment integer ID)
+    target_file_id: Optional[UUID] = None
+    try:
+        target_file_id = UUID(str(file_id))
+    except (ValueError, AttributeError):
+        pass
+
+    if not target_file_id and job.attachments:
+        for att in job.attachments:
+            if str(att.id) == str(file_id):
+                target_file_id = att.file_id
+                break
 
     attached_ids = []
     if job.file_id:
@@ -393,7 +424,7 @@ async def preview_job_file(
     if job.attachments:
         attached_ids.extend([att.file_id for att in job.attachments])
 
-    if file_id not in attached_ids:
+    if not target_file_id or target_file_id not in attached_ids:
         raise HTTPException(status_code=404, detail="File is not attached to this job posting")
 
     if current_user.role == UserRole.STUDENT:
@@ -412,17 +443,20 @@ async def preview_job_file(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
     try:
-        result = file_service.download_file(db, file_id)
+        result = file_service.download_file(db, target_file_id)
     except Exception as e:
-        logger.error(f"Error previewing job file {file_id}: {e}", exc_info=True)
+        logger.error(f"Error previewing job file {target_file_id}: {e}", exc_info=True)
         raise HTTPException(status_code=404, detail="File content could not be retrieved from storage")
 
     if not result or not result.get('content'):
         raise HTTPException(status_code=404, detail="File content not found in storage")
 
+    from urllib.parse import quote
     content = result['content']
     filename = result.get('filename') or 'job_attachment'
     safe_filename = os.path.basename(filename).replace('"', '')
+    safe_ascii_filename = safe_filename.encode('ascii', 'ignore').decode('ascii') or 'job_attachment'
+    encoded_filename = quote(safe_filename)
     mime_type = result.get('mime_type') or 'application/octet-stream'
 
     # Display inline for previewable formats (images, pdf, text)
@@ -437,7 +471,7 @@ async def preview_job_file(
         content=content,
         media_type=mime_type,
         headers={
-            "Content-Disposition": f'{disposition}; filename="{safe_filename}"',
+            "Content-Disposition": f'{disposition}; filename="{safe_ascii_filename}"; filename*=UTF-8\'\'{encoded_filename}',
             "Content-Length": str(len(content)),
             "Access-Control-Expose-Headers": "Content-Disposition",
         }

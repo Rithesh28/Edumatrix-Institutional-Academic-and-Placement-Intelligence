@@ -35,8 +35,13 @@ class TestExternalApplicationUrl(unittest.TestCase):
         # 2. Login as Student (adi01@gmail.com, ID: 1)
         s_login = requests.post(
             f"{BASE_URL}/auth/login",
-            data={"username": "adi01@gmail.com", "password": "54321"}
+            data={"username": "adi01@gmail.com", "password": "12345"}
         )
+        if s_login.status_code != 200:
+            s_login = requests.post(
+                f"{BASE_URL}/auth/login",
+                data={"username": "adi01@gmail.com", "password": "54321"}
+            )
         assert s_login.status_code == 200, f"Student login failed: {s_login.text}"
         cls.s_token = s_login.json()["access_token"]
         cls.s_headers = {"Authorization": f"Bearer {cls.s_token}"}

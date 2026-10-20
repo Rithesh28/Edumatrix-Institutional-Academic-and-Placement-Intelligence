@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 from ..core.database import Base
 import enum
+from typing import Optional
 
 
 class JobStatus(str, enum.Enum):
@@ -36,6 +37,26 @@ class JobPostingAttachment(Base):
     job_posting = relationship("JobPosting", back_populates="attachments")
     file = relationship("File", lazy="joined")
     
+    @property
+    def filename(self) -> Optional[str]:
+        """Original filename of the attached file."""
+        return self.file.filename if self.file else None
+
+    @property
+    def file_name(self) -> Optional[str]:
+        """Alias for original filename."""
+        return self.file.filename if self.file else None
+
+    @property
+    def file_size(self) -> Optional[int]:
+        """Size of the attached file in bytes."""
+        return self.file.file_size if self.file else None
+
+    @property
+    def mime_type(self) -> Optional[str]:
+        """MIME type of the attached file."""
+        return self.file.mime_type if self.file else None
+
     def __repr__(self):
         return f"<JobPostingAttachment {self.id}: job={self.job_posting_id} file={self.file_id}>"
 
