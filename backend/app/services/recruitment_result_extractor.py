@@ -49,6 +49,33 @@ HEADER_SYNONYMS = {
     ]
 }
 
+# Non-candidate document titles, announcements, exam duty banners, and page headings
+BANNER_PATTERNS = [
+    r"campus\s+(?:recruitment|placement|hiring)",
+    r"recruitment\s+drive",
+    r"shortlist(?:ed)?\s+candidates?",
+    r"selection\s+list",
+    r"final\s+(?:results?|selection|offers?)",
+    r"examination\s+duty",
+    r"exam\s+duty",
+    r"duty\s+chart",
+    r"vtu\s+(?:theory\s+)?exam",
+    r"college\s+of\s+engineering",
+    r"department\s+of\s+",
+    r"training\s+(?:&|and)\s+placement",
+    r"coordinator\s+signature",
+    r"signature\s+of\s+(?:hod|principal|coordinator|officer)",
+    r"page\s+\d+\s+(?:of|/)\s+\d+",
+    r"date\s*:\s*\d+",
+    r"venue\s*:\s*",
+    r"time\s*:\s*\d+",
+    r"semester\s*:\s*",
+    r"session\s*:\s*",
+    r"room\s+no\b",
+    r"total\s+candidates?",
+    r"sl\s*no\b|serial\s*no\b",
+]
+
 
 class RecruitmentResultExtractionError(ValueError):
     """Raised when recruitment result extraction fails."""
@@ -87,10 +114,24 @@ class RecruitmentResultExtractor:
             raise RecruitmentResultExtractionError(f"Unsupported result file format: '{ext}'. Supported formats: .csv, .xlsx, .xls, .pdf, .docx, .txt, .png, .jpg, .jpeg")
 
     # =========================================================================
-    # IMAGE OCR EXTRACTION
+    # IMAGE OCR EXTRACTION (SPATIAL TABLE RECONSTRUCTION)
     # =========================================================================
     def _extract_image(self, file_bytes: bytes) -> Dict[str, Any]:
-        """Extract candidate rows from image files using OCR."""
+        """Extract candidate rows from image files using spatial OCR with fallback."""
+        # 1. Attempt spatial image_to_data extraction (preserves row/column alignment)
+        try:
+            from app.services.ocr_service import ocr_service
+            ocr_data = ocr_service.extract_ocr_data_from_image_bytes(file_bytes)
+            if ocr_data and any(str(t).strip() for t in ocr_data.get("text", [])):
+                res = self._parse_candidates_from_ocr_data(ocr_data, source_type="image", source_page=1)
+                if res and res.get("total_rows", 0) > 0:
+                    return res
+        except RecruitmentResultExtractionError:
+            raise
+        except Exception as spatial_err:
+            logger.warning(f"Spatial OCR table parsing failed on image: {spatial_err}; trying text fallback...")
+
+        # 2. Fallback to image_to_string text extraction
         try:
             from app.services.ocr_service import ocr_service
             text = ocr_service.extract_text_from_image_bytes(file_bytes)
@@ -102,19 +143,427 @@ class RecruitmentResultExtractor:
 
         return self._parse_candidates_from_ocr_text(text, source_type="image")
 
+    def _is_title_banner(self, text: str) -> bool:
+        """Identify non-candidate document titles, announcements, exam duty banners, or labels (excluding column header rows)."""
+        if not text:
+            return True
+        t = str(text).strip().lower()
+        if len(t) < 3:
+            return True
+        for pat in BANNER_PATTERNS:
+            if re.search(pat, t, re.IGNORECASE):
+                return True
+        return False
+
+    def _is_banner_text(self, text: str) -> bool:
+        """Identify non-candidate document titles, announcements, exam duty banners, or labels."""
+        if not text:
+            return True
+        t = str(text).strip().lower()
+        if len(t) < 3:
+            return True
+        for pat in BANNER_PATTERNS:
+            if re.search(pat, t, re.IGNORECASE):
+                return True
+
+        # Reject pure table header lines (e.g. "USN / Register Number Name Email Status")
+        header_kw = [
+            "usn", "register number", "reg no", "roll no", "candidate name", "student name",
+            "email", "status", "department", "branch", "discipline", "remarks", "selection status"
+        ]
+        matches = sum(1 for kw in header_kw if kw in t)
+        if matches >= 2 and "@" not in t and not re.search(r"\b[0-9][a-zA-Z]{2}[0-9]{2}[a-zA-Z0-9]{2,5}\b", t, re.IGNORECASE):
+            return True
+
+        return False
+
+    def _detect_header_row(self, row_tokens: List[Dict[str, Any]]) -> Tuple[bool, Dict[str, Tuple[int, int]]]:
+        """
+        Check if a visual row represents a table column header.
+        Returns (is_header, mapping of canonical_col -> (left_x, right_x)).
+        """
+        row_text = " ".join(t["text"] for t in row_tokens).lower()
+        norm_row = self._normalize_key(row_text)
+
+        detected_cols: Dict[str, Tuple[int, int]] = {}
+        for canon_field, syns in HEADER_SYNONYMS.items():
+            for syn in syns:
+                norm_syn = self._normalize_key(syn)
+                if norm_syn in norm_row:
+                    matched_tokens = [
+                        t for t in row_tokens
+                        if self._normalize_key(t["text"]) in norm_syn or norm_syn in self._normalize_key(t["text"])
+                    ]
+                    if matched_tokens:
+                        col_left = min(t["left"] for t in matched_tokens)
+                        col_right = max(t["right"] for t in matched_tokens)
+                        detected_cols[canon_field] = (col_left, col_right)
+                        break
+
+        # A table header row requires at least 2 detected distinct column headers
+        is_header = len(detected_cols) >= 2
+        return is_header, detected_cols
+
+    def _classify_row_tokens(self, tokens: List[Dict[str, Any]]) -> Tuple[str, str, str, str, str]:
+        """
+        Classify row tokens into (usn, name, email, status, branch) when column headers are absent.
+        """
+        usn_parts = []
+        name_parts = []
+        email_parts = []
+        status_parts = []
+        branch_parts = []
+
+        for t in tokens:
+            w = t["text"]
+            w_clean = re.sub(r"[\s\-\/\.]+", "", w).upper()
+            if re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", w):
+                email_parts.append(w)
+            elif re.search(r"\b[4A0-9][a-zA-Z]{2}[0-9]{2}[a-zA-Z0-9]{2,5}\b", w_clean):
+                usn_parts.append(w)
+            elif w.lower() in ["selected", "rejected", "shortlisted", "absent", "cleared", "placed", "hired", "offer"]:
+                status_parts.append(w)
+            elif w.upper() in ["CSE", "ISE", "AIML", "AIDS", "ECE", "EEE", "ME", "CV", "MCA", "MBA"]:
+                branch_parts.append(w)
+            else:
+                name_parts.append(w)
+
+        return (
+            " ".join(usn_parts).strip(),
+            " ".join(name_parts).strip(),
+            " ".join(email_parts).strip(),
+            " ".join(status_parts).strip(),
+            " ".join(branch_parts).strip()
+        )
+
+    def _normalize_candidate_fields(
+        self, raw_usn: str, raw_name: str, raw_email: str, raw_status: str, full_row_text: str = ""
+    ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+        """
+        Conservatively normalize fields, resolve accidental column merges, and clean noise.
+        """
+        usn = str(raw_usn or "").strip("‘'\"-–—.:;| \t")
+        name = str(raw_name or "").strip("‘'\"-–—.:;|•*▪ \t")
+        email = str(raw_email or "").strip("‘'\"-–—.:;| \t")
+        status = str(raw_status or "").strip()
+        full_text = str(full_row_text or "").strip()
+
+        # 1. Email extraction & dot-correction
+        email_clean = ""
+        email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-.]+", full_text or email)
+        if email_match:
+            extracted = email_match.group(0).lower()
+            if not re.search(r"\.[a-zA-Z]{2,4}$", extracted):
+                extracted = re.sub(r"(gmail|yahoo|hotmail|outlook|vcet|edu)(com|in|org|net)$", r"\1.\2", extracted)
+            email_clean = extracted
+        elif "@" in email:
+            email_clean = email.lower()
+
+        # 2. Status extraction and normalization
+        status_clean = "shortlisted"
+        for term in ["selected", "rejected", "shortlisted", "absent", "cleared", "not selected", "placed", "hired", "offer"]:
+            if re.search(r"\b" + term + r"\b", status, re.IGNORECASE) or re.search(r"\b" + term + r"\b", full_text, re.IGNORECASE):
+                status_clean = self._normalize_status(term)
+                break
+
+        # 3. USN extraction & common OCR misreadings
+        usn_clean = None
+        usn_raw_match = None
+        usn_match = re.search(r"\b([4AH0-9])([A-Za-z0-9]{2})\s*([0-9]{2})\s*([A-Za-z0-9]{1,3})\s*([0-9]{2,4})\b", usn or full_text)
+        if not usn_match and full_text:
+            usn_match = re.search(r"\b([4AH0-9])([A-Za-z0-9]{2})\s*([0-9]{2})\s*([A-Za-z0-9]{1,3})\s*([0-9]{2,4})\b", full_text)
+
+        if usn_match:
+            usn_raw_match = usn_match.group(0)
+            c1, c2, yr, br, num = usn_match.groups()
+            c2_clean = c2.upper()
+            c1 = "4" if c1[0].upper() in ["A", "H"] and c2_clean == "VP" else c1[0].upper()
+            c2 = c2_clean
+            if len(br) == 1 and len(num) == 4 and num[0] in ["9", "5", "8", "S"]:
+                br = br + "S"
+                num = num[1:]
+            br_fixed = br.upper().replace("1", "I").replace("L", "I").replace("9", "S").replace("5", "S")
+            usn_clean = f"{c1}{c2}{yr}{br_fixed}{num}"
+        elif usn:
+            merged_match = re.match(r"^([0-9][a-zA-Z]{2}[0-9]{2}[a-zA-Z0-9]{2,5}[0-9]{2,4})([a-zA-Z].*)$", usn.strip())
+            if merged_match:
+                usn_clean = merged_match.group(1).upper()
+                spilled = merged_match.group(2)
+                name = (spilled + " " + name).strip()
+            else:
+                usn_clean = usn.strip().upper()
+
+        # 4. Name extraction & isolation
+        rem = name or ""
+        if not rem or not re.search(r"[a-zA-Z]{2,}", rem) or (usn_raw_match and usn_raw_match in rem):
+            rem = full_text or ""
+
+        if usn_raw_match:
+            rem = re.sub(re.escape(usn_raw_match), "", rem, flags=re.IGNORECASE)
+        if usn_clean:
+            rem = re.sub(re.escape(usn_clean), "", rem, flags=re.IGNORECASE)
+        if usn:
+            rem = re.sub(re.escape(usn), "", rem, flags=re.IGNORECASE)
+        # Remove standalone digits from split USN tokens
+        rem = re.sub(r"\b\d{3,5}\b", "", rem)
+        rem = re.sub(r"[a-zA-Z0-9_.+-]*@[a-zA-Z0-9-.]*", "", rem)
+        for term in ["selected", "rejected", "shortlisted", "absent", "cleared", "not selected", "placed", "hired", "offer"]:
+            rem = re.sub(r"\b" + term + r"\b", "", rem, flags=re.IGNORECASE)
+
+        rem = re.sub(r"^\d+[\.\)\-\s]+\s*", "", rem)
+        rem = re.sub(r"[—\-–_.:;|~^`=]+", " ", rem)
+        rem = re.sub(r"\s+", " ", rem).strip()
+        rem = re.sub(r"([a-z])([A-Z])", r"\1 \2", rem)
+        name_clean = rem if len(rem) >= 2 else (name or None)
+
+        return (usn_clean or None, name_clean or None, email_clean or None, status_clean or "shortlisted")
+
+    def _is_valid_candidate_row(
+        self, usn: Optional[str], name: Optional[str], email: Optional[str], status: Optional[str], full_row_text: str
+    ) -> bool:
+        """
+        Structural validation to reject false candidate records:
+        - Document titles, banners, date labels, exam duties, and table headers are rejected.
+        - Rows without USN or email must have a valid student name and non-banner structure.
+        """
+        if self._is_banner_text(full_row_text):
+            return False
+
+        # Reject if all/majority of tokens in the row match column header synonyms
+        tokens = [self._normalize_key(w) for w in full_row_text.split() if self._normalize_key(w)]
+        if tokens:
+            header_count = 0
+            for t in tokens:
+                for syns in HEADER_SYNONYMS.values():
+                    if any(self._normalize_key(s) == t for s in syns):
+                        header_count += 1
+                        break
+            if header_count >= len(tokens) * 0.7:
+                return False
+
+        # Reject if name matches non-candidate keywords
+        if name:
+            norm_name = name.lower()
+            non_candidate_names = [
+                "usn", "name", "candidate name", "student name", "email", "status",
+                "department", "branch", "remarks", "result", "selection status",
+                "campus recruitment", "examination duty", "vtu theory exam", "duty chart",
+                "register number", "total candidates", "coordinator signature", "principal"
+            ]
+            if any(ncn in norm_name for ncn in non_candidate_names):
+                return False
+
+        # Must have at least one strong identifier or valid candidate attributes
+        if usn and len(usn) >= 4:
+            return True
+        if email and "@" in email and "." in email:
+            return True
+        if name and len(name) >= 3 and not re.match(r"^[\d\.\s\-\/\:]+$", name):
+            if status and status.lower() in ["selected", "shortlisted", "rejected", "absent", "cleared"]:
+                return True
+
+        return False
+
+    def _parse_candidates_from_ocr_data(
+        self, ocr_data: Dict[str, Any], source_type: str = "document", source_page: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Parse structured candidate records using spatial bounding boxes from Tesseract image_to_data.
+        - Clusters words into horizontal rows using vertical coordinates.
+        - Identifies table header row and establishes column horizontal boundaries.
+        - Rejects document titles, announcement banners, table headers, and unrelated fragments.
+        - Slots words into detected columns (USN, Name, Email, Status, Branch) without shifting.
+        - Conservatively normalizes noisy USNs.
+        """
+        import statistics
+
+        texts = ocr_data.get("text", [])
+        lefts = ocr_data.get("left", [])
+        tops = ocr_data.get("top", [])
+        widths = ocr_data.get("width", [])
+        heights = ocr_data.get("height", [])
+        confs = ocr_data.get("conf", [])
+
+        tokens: List[Dict[str, Any]] = []
+        for i in range(len(texts)):
+            w_text = str(texts[i]).strip()
+            if not w_text or w_text in ["|", "~", "^", "—", "_", "`"]:
+                continue
+            left = int(lefts[i])
+            top = int(tops[i])
+            w = int(widths[i])
+            h = int(heights[i])
+            conf = float(confs[i]) if i < len(confs) and confs[i] != -1 else 50.0
+            tokens.append({
+                "text": w_text,
+                "left": left,
+                "top": top,
+                "right": left + w,
+                "bottom": top + h,
+                "width": w,
+                "height": h,
+                "center_x": left + w / 2,
+                "center_y": top + h / 2,
+                "conf": conf,
+            })
+
+        if not tokens:
+            raise RecruitmentResultExtractionError(f"{source_type.capitalize()} OCR extracted no readable text tokens.")
+
+        # Vertical clustering into visual rows
+        med_h = statistics.median([t["height"] for t in tokens]) if tokens else 10
+        y_tol = max(8, int(med_h * 0.6))
+        tokens.sort(key=lambda t: (t["top"], t["left"]))
+
+        v_rows: List[Dict[str, Any]] = []
+        for t in tokens:
+            matched_row = None
+            for r in v_rows:
+                if abs(t["center_y"] - r["avg_y"]) <= y_tol:
+                    matched_row = r
+                    break
+            if matched_row:
+                matched_row["tokens"].append(t)
+                matched_row["min_top"] = min(matched_row["min_top"], t["top"])
+                matched_row["max_bottom"] = max(matched_row["max_bottom"], t["bottom"])
+                matched_row["avg_y"] = sum(tok["center_y"] for tok in matched_row["tokens"]) / len(matched_row["tokens"])
+            else:
+                v_rows.append({
+                    "tokens": [t],
+                    "min_top": t["top"],
+                    "max_bottom": t["bottom"],
+                    "avg_y": t["center_y"],
+                })
+
+        for r in v_rows:
+            r["tokens"].sort(key=lambda t: t["left"])
+            r["text"] = " ".join(t["text"] for t in r["tokens"])
+
+        # Detect Header Row and Column Boundaries
+        header_row_idx: Optional[int] = None
+        detected_col_spans: Dict[str, Tuple[int, int]] = {}
+
+        for r_idx, r in enumerate(v_rows):
+            is_hdr, col_spans = self._detect_header_row(r["tokens"])
+            if is_hdr:
+                header_row_idx = r_idx
+                detected_col_spans = col_spans
+                break
+            if self._is_banner_text(r["text"]):
+                continue
+
+        # Compute horizontal boundary cutoffs if header row was detected
+        col_zones: List[Tuple[str, float, float]] = []
+        canonical_headers: List[str] = ["USN", "Name", "Email", "Status"]
+
+        if header_row_idx is not None and detected_col_spans:
+            sorted_cols = sorted(detected_col_spans.items(), key=lambda x: x[1][0])
+            canonical_headers = [col_name.upper() for col_name, _ in sorted_cols]
+            
+            cutoffs = [0.0]
+            for i in range(len(sorted_cols) - 1):
+                mid = (sorted_cols[i][1][1] + sorted_cols[i + 1][1][0]) / 2.0
+                cutoffs.append(mid)
+            cutoffs.append(float("inf"))
+
+            for i, (col_name, _) in enumerate(sorted_cols):
+                col_zones.append((col_name, cutoffs[i], cutoffs[i + 1]))
+
+        # Data rows extraction
+        start_row_idx = (header_row_idx + 1) if header_row_idx is not None else 0
+        data_rows: List[List[str]] = []
+
+        for r_idx in range(start_row_idx, len(v_rows)):
+            r = v_rows[r_idx]
+            row_text = r["text"]
+
+            if self._is_banner_text(row_text):
+                continue
+
+            is_rep_hdr, _ = self._detect_header_row(r["tokens"])
+            if is_rep_hdr:
+                continue
+
+            usn_val = ""
+            name_val = ""
+            email_val = ""
+            status_val = ""
+            branch_val = ""
+
+            if col_zones:
+                cells: Dict[str, List[str]] = {col_name: [] for col_name, _, _ in col_zones}
+                for t in r["tokens"]:
+                    cx = t["center_x"]
+                    assigned_col = None
+                    for col_name, left_bound, right_bound in col_zones:
+                        if left_bound <= cx < right_bound:
+                            assigned_col = col_name
+                            break
+                    if not assigned_col:
+                        assigned_col = col_zones[-1][0]
+                    cells[assigned_col].append(t["text"])
+
+                usn_val = " ".join(cells.get("usn", [])).strip()
+                name_val = " ".join(cells.get("name", [])).strip()
+                email_val = " ".join(cells.get("email", [])).strip()
+                status_val = " ".join(cells.get("status", [])).strip()
+                branch_val = " ".join(cells.get("branch", [])).strip()
+            else:
+                usn_val, name_val, email_val, status_val, branch_val = self._classify_row_tokens(r["tokens"])
+
+            usn_clean, name_clean, email_clean, status_clean = self._normalize_candidate_fields(
+                usn_val, name_val, email_val, status_val, row_text
+            )
+
+            if not self._is_valid_candidate_row(usn_clean, name_clean, email_clean, status_clean, row_text):
+                continue
+
+            if col_zones:
+                row_items = []
+                for h in canonical_headers:
+                    h_lower = h.lower()
+                    if h_lower == "usn":
+                        row_items.append(usn_clean or "")
+                    elif h_lower == "name":
+                        row_items.append(name_clean or "")
+                    elif h_lower == "email":
+                        row_items.append(email_clean or "")
+                    elif h_lower == "status":
+                        row_items.append(status_clean or "shortlisted")
+                    elif h_lower == "branch":
+                        row_items.append(branch_val or "")
+                    else:
+                        row_items.append("")
+                data_rows.append(row_items)
+            else:
+                data_rows.append([usn_clean or "", name_clean or "", email_clean or "", status_clean or "shortlisted"])
+
+        if not data_rows:
+            raise RecruitmentResultExtractionError(
+                f"Could not extract any candidate records from the {source_type} OCR output. "
+                "Please verify that the document contains recognizable student USNs, names, or emails."
+            )
+
+        return self._build_extracted_result(canonical_headers, data_rows, source_page=source_page)
+
     def _parse_candidates_from_ocr_text(
         self, text: str, source_type: str = "document", source_page: int = 1
     ) -> Dict[str, Any]:
         """
         Parse structured candidate records from OCR text output.
         Handles delimited text, aligned column text, and free-form pattern matching.
+        Enforces rejection of document banners, examination duties, and table headers.
         """
         lines = [line.strip() for line in text.splitlines() if line.strip()]
         if not lines:
             raise RecruitmentResultExtractionError(f"{source_type.capitalize()} OCR extracted no readable text lines.")
 
-        # Filter out generic header/banner lines like "--- Page 1 ---"
         clean_lines = [l for l in lines if not re.match(r"^---\s*Page\s*\d+\s*---$", l, re.IGNORECASE)]
+        if not clean_lines:
+            raise RecruitmentResultExtractionError(f"{source_type.capitalize()} OCR extracted no readable data lines.")
+
+        # Filter out document title and announcement banners (preserving table header lines for structural parsing)
+        clean_lines = [l for l in clean_lines if not self._is_title_banner(l)]
         if not clean_lines:
             raise RecruitmentResultExtractionError(f"{source_type.capitalize()} OCR extracted no readable data lines.")
 
@@ -124,16 +573,24 @@ class RecruitmentResultExtractor:
                 reader = csv.reader(clean_lines, delimiter=candidate_delim)
                 raw_rows = [row for row in reader if any(cell.strip() for cell in row)]
                 if len(raw_rows) >= 2:
-                    header_row = raw_rows[0]
-                    data_rows = raw_rows[1:]
-                    return self._build_extracted_result(header_row, data_rows, source_page=source_page)
+                    row_0_text = " ".join(raw_rows[0]).lower()
+                    if any(k in row_0_text for k in ["usn", "roll", "reg", "name", "email", "status", "branch"]):
+                        header_row = raw_rows[0]
+                        data_rows = [r for r in raw_rows[1:] if not self._is_banner_text(" ".join(r))]
+                    else:
+                        header_row = ["USN", "Name", "Email", "Status"]
+                        data_rows = [r for r in raw_rows if not self._is_banner_text(" ".join(r))]
+                    if data_rows:
+                        return self._build_extracted_result(header_row, data_rows, source_page=source_page)
 
         # Tabular whitespace check: if header line has 2+ columns separated by 2+ spaces
         tokens_line_0 = re.split(r"\s{2,}|\t", clean_lines[0])
-        if len(tokens_line_0) >= 2 and any(k in clean_lines[0].lower() for k in ["usn", "roll", "name", "email", "status", "candidate"]):
+        if len(tokens_line_0) >= 2 and any(k in clean_lines[0].lower() for k in ["usn", "roll", "reg", "name", "email", "status", "candidate", "branch"]):
             headers = [t.strip() for t in tokens_line_0 if t.strip()]
             data_rows = []
             for line in clean_lines[1:]:
+                if self._is_banner_text(line):
+                    continue
                 parts = [p.strip() for p in re.split(r"\s{2,}|\t", line) if p.strip()]
                 if parts:
                     data_rows.append(parts)
@@ -144,15 +601,15 @@ class RecruitmentResultExtractor:
         headers = ["USN", "Name", "Email", "Status"]
         data_rows = []
         for line in clean_lines:
-            # Check email
-            email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", line)
-            email = email_match.group(0) if email_match else ""
+            if self._is_banner_text(line):
+                continue
 
-            # Check USN pattern
-            usn_match = re.search(r"\b[0-9][a-zA-Z]{2}[0-9]{2}[a-zA-Z]{2}[0-9]{3}\b|\b[a-zA-Z]{2,4}[0-9]{5,10}\b", line, re.IGNORECASE)
+            email_match = re.search(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", line)
+            email = email_match.group(0).lower() if email_match else ""
+
+            usn_match = re.search(r"\b[0-9][a-zA-Z]{2}[0-9]{2}[a-zA-Z]{0,3}[0-9]{2,4}\b|\b[a-zA-Z]{2,4}[0-9]{5,10}\b", line, re.IGNORECASE)
             usn = usn_match.group(0).upper() if usn_match else ""
 
-            # Remainder as name / status
             rem = line
             if email:
                 rem = rem.replace(email, "")
@@ -161,16 +618,20 @@ class RecruitmentResultExtractor:
             rem = rem.strip(" ,-|:\t")
 
             status = "shortlisted"
-            for term in ["selected", "rejected", "shortlisted", "absent", "cleared"]:
+            for term in ["selected", "rejected", "shortlisted", "absent", "cleared", "placed", "hired", "offer"]:
                 if re.search(r"\b" + term + r"\b", rem, re.IGNORECASE):
                     status = term
                     rem = re.sub(r"\b" + term + r"\b", "", rem, flags=re.IGNORECASE).strip(" ,-|:\t")
                     break
 
             name = rem
-            # Filter out non-candidate lines (like pure document titles or dates)
-            if usn or email or (name and len(name) >= 3 and not re.match(r"^(shortlist|announcement|candidates|page\s*\d+|date|company)", name, re.IGNORECASE)):
-                data_rows.append([usn, name, email, status])
+            name = re.sub(r"^\d+[\.\)\-\s]+\s*", "", name).strip("‘'\"-–—.:;|•*▪ \t")
+
+            # Validate before adding
+            if not self._is_valid_candidate_row(usn, name, email, status, line):
+                continue
+
+            data_rows.append([usn, name, email, status])
 
         if not data_rows:
             raise RecruitmentResultExtractionError(
@@ -373,6 +834,34 @@ class RecruitmentResultExtractor:
             logger.info("PDF contained no selectable tables; attempting scanned PDF OCR extraction...")
             try:
                 from app.services.ocr_service import ocr_service
+                # 1. Attempt spatial page OCR extraction
+                try:
+                    ocr_pages = ocr_service.extract_ocr_data_pages_from_scanned_pdf_bytes(file_bytes)
+                    if ocr_pages:
+                        all_page_rows: List[Tuple[List[str], int]] = []
+                        canonical_hdrs: Optional[List[str]] = None
+                        for p_idx, p_data in enumerate(ocr_pages, start=1):
+                            if not p_data or not any(str(t).strip() for t in p_data.get("text", [])):
+                                continue
+                            try:
+                                p_res = self._parse_candidates_from_ocr_data(p_data, source_type="scanned_pdf", source_page=p_idx)
+                                if p_res and p_res.get("rows"):
+                                    if canonical_hdrs is None:
+                                        canonical_hdrs = p_res.get("headers", ["USN", "Name", "Email", "Status"])
+                                    for r in p_res["rows"]:
+                                        row_cells = [
+                                            r.get(h.lower()) or r.get("raw_data", {}).get(h, "")
+                                            for h in canonical_hdrs
+                                        ]
+                                        all_page_rows.append((row_cells, p_idx))
+                            except Exception as page_e:
+                                logger.debug(f"Page {p_idx} spatial OCR extraction skipped: {page_e}")
+                        if canonical_hdrs and all_page_rows:
+                            return self._build_extracted_result_with_pages(canonical_hdrs, all_page_rows)
+                except Exception as spatial_pdf_err:
+                    logger.warning(f"Spatial OCR table parsing on scanned PDF failed: {spatial_pdf_err}; falling back to text OCR...")
+
+                # 2. Text OCR fallback
                 ocr_text = ocr_service.extract_text_from_scanned_pdf_bytes(file_bytes)
                 if ocr_text and not ocr_text.startswith("Error:") and not ocr_text.startswith("Scanned PDF Error:"):
                     return self._parse_candidates_from_ocr_text(ocr_text, source_type="scanned_pdf")

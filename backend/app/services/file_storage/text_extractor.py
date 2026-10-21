@@ -177,12 +177,49 @@ class TextExtractor:
                     # Fallback to PyPDF2 if pdfplumber returns empty
                     logger.warning("pdfplumber returned empty text, trying PyPDF2...")
                     result = self._extract_pdf_pypdf2(file_path, content)
-                    result['extractor_used'] = 'PyPDF2 (fallback)'
-                    return result
+                    if result.get('success') and result.get('text', '').strip():
+                        result['extractor_used'] = 'PyPDF2 (fallback)'
+                        return result
+                    
+                    # Tertiary Fallback: Scanned PDF OCR extraction
+                    logger.info("Native PDF extractors returned empty text; attempting scanned-PDF OCR tertiary fallback...")
+                    return self._extract_pdf_scanned_ocr(file_path, content)
                 
         except Exception as e:
             logger.warning(f"pdfplumber failed: {str(e)}, trying PyPDF2...")
-            return self._extract_pdf_pypdf2(file_path, content)
+            result = self._extract_pdf_pypdf2(file_path, content)
+            if result.get('success') and result.get('text', '').strip():
+                result['extractor_used'] = 'PyPDF2 (fallback)'
+                return result
+            logger.info("PyPDF2 failed or returned empty; attempting scanned-PDF OCR tertiary fallback...")
+            return self._extract_pdf_scanned_ocr(file_path, content)
+
+    def _extract_pdf_scanned_ocr(self, file_path: str, content: Optional[bytes] = None) -> Dict[str, Any]:
+        """Tertiary fallback: extract text from scanned PDF using ocr_service."""
+        result = {
+            'success': False,
+            'text': '',
+            'error': None,
+            'extractor_used': 'ocr_service (scanned PDF fallback)',
+            'metadata': {'page_count': 0, 'hyperlinks': []}
+        }
+        try:
+            from app.services.ocr_service import ocr_service
+            pdf_bytes = content if content is not None else self._get_content_bytes(file_path)
+            ocr_text = ocr_service.extract_text_from_scanned_pdf_bytes(pdf_bytes)
+            if ocr_text and not ocr_text.startswith("Error:") and not ocr_text.startswith("Scanned PDF Error:"):
+                result['text'] = ocr_text
+                result['success'] = True
+                result['metadata']['page_count'] = max(1, ocr_text.count("--- Page "))
+                logger.info(f"📄 Extracted {len(ocr_text)} chars from scanned PDF via OCR fallback")
+                return result
+            else:
+                result['error'] = ocr_text or "Scanned PDF OCR returned empty text."
+                return result
+        except Exception as ocr_err:
+            logger.warning(f"Scanned PDF OCR fallback failed: {ocr_err}")
+            result['error'] = f"Native PDF extractors returned empty text and OCR fallback failed: {str(ocr_err)}"
+            return result
     
     def _extract_pdf_pypdf2(self, file_path: str, content: Optional[bytes] = None) -> Dict[str, Any]:
         """Extract text from PDF using PyPDF2 (fallback)."""

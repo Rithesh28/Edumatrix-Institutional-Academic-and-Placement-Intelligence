@@ -18,6 +18,7 @@ Never automatically confirms a match. Retains full evidence and alternatives.
 import re
 import logging
 from typing import Dict, Any, List, Optional, Tuple, Set
+from difflib import SequenceMatcher
 from sqlalchemy.orm import Session, joinedload
 
 from ..models.user import User, UserRole
@@ -26,6 +27,11 @@ from ..models.recruitment_result import RecruitmentResultReviewState
 
 logger = logging.getLogger(__name__)
 
+GENERIC_NAME_TOKENS = {
+    "kumar", "kumari", "singh", "sharma", "devi", "prasad", "lal", "babu",
+    "rao", "shetty", "bhat", "hegde", "gowda", "poojary", "acharya", "nayak", "pai", "kamath"
+}
+
 
 def normalize_usn(val: Optional[str]) -> Optional[str]:
     """Clean USN / Roll number: uppercase, remove spaces, hyphens, slashes."""
@@ -33,6 +39,18 @@ def normalize_usn(val: Optional[str]) -> Optional[str]:
         return None
     cleaned = re.sub(r"[\s\-\/\.]+", "", str(val)).upper()
     return cleaned if len(cleaned) >= 3 else None
+
+
+def is_identity_changing_usn_correction(raw_val: Optional[str], norm_val: Optional[str]) -> bool:
+    """
+    Determine if the transformation from raw_val to norm_val involved
+    character alterations (e.g. A->4, 1/L->I, 9/5->S, digit restructuring) rather than
+    harmless whitespace/punctuation/casing normalization.
+    """
+    if not raw_val or not norm_val:
+        return False
+    harmless_cleaned = re.sub(r"[\s\-\/\.]+", "", str(raw_val)).upper()
+    return harmless_cleaned != norm_val
 
 
 def normalize_email(val: Optional[str]) -> Optional[str]:
@@ -54,6 +72,12 @@ def normalize_name(val: Optional[str]) -> Optional[str]:
     s = re.sub(r"[^a-zA-Z0-9\s]", " ", s)
     s = re.sub(r"\s+", " ", s).strip()
     return s if len(s) >= 2 else None
+
+
+def normalize_name_tokens(name_str: Optional[str]) -> List[str]:
+    """Extract clean lowercase alphanumeric tokens from a student/candidate name."""
+    norm = normalize_name(name_str)
+    return norm.split() if norm else []
 
 
 class RecruitmentResultMatcher:
@@ -81,6 +105,7 @@ class RecruitmentResultMatcher:
 
         student_by_usn: Optional[User] = None
         student_by_email: Optional[User] = None
+        matched_profiles: List[StudentProfileExtended] = []
 
         # 1. Search by USN / Enrollment Number
         if norm_usn:
@@ -151,30 +176,100 @@ class RecruitmentResultMatcher:
 
         # TIER 1: Exact USN Match
         if student_by_usn:
+            is_contradiction, contradiction_reason = self._is_name_contradiction(
+                extracted_name, student_by_usn, matched_profiles[0] if matched_profiles else None
+            )
+            if is_contradiction:
+                logger.warning(
+                    f"⚠️ Strong name-USN contradiction: USN {norm_usn} resolves to "
+                    f"'{student_by_usn.name}', but document specifies '{extracted_name}'. "
+                    f"Details: {contradiction_reason}"
+                )
+                return {
+                    "matched_student_id": None,
+                    "match_confidence": 0.40,
+                    "match_method": "NAME_USN_CONTRADICTION",
+                    "review_status": RecruitmentResultReviewState.AMBIGUOUS,
+                    "match_evidence": {
+                        "reason": (
+                            f"USN {norm_usn} resolves to '{student_by_usn.name}', but document specifies "
+                            f"candidate name '{extracted_name}'. {contradiction_reason}"
+                        ),
+                        "usn_candidate": self._serialize_student(student_by_usn),
+                        "extracted_name": extracted_name,
+                        "contradiction_details": contradiction_reason,
+                    },
+                }
+
+            evidence = {
+                "matched_field": "enrollment_number",
+                "matched_value": norm_usn,
+                "student": self._serialize_student(student_by_usn),
+            }
+            if norm_name:
+                evidence["name_verified"] = True
+                evidence["corroborated_name"] = norm_name
+            else:
+                evidence["name_verified"] = False
+                evidence["note"] = "Exact USN match. No candidate name was available in document for corroboration."
+
+            if extracted_usn and norm_usn and str(extracted_usn).strip().upper() != norm_usn:
+                evidence["usn_normalization_applied"] = True
+                evidence["raw_extracted_usn"] = str(extracted_usn).strip()
+
             return {
                 "matched_student_id": student_by_usn.id,
                 "match_confidence": 1.00,
                 "match_method": "EXACT_USN",
                 "review_status": RecruitmentResultReviewState.MATCHED,
-                "match_evidence": {
-                    "matched_field": "enrollment_number",
-                    "matched_value": norm_usn,
-                    "student": self._serialize_student(student_by_usn),
-                },
+                "match_evidence": evidence,
             }
 
         # TIER 2: Exact Email Match
         if student_by_email:
+            is_contradiction, contradiction_reason = self._is_name_contradiction(
+                extracted_name, student_by_email, getattr(student_by_email, "student_profile", None)
+            )
+            if is_contradiction:
+                logger.warning(
+                    f"⚠️ Strong name-Email contradiction: Email {norm_email} resolves to "
+                    f"'{student_by_email.name}', but document specifies '{extracted_name}'. "
+                    f"Details: {contradiction_reason}"
+                )
+                return {
+                    "matched_student_id": None,
+                    "match_confidence": 0.40,
+                    "match_method": "NAME_EMAIL_CONTRADICTION",
+                    "review_status": RecruitmentResultReviewState.AMBIGUOUS,
+                    "match_evidence": {
+                        "reason": (
+                            f"Email {norm_email} resolves to '{student_by_email.name}', but document specifies "
+                            f"candidate name '{extracted_name}'. {contradiction_reason}"
+                        ),
+                        "email_candidate": self._serialize_student(student_by_email),
+                        "extracted_name": extracted_name,
+                        "contradiction_details": contradiction_reason,
+                    },
+                }
+
+            evidence = {
+                "matched_field": "email",
+                "matched_value": norm_email,
+                "student": self._serialize_student(student_by_email),
+            }
+            if norm_name:
+                evidence["name_verified"] = True
+                evidence["corroborated_name"] = norm_name
+            else:
+                evidence["name_verified"] = False
+                evidence["note"] = "Exact email match. No candidate name was available in document for corroboration."
+
             return {
                 "matched_student_id": student_by_email.id,
                 "match_confidence": 0.98,
                 "match_method": "EXACT_EMAIL",
                 "review_status": RecruitmentResultReviewState.MATCHED,
-                "match_evidence": {
-                    "matched_field": "email",
-                    "matched_value": norm_email,
-                    "student": self._serialize_student(student_by_email),
-                },
+                "match_evidence": evidence,
             }
 
         # TIER 3 & 4: Name Matching (with branch corroboration and collision detection)
@@ -310,6 +405,100 @@ class RecruitmentResultMatcher:
             "cgpa": profile.cgpa if profile else None,
             "year": profile.year if profile else None,
         }
+
+    def _is_name_contradiction(
+        self,
+        extracted_name: Optional[str],
+        student: User,
+        profile: Optional[StudentProfileExtended] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Conservative comparison between extracted candidate name and registered student name.
+        Returns (is_contradiction, reason_if_contradiction).
+
+        Rules:
+        - If extracted_name is missing/empty, returns (False, None) (cannot contradict).
+        - If student has no registered name, returns (False, None).
+        - Compares extracted name tokens against all registered name fields (User.name, StudentProfileExtended.full_name).
+        - Accounts for reordering (sorted tokens match), prefixes/initials (e.g. 'A' vs 'Adithya'),
+          and minor OCR typo tolerance (difflib ratio >= 0.80).
+        - Distinguishes strong contradiction from insufficient evidence:
+          * If only generic surname/patronymic matches (e.g. 'Kumar', 'Shetty') while substantive
+            given names conflict (e.g. 'Ramesh Kumar' vs 'Ashok Kumar'), flags contradiction.
+          * If zero token overlap and no initial/fuzzy match (e.g. 'Completely Different Person' vs 'Rakshith R Shetty'),
+            flags contradiction.
+        """
+        ext_tokens = normalize_name_tokens(extracted_name)
+        if not ext_tokens:
+            return False, None
+
+        registered_names: List[str] = []
+        if getattr(student, "name", None):
+            registered_names.append(student.name)
+        if profile and getattr(profile, "full_name", None):
+            registered_names.append(profile.full_name)
+        elif getattr(student, "student_profile", None) and getattr(student.student_profile, "full_name", None):
+            registered_names.append(student.student_profile.full_name)
+
+        reg_name_token_lists = []
+        for rn in registered_names:
+            if rn:
+                tokens = normalize_name_tokens(rn)
+                if tokens and tokens not in reg_name_token_lists:
+                    reg_name_token_lists.append(tokens)
+
+        if not reg_name_token_lists:
+            return False, None
+
+        reasons = []
+        for reg_tokens in reg_name_token_lists:
+            # 1. Exact token set match (including reordered)
+            if sorted(ext_tokens) == sorted(reg_tokens):
+                return False, None
+
+            # 2. Token overlap & fuzzy / initial matches
+            ext_set = set(ext_tokens)
+            reg_set = set(reg_tokens)
+            common_tokens = ext_set & reg_set
+
+            fuzzy_matches = set()
+            for et in ext_tokens:
+                for rt in reg_tokens:
+                    # Initial match (e.g. 'a' matches 'adithya' or 'c' matches 'cs')
+                    if len(et) == 1 and rt.startswith(et):
+                        fuzzy_matches.add((et, rt))
+                    elif len(rt) == 1 and et.startswith(rt):
+                        fuzzy_matches.add((et, rt))
+                    elif len(et) >= 3 and len(rt) >= 3:
+                        # Typo tolerance (e.g. 'aditya' vs 'adithya')
+                        if SequenceMatcher(None, et, rt).ratio() >= 0.80:
+                            fuzzy_matches.add((et, rt))
+
+            has_overlap = bool(common_tokens or fuzzy_matches)
+            if not has_overlap:
+                reasons.append(
+                    f"Extracted name tokens {ext_tokens} share no common words or initials with registered name {reg_tokens}"
+                )
+                continue
+
+            # If the ONLY matching token is a generic surname/family title, check if given names contradict
+            matched_ext_tokens = common_tokens | {et for et, rt in fuzzy_matches}
+            non_generic_matches = {t for t in matched_ext_tokens if t not in GENERIC_NAME_TOKENS}
+
+            if not non_generic_matches:
+                distinct_ext = [t for t in ext_tokens if t not in GENERIC_NAME_TOKENS and len(t) >= 3]
+                distinct_reg = [t for t in reg_tokens if t not in GENERIC_NAME_TOKENS and len(t) >= 3]
+                if distinct_ext and distinct_reg:
+                    reasons.append(
+                        f"Names only share generic token {common_tokens}, but given names ({distinct_ext} vs {distinct_reg}) contradict"
+                    )
+                    continue
+
+            # This registered name variant is consistent with extracted candidate name
+            return False, None
+
+        # None of the registered name variants was consistent
+        return True, "; ".join(reasons)
 
 
 # Global singleton instance

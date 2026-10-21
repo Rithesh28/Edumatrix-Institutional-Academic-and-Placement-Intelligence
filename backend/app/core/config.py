@@ -37,6 +37,11 @@ class Settings:
     STUDY_BUDDY_MIN_RELEVANCE_SCORE: float = float(os.getenv("STUDY_BUDDY_MIN_RELEVANCE_SCORE", "0.35"))
     STUDY_BUDDY_TOP_K: int = int(os.getenv("STUDY_BUDDY_TOP_K", "4"))
     STUDY_BUDDY_MAX_CONTEXT_CHARS: int = int(os.getenv("STUDY_BUDDY_MAX_CONTEXT_CHARS", "2000"))
+
+    # GLiNER Placement NER Configuration
+    GLINER_MODEL_NAME: str = os.getenv("GLINER_MODEL_NAME", "urchade/gliner_base")
+    USE_GLINER: bool = os.getenv("USE_GLINER", "true").lower() in ("true", "1", "yes")
+    GLINER_THRESHOLD: float = float(os.getenv("GLINER_THRESHOLD", "0.50"))
     
     # Firebase
     FIREBASE_CREDENTIALS: str = os.getenv("FIREBASE_CREDENTIALS", "")

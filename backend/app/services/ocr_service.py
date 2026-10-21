@@ -6,6 +6,7 @@ import os
 import pytesseract
 from PIL import Image
 import logging
+from typing import Dict, Any, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +77,55 @@ class OCRService:
                 enhancer = ImageEnhance.Contrast(image)
                 image = enhancer.enhance(1.8)
             
+            # Upscale low-resolution images for optimal OCR character clarity
+            w, h = image.size
+            if w < 1600 or h < 1200:
+                scale_factor = 2 if (w < 900 or h < 700) else 1.5
+                image = image.resize((int(w * scale_factor), int(h * scale_factor)), Image.Resampling.LANCZOS)
+
             text = pytesseract.image_to_string(image)
             return text.strip()
         except Exception as e:
             logger.error(f"OCR extraction from bytes failed: {e}")
             return f"OCR Error: {str(e)}"
+
+    def extract_ocr_data_from_image(self, image: Image.Image) -> Dict[str, Any]:
+        """
+        Extract detailed OCR data with bounding box coordinates and confidence
+        using Tesseract image_to_data.
+        """
+        from pytesseract import Output
+        from PIL import ImageEnhance
+
+        processed = image
+        if processed.mode not in ('L', '1'):
+            processed = processed.convert('L')
+            enhancer = ImageEnhance.Contrast(processed)
+            processed = enhancer.enhance(1.8)
+
+        # Upscale low-resolution images for optimal character clarity
+        w, h = processed.size
+        if w < 1600 or h < 1200:
+            scale_factor = 2 if (w < 900 or h < 700) else 1.5
+            processed = processed.resize((int(w * scale_factor), int(h * scale_factor)), Image.Resampling.LANCZOS)
+
+        return pytesseract.image_to_data(processed, output_type=Output.DICT)
+
+    def extract_ocr_data_from_image_bytes(self, image_bytes: bytes) -> Dict[str, Any]:
+        """Extract Tesseract image_to_data dict from image bytes."""
+        from io import BytesIO
+        image = Image.open(BytesIO(image_bytes))
+        return self.extract_ocr_data_from_image(image)
+
+    def extract_ocr_data_pages_from_scanned_pdf_bytes(self, pdf_bytes: bytes) -> List[Dict[str, Any]]:
+        """
+        Extract Tesseract image_to_data per page from scanned PDF bytes using pdf2image.
+        """
+        from pdf2image import convert_from_bytes
+        if not pdf_bytes or len(pdf_bytes) == 0:
+            return []
+        images = convert_from_bytes(pdf_bytes)
+        return [self.extract_ocr_data_from_image(img) for img in images]
 
     def extract_text_from_scanned_pdf(self, pdf_path: str) -> str:
         """

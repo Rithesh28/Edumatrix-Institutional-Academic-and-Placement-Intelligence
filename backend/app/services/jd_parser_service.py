@@ -25,6 +25,7 @@ from urllib.parse import urlparse
 from .skill_normalizer import skill_normalizer
 from .file_storage.text_extractor import text_extractor
 from .ocr_service import OCRService
+from .gliner_service import gliner_service
 
 logger = logging.getLogger(__name__)
 
@@ -565,7 +566,7 @@ class JdParserService:
             r'(?:recruitment\s*of|inviting\s*applications\s*for)[\s:\-–—|]+([^\n\r,;|\t]+)',
             r'(?:looking\s*for|seeking)(?:\s*(?:a|an))?[\s:\-–—|]+([^\n\r,;|\t]+?)(?:\s+(?:with|to|in|having|who)|\.|\n|$)'
         ]
-        non_title_words = r'(?:bright\s+and\s+motivated|candidates?|freshers?|individuals?|talented|dynamic|eligible|graduates?|students?|overview|criteria|eligibility|notice|company|welcome|campus)'
+        non_title_words = r'(?:bright\s+and\s+motivated|candidates?|freshers?|individuals?|talented|dynamic|eligible|graduates?|students?|overview|criteria|eligibility|notice|company|welcome|campus|our|team|office|locations?)'
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
@@ -593,6 +594,42 @@ class JdParserService:
                 if not re.search(r'company|welcome|campus|placement|hiring|seeking|looking\s+for', line, re.IGNORECASE):
                     evidence["title"] = line
                     return line
+
+        # 3. GLiNER zero-shot entity fallback if semantic model is available and deterministic methods found no title
+        if gliner_service.is_available():
+            try:
+                intro_text = text[:1200]
+                preds = gliner_service.predict_entities(
+                    intro_text,
+                    labels=["job title", "designation", "role"],
+                    threshold=0.55
+                )
+                valid_gliner_titles = []
+                known_tech_or_skills = {
+                    "docker", "kubernetes", "linux", "python", "java", "react", "angular", "vue",
+                    "aws", "azure", "gcp", "sql", "git", "c++", "c#", "html", "css", "javascript",
+                    "typescript", "nosql", "node", "express", "fastify", "spring", "django"
+                }
+                title_role_pattern = r'\b(?:engineer|developer|architect|consultant|specialist|analyst|intern|lead|manager|administrator|executive|trainee|officer|associate|coordinator|scientist|designer|tester|programmer|sre|chaos|director|head)\b'
+
+                for p in preds:
+                    cand = re.sub(r'^(?:is\s+|a\s+|an\s+|the\s+|role\s+of\s+)', '', p["text"].strip(), flags=re.IGNORECASE).strip(" :,.-")
+                    cand_lower = cand.lower()
+                    if 4 <= len(cand) <= 60 and not re.search(r'^(?:' + non_title_words + r')\b', cand, re.IGNORECASE):
+                        if not re.search(r'company|overview|eligibility|ctc|notice|salary|drive|campus|welcome|placement|opening|criteria|requirement', cand, re.IGNORECASE):
+                            if cand_lower in self.KNOWN_SKILL_KEYWORDS or cand_lower in known_tech_or_skills:
+                                continue
+                            is_recognized_role = bool(re.search(title_role_pattern, cand, re.IGNORECASE))
+                            is_multi_word_high_conf = len(cand.split()) >= 2 and p["score"] >= 0.70
+                            if is_recognized_role or is_multi_word_high_conf:
+                                valid_gliner_titles.append((cand, p["score"]))
+                if valid_gliner_titles:
+                    valid_gliner_titles.sort(key=lambda x: (x[1], len(x[0])), reverse=True)
+                    best_title, best_score = valid_gliner_titles[0]
+                    evidence["title"] = f"{best_title} [GLiNER: {best_score:.2f}]"
+                    return best_title
+            except Exception as e:
+                logger.warning(f"GLiNER title extraction fallback error: {e}")
 
         return None
 
@@ -853,9 +890,6 @@ class JdParserService:
         for pat, deg_code in self.DEGREE_PATTERNS:
             if re.search(pat, text, re.IGNORECASE):
                 degrees.append(deg_code)
-        degrees = list(dict.fromkeys(degrees))
-        if degrees:
-            evidence["degree_eligibility"] = ", ".join(degrees)
 
         # 2. Branches
         text_lower = text.lower()
@@ -868,6 +902,44 @@ class JdParserService:
         # Check for circuital branches
         if re.search(r'\bcircuital\s*branches\b', text_lower):
             found_branches.update(["CSE", "IT", "ECE", "EEE"])
+
+        # GLiNER semantic degree and branch enrichment
+        if gliner_service.is_available():
+            try:
+                edu_preds = gliner_service.predict_entities(
+                    text[:2500],
+                    labels=["academic degree", "educational qualification", "academic branch", "engineering discipline"],
+                    threshold=0.55
+                )
+                for ep in edu_preds:
+                    lbl = ep["label"].lower()
+                    ent_str = ep["text"].strip(" \t\n\r\"'()[]{}.,;:*•▪-–—")
+                    if "degree" in lbl or "qualification" in lbl:
+                        for pat, deg_code in self.DEGREE_PATTERNS:
+                            if re.search(pat, ent_str, re.IGNORECASE):
+                                if deg_code not in degrees:
+                                    degrees.append(deg_code)
+                                    evidence[f"gliner_degree_{deg_code}"] = f"{ent_str} [GLiNER: {ep['score']:.2f}]"
+                    elif "branch" in lbl or "discipline" in lbl:
+                        clean_b = ent_str.lower()
+                        clean_b = re.sub(r'^(?:branch(?:es)?\s*(?:of|in)?|discipline\s*(?:of|in)?)\s*', '', clean_b).strip()
+                        if clean_b in self.BRANCH_MAP:
+                            b_code = self.BRANCH_MAP[clean_b]
+                            if b_code not in found_branches:
+                                found_branches.add(b_code)
+                                evidence[f"gliner_branch_{b_code}"] = f"{ent_str} [GLiNER: {ep['score']:.2f}]"
+                        else:
+                            for term, b_code in self.BRANCH_MAP.items():
+                                if len(term) >= 3 and term in clean_b:
+                                    if b_code not in found_branches:
+                                        found_branches.add(b_code)
+                                        evidence[f"gliner_branch_{b_code}"] = f"{ent_str} [GLiNER: {ep['score']:.2f}]"
+            except Exception as e:
+                logger.warning(f"GLiNER education enrichment warning: {e}")
+
+        degrees = list(dict.fromkeys(degrees))
+        if degrees:
+            evidence["degree_eligibility"] = ", ".join(degrees)
 
         branches = sorted(list(found_branches))
         if branches:
@@ -925,6 +997,33 @@ class JdParserService:
                 if match_plus:
                     exp_level = match_plus.group(1).strip()
                     evidence["experience_level"] = exp_level
+
+        # Fallback to GLiNER for experience requirements if not found
+        if not exp_level and gliner_service.is_available():
+            try:
+                exp_preds = gliner_service.predict_entities(
+                    text[:1500],
+                    labels=["experience requirement", "internship prerequisite"],
+                    threshold=0.55
+                )
+                for ep in exp_preds:
+                    txt = ep["text"].lower()
+                    if "intern" in txt:
+                        exp_level = "internship"
+                        evidence["experience_level"] = f"{ep['text']} [GLiNER: {ep['score']:.2f}]"
+                        break
+                    elif "fresher" in txt or "entry" in txt:
+                        exp_level = "fresher"
+                        evidence["experience_level"] = f"{ep['text']} [GLiNER: {ep['score']:.2f}]"
+                        break
+                    else:
+                        ym = re.search(r'([0-9]+\s*-\s*[0-9]+\s*(?:years?|yrs?))', ep["text"], re.IGNORECASE)
+                        if ym:
+                            exp_level = ym.group(1).strip()
+                            evidence["experience_level"] = f"{exp_level} [GLiNER: {ep['score']:.2f}]"
+                            break
+            except Exception as e:
+                logger.warning(f"GLiNER experience extraction warning: {e}")
 
         # Job / Employment Type
         if re.search(r'\binternship\s*(?:cum|\+)\s*(?:placement|full\s*time|fte|job)\b', text, re.IGNORECASE):
@@ -1005,7 +1104,7 @@ class JdParserService:
 
         # Normalize OCR comma in decimals for compensation (e.g., 'INR 2,40 - 3.60 Lakhs' -> 'INR 2.40 - 3.60 Lakhs')
         # Do not alter thousands separators like 1,00,000 or 25,000
-        comp_text = re.sub(r'(\bINR|\bRs|₹|\bCTC|\bPackage|\bsalary|\bto|[–—-]|[\-–—])\s*(\d+),(\d{1,2})\b(?!\d)', r'\1 \2.\3', text, flags=re.IGNORECASE)
+        comp_text = re.sub(r'(\bINR|\bRs|₹|\bCTC|\bPackage|\bsalary|\bto|[–—-]|[\-–—])\s*(\d+),(\d{1,2})\b(?!\s*,?\d{3})', r'\1 \2.\3', text, flags=re.IGNORECASE)
         comp_text = re.sub(r'(\d+),(\d{1,2})\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)\s*(?:lpa|lakhs?|lac)', r'\1.\2 - \3 Lakhs', comp_text, flags=re.IGNORECASE)
 
         # 1. Detect Staged Compensation (Stipend + Post-conversion / Annual CTC)
@@ -1440,6 +1539,16 @@ class JdParserService:
         req_skills = [self._format_skill_name(s) for s in req_raw]
         pref_skills = [self._format_skill_name(s) for s in pref_raw]
 
+        # Additive GLiNER entity enrichment (captures unlisted frameworks, modern libraries, soft skills)
+        if gliner_service.is_available():
+            self._enrich_skills_with_gliner(
+                required_text=required_text,
+                preferred_text=preferred_text,
+                req_skills=req_skills,
+                pref_skills=pref_skills,
+                evidence=evidence
+            )
+
         # Extract certifications
         certifications: List[str] = []
         cert_patterns = [
@@ -1558,6 +1667,182 @@ class JdParserService:
             "ticketing": "Ticketing"
         }
         return special_casing.get(skill.lower(), skill.title())
+
+    def _clean_and_validate_skill_entity(self, ent_text: str) -> Optional[str]:
+        """Validate and clean a candidate skill entity from GLiNER."""
+        if not ent_text:
+            return None
+        clean = ent_text.strip(" \t\n\r\"'()[]{}.,;:*•▪-–—")
+        # Strip common leading noise
+        clean = re.sub(
+            r'^(?:experience\s+(?:in|with)|knowledge\s+of|proficiency\s+in|familiarity\s+with|understanding\s+of|hands[\s\-]*on\s+with|skills?\s+in)\s+',
+            '',
+            clean,
+            flags=re.IGNORECASE
+        ).strip(" \t\n\r\"'()[]{}.,;:*•▪-–—")
+        # Strip common trailing generic descriptors (e.g. "Qdrant vector database" -> "Qdrant", "Agile environments" -> "Agile")
+        clean = re.sub(r'\s+(?:vector\s+)?databases?$', '', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'\s+environments?$', '', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'\s+frameworks?$', '', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'\s+platforms?$', '', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'\s+technolog(?:y|ies)$', '', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'\s+tools?$', '', clean, flags=re.IGNORECASE)
+        clean = clean.strip(" \t\n\r\"'()[]{}.,;:*•▪-–—")
+        if len(clean) < 2 or len(clean) > 40:
+            return None
+        # Disallow pure numbers, percentages, or punctuation
+        if re.match(r'^[\d\.\%\s\-\/\:]+$', clean):
+            return None
+        # Disallow blacklisted stop words and non-skill entities
+        stop_words = {
+            "skill", "skills", "requirement", "requirements", "qualification", "qualifications",
+            "responsibilities", "experience", "candidate", "candidates", "team", "work", "role",
+            "job", "company", "degree", "branch", "engineering", "b.tech", "m.tech", "knowledge",
+            "ability", "proficient", "familiar", "hands-on", "understanding", "good", "strong",
+            "excellent", "basic", "advanced", "etc", "years", "fresher", "freshers", "students",
+            "graduates", "notice", "criteria", "eligibility", "overview", "drive", "interview",
+            "process", "location", "salary", "stipend", "package", "ctc", "lpa", "inr", "per annum",
+            "written", "verbal", "communication", "opportunity", "profile", "discipline", "applicant"
+        }
+        if clean.lower() in stop_words:
+            return None
+        # Formatting casing
+        low = clean.lower()
+        if low in self.KNOWN_SKILL_KEYWORDS:
+            return self._format_skill_name(low)
+        # If all lowercase or all uppercase (and > 4 chars), titlecase; else preserve exact casing
+        if clean.islower():
+            return clean.title() if len(clean) > 4 else clean.upper()
+        if clean.isupper() and len(clean) > 5:
+            return clean.title()
+        return clean
+
+    def _chunk_text_for_gliner(self, text: str, max_chars: int = 750) -> List[str]:
+        """
+        Split text into bounded chunks below GLiNER's 384-token limit (~750 chars / ~150 words),
+        preserving sentence and bullet boundaries without dropping text.
+        """
+        if not text or not text.strip():
+            return []
+
+        raw_lines = text.splitlines()
+        segments: List[str] = []
+        for line in raw_lines:
+            line = line.strip()
+            if not line:
+                continue
+            sentences = re.split(r'(?<=[.!?])\s+', line)
+            for s in sentences:
+                s = s.strip()
+                if s:
+                    segments.append(s)
+
+        chunks: List[str] = []
+        current_chunk = ""
+
+        for seg in segments:
+            if len(current_chunk) + (1 if current_chunk else 0) + len(seg) <= max_chars:
+                current_chunk = (current_chunk + " " + seg).strip() if current_chunk else seg
+            else:
+                if current_chunk:
+                    chunks.append(current_chunk)
+                    current_chunk = ""
+                
+                if len(seg) > max_chars:
+                    words = seg.split()
+                    sub_chunk = ""
+                    for w in words:
+                        if len(sub_chunk) + (1 if sub_chunk else 0) + len(w) <= max_chars:
+                            sub_chunk = (sub_chunk + " " + w).strip() if sub_chunk else w
+                        else:
+                            if sub_chunk:
+                                chunks.append(sub_chunk)
+                            sub_chunk = w
+                    current_chunk = sub_chunk
+                else:
+                    current_chunk = seg
+
+        if current_chunk:
+            chunks.append(current_chunk)
+
+        return chunks
+
+    def _enrich_skills_with_gliner(
+        self,
+        required_text: str,
+        preferred_text: str,
+        req_skills: List[str],
+        pref_skills: List[str],
+        evidence: Dict[str, str]
+    ) -> None:
+        """Enrich required and preferred skill lists using bounded chunked GLiNER zero-shot entity extraction."""
+        target_labels = ["technical skill", "software tool", "soft skill"]
+        req_keys = {skill_normalizer.clean_text(s) for s in req_skills}
+        req_canon_keys = {skill_normalizer.get_canonical(s) for s in req_skills}
+        pref_keys = {skill_normalizer.clean_text(s) for s in pref_skills}
+        pref_canon_keys = {skill_normalizer.get_canonical(s) for s in pref_skills}
+
+        gliner_added_req: List[Tuple[str, float]] = []
+        gliner_added_pref: List[Tuple[str, float]] = []
+
+        # 1. Required skills segment (chunked to ensure every chunk < 384 tokens)
+        if required_text and required_text.strip():
+            req_chunks = self._chunk_text_for_gliner(required_text, max_chars=750)
+            for chunk in req_chunks:
+                try:
+                    req_preds = gliner_service.predict_entities(
+                        chunk,
+                        labels=target_labels,
+                        threshold=0.50
+                    )
+                except Exception as e:
+                    logger.warning(f"GLiNER inference error on required skills chunk: {e}")
+                    continue
+                for rp in req_preds:
+                    c_skill = self._clean_and_validate_skill_entity(rp["text"])
+                    if not c_skill:
+                        continue
+                    k_clean = skill_normalizer.clean_text(c_skill)
+                    k_canon = skill_normalizer.get_canonical(c_skill)
+                    if k_clean not in req_keys and k_canon not in req_canon_keys:
+                        req_skills.append(c_skill)
+                        req_keys.add(k_clean)
+                        req_canon_keys.add(k_canon)
+                        gliner_added_req.append((c_skill, rp["score"]))
+
+        # 2. Preferred skills segment (chunked to ensure every chunk < 384 tokens)
+        if preferred_text and preferred_text.strip():
+            pref_chunks = self._chunk_text_for_gliner(preferred_text, max_chars=750)
+            for chunk in pref_chunks:
+                try:
+                    pref_preds = gliner_service.predict_entities(
+                        chunk,
+                        labels=target_labels,
+                        threshold=0.50
+                    )
+                except Exception as e:
+                    logger.warning(f"GLiNER inference error on preferred skills chunk: {e}")
+                    continue
+                for pp in pref_preds:
+                    c_skill = self._clean_and_validate_skill_entity(pp["text"])
+                    if not c_skill:
+                        continue
+                    k_clean = skill_normalizer.clean_text(c_skill)
+                    k_canon = skill_normalizer.get_canonical(c_skill)
+                    if (k_clean not in req_keys and k_canon not in req_canon_keys and
+                        k_clean not in pref_keys and k_canon not in pref_canon_keys):
+                        pref_skills.append(c_skill)
+                        pref_keys.add(k_clean)
+                        pref_canon_keys.add(k_canon)
+                        gliner_added_pref.append((c_skill, pp["score"]))
+
+        # Record GLiNER evidence
+        if gliner_added_req:
+            evidence["gliner_required_skills"] = ", ".join([f"{s} ({sc:.2f})" for s, sc in gliner_added_req])
+            evidence["required_skills"] = ", ".join(req_skills)
+        if gliner_added_pref:
+            evidence["gliner_preferred_skills"] = ", ".join([f"{s} ({sc:.2f})" for s, sc in gliner_added_pref])
+            evidence["preferred_skills"] = ", ".join(pref_skills)
 
     IGNORED_URL_HOSTS = {
         "schemas.openxmlformats.org",

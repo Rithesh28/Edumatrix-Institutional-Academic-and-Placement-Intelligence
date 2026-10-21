@@ -21,19 +21,15 @@ class NERExtractor:
             logger.info("⚡ GLiNER disabled - using regex fallback (faster)")
     
     def _load_model(self):
-        """Load GLiNER model once and cache it"""
-        if NERExtractor._model is not None:
-            self.model = NERExtractor._model
-            self.is_loaded = True
-            return
-        
+        """Load GLiNER model once and cache it via shared gliner_service"""
         try:
-            from gliner import GLiNER
-            logger.info("Loading GLiNER model (2.3GB)...")
-            self.model = GLiNER.from_pretrained("urchade/gliner_multi-v2.1")
-            NERExtractor._model = self.model
-            self.is_loaded = True
-            logger.info("✅ GLiNER loaded successfully")
+            from app.services.gliner_service import gliner_service
+            if gliner_service.is_available():
+                self.model = gliner_service.get_model()
+                self.is_loaded = True
+                NERExtractor._model = self.model
+            else:
+                self.is_loaded = False
         except Exception as e:
             logger.warning(f"⚠️ GLiNER load failed: {e}")
             self.is_loaded = False
