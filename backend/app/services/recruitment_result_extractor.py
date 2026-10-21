@@ -46,6 +46,11 @@ HEADER_SYNONYMS = {
     ],
     "remarks": [
         "remarks", "comments", "feedback", "notes", "reason", "extra info"
+    ],
+    "sl_no": [
+        "sl no", "sl no.", "sl. no.", "sl.no", "sl_no", "s no", "s. no.", "s.no",
+        "serial no", "serial no.", "serial number", "sr no", "sr. no.", "sr_no",
+        "sino", "slno", "si no", "si. no.", "si.no"
     ]
 }
 
@@ -73,8 +78,82 @@ BANNER_PATTERNS = [
     r"session\s*:\s*",
     r"room\s+no\b",
     r"total\s+candidates?",
-    r"sl\s*no\b|serial\s*no\b",
+    r"sl\s*no\b|serial\s*no\b|si\s*no\b",
+    # Notice phrases and explanatory sentences
+    r"\bwe\s+(?:are\s+)?(?:kindly\s+)?(?:request|inform|advise|pleased|glad|delighted|announce)\b",
+    r"\bpleased\s+to\s+inform\b",
+    r"\bplease\s+(?:find|inform|note|report|contact|ensure|advise)\b",
+    r"\bkindly\s+(?:request|inform|confirm|advise|note|find)\b",
+    r"\brespective\s+students?\b",
+    r"\babout\s+their\s+interview\b",
+    r"\binterview\s+(?:schedule|process|dates?|timings?|venue|location|details)\b",
+    r"\bshortlisted\s+for\s+(?:the\s+)?interview\b",
+    r"\breport\s+to\s+(?:the\s+)?.*office\b",
+    r"\bconfirm\s+(?:the\s+)?availability\b",
+    r"\bfinalize\s+(?:the\s+)?interview\b",
+    r"\bnecessary\s+arrangements\b",
+    r"\bselection\s+process\b",
+    r"\bapplication[-\s]level\s+screening\b",
+    r"\bpre[-\s]placement\s+talk\b",
+    r"\bgroup\s+discussion\s+round\b",
+    r"\bpersonal\s+interview\b",
+    r"\bregistration\s+link\b",
+    r"\blast\s+date\s+of\b",
+    r"\bcompany\s+profile\b",
+    r"\bjob\s+description\b",
+    r"\bworking\s+(?:days|hours)\b",
+    r"\brequired\s+skills\b",
+    r"\beducational\s+qualification\b",
+    r"\bcompensation\b",
+    r"\bannual\s+ctc\b",
+    r"\bstipend\s+is\b",
+    r"\bwork\s+mode\b",
+    r"\bon\s*site\b",
+    r"\bhead\s+office\b",
+    r"\bregistered\s+office\b",
+    r"\borganized\s+&\s+coordinated\b",
+    r"\ball\s+other\s+details\b",
+    r"\bmentioned\s+in\s+the\s+attachment\b",
+    r"\bgraduating\s+batch\b",
+    r"\bhiring\s+students\b",
+    r"\binterested\s+candidates\b",
+    r"\bnot\s+supposed\s+to\s+pay\b",
+    r"\bpay\s+any\s+amount\b",
+    r"\brecruitment\s+partners?\b",
+    r"\bjoining\s+date\b",
+    r"\bfor\s+your\s+reference\b",
+    r"\bdear\s+(?:sir|madam)\b",
 ]
+
+# Words that indicate sentence structure or non-name text
+SENTENCE_STOPWORDS = {
+    "we", "you", "they", "them", "their", "our", "us", "he", "she", "him", "her",
+    "this", "that", "these", "those", "which", "what", "who", "whom", "whose",
+    "the", "an",
+    "and", "or", "but", "if", "because", "as", "until", "while", "of", "at", "by",
+    "for", "with", "about", "against", "between", "into", "through", "during",
+    "before", "after", "above", "below", "to", "from", "up", "down", "in", "out",
+    "on", "off", "over", "under", "again", "further", "then", "once",
+    "is", "am", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "having", "do", "does", "did", "doing",
+    "would", "should", "could", "ought", "shall", "will", "can", "may", "might", "must",
+    "please", "kindly", "request", "inform", "advise", "report", "confirm", "finalize",
+    "students", "interview", "schedule", "availability", "attending", "arrangements",
+    "timings", "dates", "office", "process", "details", "qualification", "attachment",
+    "eligible", "stream", "batch", "annual", "ctc", "stipend", "lakhs", "per", "month",
+    "mode", "site", "company", "requirements", "guidelines", "criteria"
+}
+
+# Words that are known non-candidate tokens or noise fragments
+NOISE_NAME_WORDS = {
+    "non", "none", "nil", "na", "null", "not", "no", "yes", "ok",
+    "total", "page", "date", "time", "venue", "sl", "serial", "sr",
+    "usn", "name", "email", "status", "branch", "dept", "department",
+    "round", "result", "remarks", "gender", "male", "female", "cgpa",
+    "oct", "nov", "dec", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep",
+    "october", "november", "december", "january", "february", "march", "april",
+    "june", "july", "august", "september", "am", "pm"
+}
 
 
 class RecruitmentResultExtractionError(ValueError):
@@ -236,6 +315,50 @@ class RecruitmentResultExtractor:
             " ".join(branch_parts).strip()
         )
 
+    def _is_valid_usn_format(self, usn: Optional[str]) -> bool:
+        """Verify if a string matches valid institutional candidate identifier formats."""
+        if not usn:
+            return False
+        u = re.sub(r"[\s\-\.]+", "", str(usn)).upper()
+        # VTU format: 1-digit region, 2-letter college, 2-digit year, 2-3 letter branch, 2-4 digit roll
+        if re.match(r"^[0-9][A-Z]{2}[0-9]{2}[A-Z0-9]{2,3}[0-9]{2,4}$", u):
+            return True
+        # Standard institutional roll format: e.g. TEST36419, CS20210045
+        if re.match(r"^[A-Z]{2,6}[0-9]{4,10}$", u):
+            return True
+        # Numeric / college year roll format: e.g. 21CSE0045
+        if re.match(r"^[0-9]{2}[A-Z]{2,4}[0-9]{3,6}$", u):
+            return True
+        # General candidate alphanumeric ID (6-14 chars, alphanumeric only, with digits and letters)
+        if 6 <= len(u) <= 14 and u.isalnum() and any(c.isdigit() for c in u) and any(c.isalpha() for c in u):
+            if not any(w in u.lower() for w in ["the", "students", "interview", "schedule", "office", "about", "dates"]):
+                return True
+        return False
+
+    def _is_plausible_candidate_name(self, name: Optional[str]) -> bool:
+        """Validate if extracted candidate name is genuine rather than arbitrary OCR text or sentences."""
+        if not name:
+            return False
+        clean = re.sub(r"[^a-zA-Z\s\.\-]", " ", str(name)).strip()
+        clean = re.sub(r"\s+", " ", clean)
+        tokens = clean.split()
+        if not tokens or len(tokens) > 5:
+            return False
+        if len(tokens) == 1:
+            tok_lower = tokens[0].lower()
+            if tok_lower in NOISE_NAME_WORDS or tok_lower in SENTENCE_STOPWORDS:
+                return False
+            if len(tokens[0]) < 2:
+                return False
+            return True
+        # Multi-token: check stopwords (single letter tokens are initials, not articles)
+        real_words = [t.lower() for t in tokens if len(t) > 1]
+        stopwords_count = sum(1 for w in real_words if w in SENTENCE_STOPWORDS or w in NOISE_NAME_WORDS)
+        if stopwords_count > 0:
+            return False
+        alpha_chars = sum(len(t) for t in tokens if t.isalpha())
+        return alpha_chars >= 3
+
     def _normalize_candidate_fields(
         self, raw_usn: str, raw_name: str, raw_email: str, raw_status: str, full_row_text: str = ""
     ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
@@ -287,11 +410,15 @@ class RecruitmentResultExtractor:
         elif usn:
             merged_match = re.match(r"^([0-9][a-zA-Z]{2}[0-9]{2}[a-zA-Z0-9]{2,5}[0-9]{2,4})([a-zA-Z].*)$", usn.strip())
             if merged_match:
-                usn_clean = merged_match.group(1).upper()
-                spilled = merged_match.group(2)
-                name = (spilled + " " + name).strip()
-            else:
+                cand_usn = merged_match.group(1).upper()
+                if self._is_valid_usn_format(cand_usn):
+                    usn_clean = cand_usn
+                    spilled = merged_match.group(2)
+                    name = (spilled + " " + name).strip()
+            elif self._is_valid_usn_format(usn.strip()):
                 usn_clean = usn.strip().upper()
+            else:
+                usn_clean = None
 
         # 4. Name extraction & isolation
         rem = name or ""
@@ -314,6 +441,14 @@ class RecruitmentResultExtractor:
         rem = re.sub(r"[—\-–_.:;|~^`=]+", " ", rem)
         rem = re.sub(r"\s+", " ", rem).strip()
         rem = re.sub(r"([a-z])([A-Z])", r"\1 \2", rem)
+
+        # Defensive cleanup: strip leading serial tokens / noise (e.g. DBD, WwW, bt, Oo)
+        toks = rem.split()
+        if len(toks) >= 2:
+            first_tok_lower = toks[0].lower()
+            if first_tok_lower in NOISE_NAME_WORDS or (len(toks[0]) in (2, 3) and toks[0].isupper() and all(c not in 'AEIOU' for c in toks[0])):
+                rem = " ".join(toks[1:])
+
         name_clean = rem if len(rem) >= 2 else (name or None)
 
         return (usn_clean or None, name_clean or None, email_clean or None, status_clean or "shortlisted")
@@ -324,6 +459,7 @@ class RecruitmentResultExtractor:
         """
         Structural validation to reject false candidate records:
         - Document titles, banners, date labels, exam duties, and table headers are rejected.
+        - Notice paragraphs, instructions, and announcement sentences are rejected.
         - Rows without USN or email must have a valid student name and non-banner structure.
         """
         if self._is_banner_text(full_row_text):
@@ -341,25 +477,33 @@ class RecruitmentResultExtractor:
             if header_count >= len(tokens) * 0.7:
                 return False
 
-        # Reject if name matches non-candidate keywords
-        if name:
-            norm_name = name.lower()
-            non_candidate_names = [
-                "usn", "name", "candidate name", "student name", "email", "status",
-                "department", "branch", "remarks", "result", "selection status",
-                "campus recruitment", "examination duty", "vtu theory exam", "duty chart",
-                "register number", "total candidates", "coordinator signature", "principal"
-            ]
-            if any(ncn in norm_name for ncn in non_candidate_names):
-                return False
+        # Reject if row contains notice or announcement language
+        if any(re.search(pat, full_row_text, re.IGNORECASE) for pat in BANNER_PATTERNS):
+            return False
 
-        # Must have at least one strong identifier or valid candidate attributes
-        if usn and len(usn) >= 4:
+        # Validate name plausibility
+        name_is_plausible = self._is_plausible_candidate_name(name)
+        if name and not name_is_plausible:
+            # If name is clearly a sentence/notice phrase or has > 5 words, reject row entirely
+            if any(re.search(pat, name, re.IGNORECASE) for pat in BANNER_PATTERNS) or len(name.split()) > 5:
+                return False
+            name = None
+
+        # Candidate validity tiers:
+        # 1. Valid USN
+        if usn and self._is_valid_usn_format(usn):
             return True
-        if email and "@" in email and "." in email:
+
+        # 2. Valid Email
+        if email and re.match(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$", email):
             return True
-        if name and len(name) >= 3 and not re.match(r"^[\d\.\s\-\/\:]+$", name):
-            if status and status.lower() in ["selected", "shortlisted", "rejected", "absent", "cleared"]:
+
+        # 3. Plausible Name without USN or email (must be a genuine name with proper structure)
+        if name and name_is_plausible:
+            tokens = name.split()
+            # Must have at least 2 tokens with proper capitalized structure (e.g. "Adithya CS")
+            # or a single valid name
+            if len(tokens) >= 2 and all(t[0].isupper() for t in tokens if t[0].isalpha()):
                 return True
 
         return False
@@ -458,6 +602,10 @@ class RecruitmentResultExtractor:
 
         if header_row_idx is not None and detected_col_spans:
             sorted_cols = sorted(detected_col_spans.items(), key=lambda x: x[1][0])
+            first_col_left = sorted_cols[0][1][0]
+            if first_col_left > 180 and sorted_cols[0][0] != "sl_no":
+                sorted_cols.insert(0, ("sl_no", (0, int(first_col_left - 30))))
+
             canonical_headers = [col_name.upper() for col_name, _ in sorted_cols]
             
             cutoffs = [0.0]
@@ -473,6 +621,7 @@ class RecruitmentResultExtractor:
         start_row_idx = (header_row_idx + 1) if header_row_idx is not None else 0
         data_rows: List[List[str]] = []
 
+        extra_data: List[Dict[str, Any]] = []
         for r_idx in range(start_row_idx, len(v_rows)):
             r = v_rows[r_idx]
             row_text = r["text"]
@@ -516,7 +665,13 @@ class RecruitmentResultExtractor:
             )
 
             if not self._is_valid_candidate_row(usn_clean, name_clean, email_clean, status_clean, row_text):
+                logger.debug(
+                    f"Excluding non-candidate OCR row {r_idx}: text={row_text[:60]!r}, "
+                    f"usn={usn_clean!r}, name={name_clean!r}"
+                )
                 continue
+
+            extra_data.append({"raw_usn": usn_val or usn_clean or ""})
 
             if col_zones:
                 row_items = []
@@ -544,7 +699,7 @@ class RecruitmentResultExtractor:
                 "Please verify that the document contains recognizable student USNs, names, or emails."
             )
 
-        return self._build_extracted_result(canonical_headers, data_rows, source_page=source_page)
+        return self._build_extracted_result(canonical_headers, data_rows, source_page=source_page, extra_row_data=extra_data)
 
     def _parse_candidates_from_ocr_text(
         self, text: str, source_type: str = "document", source_page: int = 1
@@ -627,11 +782,16 @@ class RecruitmentResultExtractor:
             name = rem
             name = re.sub(r"^\d+[\.\)\-\s]+\s*", "", name).strip("‘'\"-–—.:;|•*▪ \t")
 
+            usn_clean, name_clean, email_clean, status_clean = self._normalize_candidate_fields(
+                usn, name, email, status, line
+            )
+
             # Validate before adding
-            if not self._is_valid_candidate_row(usn, name, email, status, line):
+            if not self._is_valid_candidate_row(usn_clean, name_clean, email_clean, status_clean, line):
+                logger.debug(f"Excluding non-candidate OCR text line: {line[:60]!r}")
                 continue
 
-            data_rows.append([usn, name, email, status])
+            data_rows.append([usn_clean or "", name_clean or "", email_clean or "", status_clean or "shortlisted"])
 
         if not data_rows:
             raise RecruitmentResultExtractionError(
@@ -839,6 +999,7 @@ class RecruitmentResultExtractor:
                     ocr_pages = ocr_service.extract_ocr_data_pages_from_scanned_pdf_bytes(file_bytes)
                     if ocr_pages:
                         all_page_rows: List[Tuple[List[str], int]] = []
+                        all_extra_rows: List[Dict[str, Any]] = []
                         canonical_hdrs: Optional[List[str]] = None
                         for p_idx, p_data in enumerate(ocr_pages, start=1):
                             if not p_data or not any(str(t).strip() for t in p_data.get("text", [])):
@@ -854,10 +1015,11 @@ class RecruitmentResultExtractor:
                                             for h in canonical_hdrs
                                         ]
                                         all_page_rows.append((row_cells, p_idx))
+                                        all_extra_rows.append({"raw_usn": r.get("raw_usn") or r.get("extracted_usn") or ""})
                             except Exception as page_e:
                                 logger.debug(f"Page {p_idx} spatial OCR extraction skipped: {page_e}")
                         if canonical_hdrs and all_page_rows:
-                            return self._build_extracted_result_with_pages(canonical_hdrs, all_page_rows)
+                            return self._build_extracted_result_with_pages(canonical_hdrs, all_page_rows, extra_row_data=all_extra_rows)
                 except Exception as spatial_pdf_err:
                     logger.warning(f"Spatial OCR table parsing on scanned PDF failed: {spatial_pdf_err}; falling back to text OCR...")
 
@@ -891,14 +1053,7 @@ class RecruitmentResultExtractor:
 
     def _map_columns(self, headers: List[str]) -> Dict[str, Optional[int]]:
         """Map canonical attributes (usn, name, email, status, branch, remarks) to column indices."""
-        mapping: Dict[str, Optional[int]] = {
-            "usn": None,
-            "name": None,
-            "email": None,
-            "status": None,
-            "branch": None,
-            "remarks": None,
-        }
+        mapping: Dict[str, Optional[int]] = {k: None for k in HEADER_SYNONYMS.keys()}
 
         normalized_headers = [self._normalize_key(h) for h in headers]
 
@@ -957,20 +1112,29 @@ class RecruitmentResultExtractor:
         return "shortlisted"
 
     def _build_extracted_result(
-        self, headers: List[str], data_rows: List[List[str]], source_page: int = 1
+        self,
+        headers: List[str],
+        data_rows: List[List[str]],
+        source_page: int = 1,
+        extra_row_data: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Convert tabular rows into structured JSON format."""
         rows_with_pages = [(row, source_page) for row in data_rows]
-        return self._build_extracted_result_with_pages(headers, rows_with_pages)
+        return self._build_extracted_result_with_pages(headers, rows_with_pages, extra_row_data=extra_row_data)
 
     def _build_extracted_result_with_pages(
-        self, headers: List[str], rows_with_pages: List[Tuple[List[str], int]]
+        self,
+        headers: List[str],
+        rows_with_pages: List[Tuple[List[str], int]],
+        extra_row_data: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Build full structured extraction response."""
         col_map = self._map_columns(headers)
 
         items: List[Dict[str, Any]] = []
         for row_idx, (row_cells, page_num) in enumerate(rows_with_pages, start=1):
+            extra = extra_row_data[row_idx - 1] if extra_row_data and (row_idx - 1) < len(extra_row_data) else {}
+
             # Pad row cells if length less than headers
             padded_cells = list(row_cells) + [""] * max(0, len(headers) - len(row_cells))
 
@@ -996,11 +1160,16 @@ class RecruitmentResultExtractor:
 
             normalized_status = self._normalize_status(extracted_status_raw)
 
+            raw_usn = extra.get("raw_usn") or extracted_usn or None
+            if raw_usn:
+                raw_dict["raw_usn"] = raw_usn
+
             items.append({
                 "row_index": row_idx,
                 "source_page": page_num,
                 "raw_data": raw_dict,
                 "extracted_usn": extracted_usn or None,
+                "raw_usn": raw_usn,
                 "extracted_name": extracted_name or None,
                 "extracted_email": extracted_email or None,
                 "extracted_branch": extracted_branch or None,

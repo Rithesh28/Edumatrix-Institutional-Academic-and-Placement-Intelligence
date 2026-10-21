@@ -213,6 +213,7 @@ class RecruitmentResultService:
 
         # 8. Match candidate rows against students
         for row in rows:
+            raw_cand_usn = row.get("raw_usn") or (row.get("raw_data") or {}).get("raw_usn") or row.get("extracted_usn")
             match_res = recruitment_result_matcher.match_row(
                 db=db,
                 extracted_usn=row.get("extracted_usn"),
@@ -220,6 +221,7 @@ class RecruitmentResultService:
                 extracted_name=row.get("extracted_name"),
                 extracted_branch=row.get("extracted_branch"),
                 job_branches=job_branches,
+                raw_usn=raw_cand_usn,
             )
 
             rev_status = match_res["review_status"]
@@ -738,12 +740,14 @@ class RecruitmentResultService:
                                 f"Your status for {round_label} at {company_name} is updated: {outcome.value}."
                             )
 
+                        target_ref = target_job_id or batch.circular_id
+                        notif_type = "placement_shortlist" if (not target_job_id and batch.circular_id) else "placement_result"
                         notif = Notification(
                             user_id=student_id,
-                            type="placement_result",
+                            type=notif_type,
                             title=title,
                             message=message,
-                            reference_id=target_job_id or batch.id,
+                            reference_id=target_ref,
                             event_key=event_key,
                             is_read=False,
                         )
@@ -993,12 +997,14 @@ class RecruitmentResultService:
                     title = f"Placement Result Update: {company_name}"
                     message = f"Your status for {batch.round_name} at {company_name} is updated: {norm_status.value}."
 
+                target_ref = batch.job_posting_id or batch.circular_id
+                notif_type = "placement_shortlist" if (not batch.job_posting_id and batch.circular_id) else "placement_result"
                 notif = Notification(
                     user_id=student_id,
-                    type="placement_result",
+                    type=notif_type,
                     title=title,
                     message=message,
-                    reference_id=batch.job_posting_id or batch.circular_id or batch.id,
+                    reference_id=target_ref,
                     event_key=event_key,
                     is_read=False,
                 )

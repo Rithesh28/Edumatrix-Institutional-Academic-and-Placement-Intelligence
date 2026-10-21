@@ -94,6 +94,7 @@ class RecruitmentResultMatcher:
         extracted_name: Optional[str],
         extracted_branch: Optional[str] = None,
         job_branches: Optional[List[str]] = None,
+        raw_usn: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Evaluate a single candidate row against active students and return
@@ -102,6 +103,7 @@ class RecruitmentResultMatcher:
         norm_usn = normalize_usn(extracted_usn)
         norm_email = normalize_email(extracted_email)
         norm_name = normalize_name(extracted_name)
+        effective_raw_usn = raw_usn if raw_usn is not None else extracted_usn
 
         student_by_usn: Optional[User] = None
         student_by_email: Optional[User] = None
@@ -201,6 +203,35 @@ class RecruitmentResultMatcher:
                     },
                 }
 
+            is_identity_changing = is_identity_changing_usn_correction(effective_raw_usn, norm_usn)
+            has_name_corroboration = bool(norm_name)
+            has_email_corroboration = bool(student_by_email and student_by_email.id == student_by_usn.id)
+
+            # If USN underwent an identity-changing OCR correction and neither name nor email corroborates it:
+            if is_identity_changing and not (has_name_corroboration or has_email_corroboration):
+                logger.warning(
+                    f"⚠️ Uncorroborated OCR USN correction: raw '{effective_raw_usn}' corrected to '{norm_usn}' "
+                    f"without candidate name or email corroboration. Routing to officer review."
+                )
+                return {
+                    "matched_student_id": None,
+                    "match_confidence": 0.60,
+                    "match_method": "UNCERTAIN_OCR_USN",
+                    "review_status": RecruitmentResultReviewState.AMBIGUOUS,
+                    "match_evidence": {
+                        "reason": (
+                            f"Extracted USN '{effective_raw_usn}' required character-level OCR correction to '{norm_usn}' "
+                            f"without candidate name or email corroboration. Routed to placement officer for review."
+                        ),
+                        "raw_extracted_usn": str(effective_raw_usn).strip() if effective_raw_usn else None,
+                        "normalized_usn": norm_usn,
+                        "usn_normalization_applied": True,
+                        "identity_changing_correction": True,
+                        "formatting_cleanup_only": False,
+                        "candidate": self._serialize_student(student_by_usn),
+                    },
+                }
+
             evidence = {
                 "matched_field": "enrollment_number",
                 "matched_value": norm_usn,
@@ -213,9 +244,15 @@ class RecruitmentResultMatcher:
                 evidence["name_verified"] = False
                 evidence["note"] = "Exact USN match. No candidate name was available in document for corroboration."
 
-            if extracted_usn and norm_usn and str(extracted_usn).strip().upper() != norm_usn:
-                evidence["usn_normalization_applied"] = True
-                evidence["raw_extracted_usn"] = str(extracted_usn).strip()
+            is_normalized = bool(effective_raw_usn and norm_usn and str(effective_raw_usn).strip() != norm_usn)
+            evidence["usn_normalization_applied"] = is_normalized
+            if is_normalized:
+                evidence["raw_extracted_usn"] = str(effective_raw_usn).strip()
+                evidence["identity_changing_correction"] = is_identity_changing
+                evidence["formatting_cleanup_only"] = not is_identity_changing
+            else:
+                evidence["identity_changing_correction"] = False
+                evidence["formatting_cleanup_only"] = False
 
             return {
                 "matched_student_id": student_by_usn.id,
@@ -457,40 +494,43 @@ class RecruitmentResultMatcher:
                 return False, None
 
             # 2. Token overlap & fuzzy / initial matches
-            ext_set = set(ext_tokens)
-            reg_set = set(reg_tokens)
-            common_tokens = ext_set & reg_set
+            matched_ext = set()
+            matched_reg = set()
+            non_generic_matches = set()
 
-            fuzzy_matches = set()
             for et in ext_tokens:
                 for rt in reg_tokens:
-                    # Initial match (e.g. 'a' matches 'adithya' or 'c' matches 'cs')
-                    if len(et) == 1 and rt.startswith(et):
-                        fuzzy_matches.add((et, rt))
+                    is_match = False
+                    if et == rt:
+                        is_match = True
+                    elif len(et) == 1 and rt.startswith(et):
+                        is_match = True
                     elif len(rt) == 1 and et.startswith(rt):
-                        fuzzy_matches.add((et, rt))
+                        is_match = True
                     elif len(et) >= 3 and len(rt) >= 3:
-                        # Typo tolerance (e.g. 'aditya' vs 'adithya')
                         if SequenceMatcher(None, et, rt).ratio() >= 0.80:
-                            fuzzy_matches.add((et, rt))
+                            is_match = True
 
-            has_overlap = bool(common_tokens or fuzzy_matches)
-            if not has_overlap:
+                    if is_match:
+                        matched_ext.add(et)
+                        matched_reg.add(rt)
+                        # A match is non-generic only if neither token is a generic surname/family title
+                        if et not in GENERIC_NAME_TOKENS and rt not in GENERIC_NAME_TOKENS:
+                            non_generic_matches.add((et, rt))
+
+            if not matched_ext:
                 reasons.append(
                     f"Extracted name tokens {ext_tokens} share no common words or initials with registered name {reg_tokens}"
                 )
                 continue
 
-            # If the ONLY matching token is a generic surname/family title, check if given names contradict
-            matched_ext_tokens = common_tokens | {et for et, rt in fuzzy_matches}
-            non_generic_matches = {t for t in matched_ext_tokens if t not in GENERIC_NAME_TOKENS}
-
+            # If all matches were generic surname/family tokens, verify that distinct given names/initials do not conflict
             if not non_generic_matches:
-                distinct_ext = [t for t in ext_tokens if t not in GENERIC_NAME_TOKENS and len(t) >= 3]
-                distinct_reg = [t for t in reg_tokens if t not in GENERIC_NAME_TOKENS and len(t) >= 3]
-                if distinct_ext and distinct_reg:
+                unmatched_ext = [t for t in ext_tokens if t not in matched_ext]
+                unmatched_reg = [t for t in reg_tokens if t not in matched_reg]
+                if unmatched_ext and unmatched_reg:
                     reasons.append(
-                        f"Names only share generic token {common_tokens}, but given names ({distinct_ext} vs {distinct_reg}) contradict"
+                        f"Names only share generic token, while given names/initials ({unmatched_ext} vs {unmatched_reg}) contradict"
                     )
                     continue
 

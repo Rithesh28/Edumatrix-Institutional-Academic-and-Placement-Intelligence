@@ -23,12 +23,13 @@ import {
   ExternalLink,
   X,
   TrendingUp,
+  Megaphone,
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import { useAuthStore } from '../../store/authStore';
 import StudentVerifiedOfferCard from '../../components/placement/StudentVerifiedOfferCard';
 import StudentRecruitmentTimeline from '../../components/placement/StudentRecruitmentTimeline';
-import { getJobFilePreviewUrl, getJobFileDownloadUrl, downloadJobFileAuth, previewJobFileAuth } from '../../services/placementService';
+import { getJobFilePreviewUrl, getJobFileDownloadUrl, downloadJobFileAuth, previewJobFileAuth, getRecruitmentCircular } from '../../services/placementService';
 import toast from 'react-hot-toast';
 
 function StudentJobDetails() {
@@ -65,6 +66,8 @@ function StudentJobDetails() {
   const [isTimelineOpen, setIsTimelineOpen] = useState(false);
   const [candidateNotes, setCandidateNotes] = useState('');
   const [submittedApplication, setSubmittedApplication] = useState(null);
+  const [circularFallback, setCircularFallback] = useState(null);
+  const [isCheckingFallback, setIsCheckingFallback] = useState(false);
 
   const handlePreviewJobFile = async (jobId, fid, filename) => {
     const toastId = toast.loading(`Opening preview for ${filename || 'document'}...`);
@@ -94,9 +97,22 @@ function StudentJobDetails() {
       // Clear any previous eligibility immediately to prevent stale display
       clearJobEligibility();
       setSubmittedApplication(null);
+      setCircularFallback(null);
 
-      // Fetch job details
-      fetchJobPosting(jobIdNum).catch(() => {});
+      // Fetch job details; on 404, check if this ID is a recruitment circular fallback
+      fetchJobPosting(jobIdNum).catch(async () => {
+        try {
+          setIsCheckingFallback(true);
+          const circ = await getRecruitmentCircular(jobIdNum);
+          if (circ && circ.id) {
+            setCircularFallback(circ);
+          }
+        } catch {
+          // not a circular either
+        } finally {
+          setIsCheckingFallback(false);
+        }
+      });
 
       // Fetch eligibility for current authenticated student
       if (user?.id) {
@@ -287,21 +303,62 @@ function StudentJobDetails() {
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Campus Jobs</span>
         </button>
-        <div className="text-center py-16 bg-white dark:bg-gray-900 rounded-2xl border border-red-200 dark:border-red-900/60 p-8 shadow-sm">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
-          <h2 className="text-lg font-bold text-gray-900 dark:text-white">Job Posting Not Found or Unavailable</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-md mx-auto">
-            {typeof jobError === 'string'
-              ? jobError
-              : 'This campus drive may be closed, in draft state, or does not exist.'}
-          </p>
-          <button
-            onClick={() => navigate('/student/jobs')}
-            className="mt-5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
-          >
-            <span>Return to Campus Jobs</span>
-          </button>
-        </div>
+        {circularFallback ? (
+          <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-2xl border border-blue-200 dark:border-blue-900/60 p-8 shadow-sm max-w-xl mx-auto space-y-4">
+            <div className="w-14 h-14 bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+              <Megaphone className="w-7 h-7" />
+            </div>
+            <span className="inline-block px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+              Recruitment Drive Found
+            </span>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+              {circularFallback.title}
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-300 max-w-md mx-auto">
+              This reference corresponds to the recruitment drive for <strong>{circularFallback.company_name || 'Campus Recruiter'}</strong>.
+              {circularFallback.linked_jobs?.length > 0 && ` Includes ${circularFallback.linked_jobs.length} linked role(s).`}
+            </p>
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                onClick={() => navigate(`/student/jobs/circulars/${circularFallback.id}`)}
+                className="w-full sm:w-auto px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-semibold transition-all cursor-pointer flex items-center justify-center gap-2 shadow-sm"
+              >
+                <span>View Recruitment Drive & Roles</span>
+                <ChevronRight className="w-4 h-4" />
+              </button>
+              {circularFallback.linked_jobs?.length === 1 && circularFallback.linked_jobs[0].job_posting_id && (
+                <button
+                  onClick={() => navigate(`/student/jobs/${circularFallback.linked_jobs[0].job_posting_id}`)}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-semibold transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  <span>View Role: {circularFallback.linked_jobs[0].title}</span>
+                </button>
+              )}
+              <button
+                onClick={() => navigate('/student/jobs?tab=circulars')}
+                className="w-full sm:w-auto px-4 py-2.5 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-sm font-medium transition-colors cursor-pointer"
+              >
+                <span>All Circulars</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-16 bg-white dark:bg-gray-900 rounded-2xl border border-red-200 dark:border-red-900/60 p-8 shadow-sm">
+            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-white">Job Posting Not Found or Unavailable</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-md mx-auto">
+              {typeof jobError === 'string'
+                ? jobError
+                : 'This campus drive may be closed, in draft state, or does not exist.'}
+            </p>
+            <button
+              onClick={() => navigate('/student/jobs')}
+              className="mt-5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <span>Return to Campus Jobs</span>
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -344,8 +401,12 @@ function StudentJobDetails() {
             </span>
           ) : null}
 
-          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-            ● Open Drive
+          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${
+            selectedJob.status === 'closed'
+              ? 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700'
+              : 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800'
+          }`}>
+            {selectedJob.status === 'closed' ? '● Closed Drive' : '● Open Drive'}
           </span>
         </div>
       </div>

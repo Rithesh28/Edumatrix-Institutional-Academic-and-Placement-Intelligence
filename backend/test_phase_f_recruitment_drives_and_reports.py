@@ -320,13 +320,26 @@ class TestPhaseFRecruitmentDrivesAndReports(unittest.TestCase):
             db=self.session,
             extracted_usn="1MS21CS001",
             extracted_email="different_email@example.com",
-            extracted_name="Different Name",
+            extracted_name="Arun Kumar",
             extracted_branch=None,
         )
         self.assertEqual(res["matched_student_id"], self.student_cse.id)
         self.assertEqual(res["match_confidence"], 1.00)
         self.assertEqual(res["match_method"], "EXACT_USN")
         self.assertEqual(res["review_status"], RecruitmentResultReviewState.MATCHED)
+
+    def test_01b_identity_matching_usn_contradictory_name(self):
+        """Safety guard: Contradictory candidate name on valid USN must route to review as AMBIGUOUS."""
+        res = recruitment_result_matcher.match_row(
+            db=self.session,
+            extracted_usn="1MS21CS001",
+            extracted_email="different_email@example.com",
+            extracted_name="Different Name",
+            extracted_branch=None,
+        )
+        self.assertIsNone(res["matched_student_id"])
+        self.assertEqual(res["match_method"], "NAME_USN_CONTRADICTION")
+        self.assertEqual(res["review_status"], RecruitmentResultReviewState.AMBIGUOUS)
 
     def test_02_identity_matching_email_exact(self):
         """Authoritative match tier: Email exact match yields 0.98 confidence."""

@@ -10,10 +10,11 @@ Handles all recruitment circular business logic:
 """
 
 import logging
-from typing import List, Optional, Dict, Any, Tuple
+import re
+from typing import List, Optional, Dict, Any, Tuple, Set
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, and_, or_
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from ..models.recruitment_circular import (
@@ -46,6 +47,80 @@ from ..schemas.recruitment_circular import (
 )
 
 logger = logging.getLogger(__name__)
+
+BRANCH_CANONICAL_MAP = {
+    "cse": {"cse", "cs", "computer science", "computer science and engineering", "computer science & engineering", "computer engineering"},
+    "aiml": {"aiml", "ai & ml", "ai/ml", "ai and ml", "ai & machine learning", "ai and machine learning", "artificial intelligence", "artificial intelligence and machine learning", "artificial intelligence & machine learning"},
+    "aids": {"aids", "ai & ds", "ai and data science", "ai & data science", "data science", "artificial intelligence and data science"},
+    "ise": {"ise", "information science", "information science and engineering", "information science & engineering"},
+    "it": {"it", "information technology"},
+    "ece": {"ece", "electronics", "electronics and communication", "electronics & communication", "electronics and communication engineering"},
+    "eee": {"eee", "electrical", "electrical and electronics", "electrical & electronics", "electrical and electronics engineering"},
+    "mech": {"mech", "me", "mechanical", "mechanical engineering"},
+    "civil": {"civil", "cv", "civil engineering"},
+}
+
+
+def get_canonical_branch_keys(branch_str: Optional[str]) -> Set[str]:
+    """Extract canonical branch keys from code, name, or parenthesis notation."""
+    if not branch_str:
+        return set()
+    s = str(branch_str).strip().lower()
+    keys = {s}
+
+    # Extract parenthesis code e.g. "Computer Science (CSE)" -> "cse"
+    m = re.search(r'\(([a-zA-Z0-9_\/& -]+)\)', s)
+    if m:
+        keys.add(m.group(1).strip().lower())
+
+    for canon, aliases in BRANCH_CANONICAL_MAP.items():
+        if s == canon or canon in keys:
+            keys.add(canon)
+            continue
+        if re.search(r'\b' + re.escape(canon) + r'\b', s):
+            keys.add(canon)
+            continue
+        for alias in aliases:
+            if alias in s:
+                keys.add(canon)
+                break
+    return keys
+
+
+def resolve_student_branch(user: Any) -> Optional[str]:
+    """Resolve student's branch from profile or department."""
+    if not user:
+        return None
+    profile = getattr(user, "student_profile", None)
+    if profile:
+        b = getattr(profile, "branch", None)
+        if b and str(b).strip():
+            return str(b).strip()
+        dept = getattr(profile, "department", None)
+        if dept and str(dept).strip():
+            return str(dept).strip()
+    u_dept = getattr(user, "department", None)
+    if u_dept and str(u_dept).strip():
+        return str(u_dept).strip()
+    return None
+
+
+def is_branch_eligible(student_branch: Optional[str], eligible_branches: Optional[List[str]]) -> bool:
+    """Check if student branch satisfies circular/job branch eligibility."""
+    if not eligible_branches or len(eligible_branches) == 0:
+        return True
+    if not student_branch:
+        return False
+    s_keys = get_canonical_branch_keys(student_branch)
+    for eb in eligible_branches:
+        if not eb:
+            continue
+        eb_keys = get_canonical_branch_keys(eb)
+        if s_keys & eb_keys:
+            return True
+        if str(student_branch).strip().lower() == str(eb).strip().lower():
+            return True
+    return False
 
 
 class RecruitmentCircularService:
@@ -205,14 +280,8 @@ class RecruitmentCircularService:
                 return None
             # Branch eligibility check
             if circular.branch_eligibility and len(circular.branch_eligibility) > 0:
-                s_branch = None
-                if current_user.student_profile and current_user.student_profile.branch:
-                    s_branch = current_user.student_profile.branch
-                elif current_user.department:
-                    s_branch = current_user.department
-                
-                target_branches = {str(b).strip().lower() for b in circular.branch_eligibility if b}
-                if not s_branch or str(s_branch).strip().lower() not in target_branches:
+                s_branch = resolve_student_branch(current_user)
+                if not is_branch_eligible(s_branch, circular.branch_eligibility):
                     return None
 
         elif current_user.role not in [UserRole.PLACEMENT_OFFICER, UserRole.ADMIN]:
@@ -269,14 +338,8 @@ class RecruitmentCircularService:
         for circ in all_circulars:
             # Filter branch eligibility for students
             if current_user.role == UserRole.STUDENT and circ.branch_eligibility and len(circ.branch_eligibility) > 0:
-                s_branch = None
-                if current_user.student_profile and current_user.student_profile.branch:
-                    s_branch = current_user.student_profile.branch
-                elif current_user.department:
-                    s_branch = current_user.department
-                
-                target_branches = {str(b).strip().lower() for b in circ.branch_eligibility if b}
-                if not s_branch or str(s_branch).strip().lower() not in target_branches:
+                s_branch = resolve_student_branch(current_user)
+                if not is_branch_eligible(s_branch, circ.branch_eligibility):
                     continue
 
             results.append(self._enrich_circular_response(circ))
@@ -441,6 +504,21 @@ class RecruitmentCircularService:
                 db.add(link)
                 linked_any = True
 
+                # If circular is already published, ensure linked job is OPEN and active
+                if circular.status == RecruitmentCircularStatus.PUBLISHED:
+                    target_job = db.query(JobPosting).filter(JobPosting.id == j_id).first()
+                    if target_job:
+                        now_ts = datetime.now(timezone.utc)
+                        if target_job.status != JobStatus.OPEN:
+                            target_job.status = JobStatus.OPEN
+                            target_job.updated_at = now_ts
+                        if target_job.application_deadline:
+                            dl = target_job.application_deadline
+                            if dl.tzinfo is None:
+                                dl = dl.replace(tzinfo=timezone.utc)
+                            if dl < now_ts:
+                                target_job.application_deadline = circular.application_deadline or circular.drive_date
+
         if linked_any:
             circular.updated_at = datetime.utcnow()
             db.commit()
@@ -538,8 +616,11 @@ class RecruitmentCircularService:
                         "Add skills or explicitly confirm publication with confirm_no_skills=True."
                     )
                 jobs_to_open.append(job)
+            elif job.status == JobStatus.CLOSED:
+                # Reopen any previously closed jobs linked to this newly published drive
+                jobs_to_open.append(job)
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         try:
             # Atomic transition
             circular.status = RecruitmentCircularStatus.PUBLISHED
@@ -549,6 +630,13 @@ class RecruitmentCircularService:
             for job in jobs_to_open:
                 job.status = JobStatus.OPEN
                 job.updated_at = now
+                # Synchronize deadline if expired so background celery task does not immediately close it
+                if job.application_deadline:
+                    j_dl = job.application_deadline
+                    if j_dl.tzinfo is None:
+                        j_dl = j_dl.replace(tzinfo=timezone.utc)
+                    if j_dl < now:
+                        job.application_deadline = circular.application_deadline or circular.drive_date
 
             db.commit()
             db.refresh(circular)
@@ -615,14 +703,9 @@ class RecruitmentCircularService:
         notif_count = 0
         for student in students:
             # Branch check
-            if target_branches:
-                s_branch = None
-                if student.student_profile and student.student_profile.branch:
-                    s_branch = student.student_profile.branch
-                elif student.department:
-                    s_branch = student.department
-
-                if not s_branch or str(s_branch).strip().lower() not in target_branches:
+            if circular.branch_eligibility and len(circular.branch_eligibility) > 0:
+                s_branch = resolve_student_branch(student)
+                if not is_branch_eligible(s_branch, circular.branch_eligibility):
                     continue
 
             event_key = f"circular_publish:{circular.id}:student:{student.id}"

@@ -100,7 +100,7 @@ const UnifiedBell = () => {
       } else {
         navigate('/lecturer/exam-duties')
       }
-    } else if (notif.type === 'placement_circular') {
+    } else if (notif.type === 'placement_circular' || notif.type === 'placement_shortlist') {
       if (role === 'student') {
         if (notif.reference_id) {
           navigate(`/student/jobs/circulars/${notif.reference_id}`)
@@ -114,9 +114,24 @@ const UnifiedBell = () => {
           navigate('/placement/circulars')
         }
       }
+    } else if (notif.type === 'placement_offer') {
+      if (role === 'student') {
+        navigate('/student/applications')
+      } else if (role === 'placement_officer' || role === 'admin') {
+        navigate('/placement/offers')
+      } else {
+        navigate(`/${role}/dashboard`)
+      }
     } else if (notif.type === 'placement_result') {
       if (role === 'student') {
-        if (notif.reference_id) {
+        // If event_key or context indicates a circular round, route to circular details
+        if (notif.event_key?.includes('circular') || notif.event_key?.includes('recruitment_circular')) {
+          if (notif.reference_id) {
+            navigate(`/student/jobs/circulars/${notif.reference_id}`)
+          } else {
+            navigate('/student/jobs?tab=circulars')
+          }
+        } else if (notif.reference_id) {
           navigate(`/student/jobs/${notif.reference_id}`)
         } else {
           navigate('/student/applications')
@@ -130,7 +145,7 @@ const UnifiedBell = () => {
       } else {
         navigate(`/${role}/dashboard`)
       }
-    } else if (notif.type?.startsWith('placement')) {
+    } else if (notif.type === 'placement_job' || notif.type === 'placement_confirm' || notif.type?.startsWith('placement')) {
       if (role === 'student') {
         if (notif.reference_id) {
           navigate(`/student/jobs/${notif.reference_id}`)

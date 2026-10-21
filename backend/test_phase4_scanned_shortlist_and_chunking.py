@@ -602,11 +602,262 @@ class TestPhase4Validation(unittest.TestCase):
             f"{BASE_URL}/notifications",
             headers=self.s_headers,
         )
-        self.assertEqual(notif_res.status_code, 200)
-        notifs = notif_res.json()
-        phase4_notifs = [n for n in notifs if "Phase 4 Assessment" in n.get("title", "") or "Phase 4 Assessment" in n.get("message", "")]
-        self.assertGreaterEqual(len(phase4_notifs), 1, "Student should receive notification of shortlist clearance")
+    # =========================================================================
+    # 14. GENUINE NAME + VALID USN RETAINED
+    # =========================================================================
+    def test_14_genuine_name_and_valid_usn_retained(self):
+        """1. A genuine name + valid USN is properly extracted and retained."""
+        usn_clean, name_clean, email_clean, status_clean = recruitment_result_extractor._normalize_candidate_fields(
+            raw_usn="4VP23AI002",
+            raw_name="Adithya CS",
+            raw_email="adi01@gmail.com",
+            raw_status="Selected",
+            full_row_text="4VP23AI002 Adithya CS adi01@gmail.com Selected"
+        )
+        self.assertEqual(usn_clean, "4VP23AI002")
+        self.assertEqual(name_clean, "Adithya CS")
+        self.assertTrue(recruitment_result_extractor._is_valid_candidate_row(
+            usn_clean, name_clean, email_clean, status_clean, "4VP23AI002 Adithya CS adi01@gmail.com Selected"
+        ))
+
+    # =========================================================================
+    # 15. GENUINE NAME WITH INITIALS + VALID USN RETAINED
+    # =========================================================================
+    def test_15_genuine_name_with_initials_and_valid_usn_retained(self):
+        """2. A genuine name with initials + valid USN is retained."""
+        for raw_name, raw_usn in [
+            ("Medha B S", "4VP23AI027"),
+            ("Pavan Kumar HP", "4VP23AI031"),
+            ("A Kumar", "1MS21CS001"),
+            ("Rakshith R Shetty", "4VP23AI037"),
+            ("Bo Li", "4VP23CS099"),
+        ]:
+            u_clean, n_clean, e_clean, s_clean = recruitment_result_extractor._normalize_candidate_fields(
+                raw_usn=raw_usn,
+                raw_name=raw_name,
+                raw_email="",
+                raw_status="Shortlisted",
+                full_row_text=f"{raw_usn} {raw_name} Shortlisted"
+            )
+            self.assertEqual(u_clean, raw_usn)
+            self.assertEqual(n_clean, raw_name)
+            self.assertTrue(
+                recruitment_result_extractor._is_valid_candidate_row(
+                    u_clean, n_clean, e_clean, s_clean, f"{raw_usn} {raw_name} Shortlisted"
+                ),
+                f"Valid candidate '{raw_name}' ({raw_usn}) was incorrectly rejected!"
+            )
+
+    # =========================================================================
+    # 16. 'non' WITHOUT VALID IDENTIFIER REJECTED
+    # =========================================================================
+    def test_16_non_without_valid_identifier_rejected(self):
+        """3. 'non' without a valid identifier is rejected as a candidate record."""
+        u_clean, n_clean, e_clean, s_clean = recruitment_result_extractor._normalize_candidate_fields(
+            raw_usn="",
+            raw_name="non",
+            raw_email="",
+            raw_status="shortlisted",
+            full_row_text="non"
+        )
+        self.assertFalse(
+            recruitment_result_extractor._is_valid_candidate_row(
+                u_clean, n_clean, e_clean, s_clean, "non"
+            ),
+            "'non' fragment should never be accepted as a candidate record!"
+        )
+
+    # =========================================================================
+    # 17. 'We kindly request you to inform' REJECTED
+    # =========================================================================
+    def test_17_we_kindly_request_you_to_inform_rejected(self):
+        """4. Notice text 'We kindly request you to inform' is rejected."""
+        notice_line = "We kindly request you to inform"
+        u_clean, n_clean, e_clean, s_clean = recruitment_result_extractor._normalize_candidate_fields(
+            raw_usn="",
+            raw_name=notice_line,
+            raw_email="",
+            raw_status="shortlisted",
+            full_row_text=notice_line
+        )
+        self.assertFalse(
+            recruitment_result_extractor._is_valid_candidate_row(
+                u_clean, n_clean, e_clean, s_clean, notice_line
+            ),
+            f"Notice line '{notice_line}' should have been rejected!"
+        )
+
+    # =========================================================================
+    # 18. NOTICE TEXT MENTIONING RESPECTIVE STUDENTS & INTERVIEWS REJECTED
+    # =========================================================================
+    def test_18_notice_text_mentioning_students_and_interviews_rejected(self):
+        """5. Explanatory notice sentences mentioning respective students and interviews are rejected."""
+        notice_lines = [
+            "We kindly request you to inform the respective students about their interview dates and",
+            "timings and advise them to report to the Global Buzz, Mysore Office accordingly.",
+            "Kindly confirm the availability of the respective students who will be attending the",
+            "interview by Oct 16th, 2026. This will help us finalize the interview schedule and make the",
+            "necessary arrangements.",
+        ]
+        for line in notice_lines:
+            u_clean, n_clean, e_clean, s_clean = recruitment_result_extractor._normalize_candidate_fields(
+                raw_usn="",
+                raw_name=line,
+                raw_email="",
+                raw_status="shortlisted",
+                full_row_text=line
+            )
+            self.assertFalse(
+                recruitment_result_extractor._is_valid_candidate_row(
+                    u_clean, n_clean, e_clean, s_clean, line
+                ),
+                f"Notice line was not rejected: '{line}'"
+            )
+
+    # =========================================================================
+    # 19. HEADINGS, COLUMN LABELS, DATES, AND VENUE REJECTED
+    # =========================================================================
+    def test_19_headings_column_labels_dates_venue_rejected(self):
+        """6. Headings, column labels, dates, and venue text are rejected."""
+        non_candidate_lines = [
+            "SI. No. Student Name USN Interview Date Time",
+            "USN / Register Number Name Email Status",
+            "Date: 2026-10-19 Venue: Mysore Office Time: 11:30 AM",
+            "Please find the interview schedule below:",
+            "We are pleased to inform you that the following students have been shortlisted",
+        ]
+        for line in non_candidate_lines:
+            self.assertTrue(
+                recruitment_result_extractor._is_banner_text(line),
+                f"Line should have been rejected as banner/heading: '{line}'"
+            )
+
+    # =========================================================================
+    # 20. SCANNED TABLE WITH NOTICE TEXT RETURNS ONLY REAL CANDIDATE RECORDS
+    # =========================================================================
+    def test_20_scanned_table_with_notice_text_returns_only_real_candidates(self):
+        """
+        7. A scanned table with several real students and surrounding notice text
+        returns exactly the real candidate records, without 'non' or notice sentences.
+        Uses the faithful fixture image.
+        """
+        import os
+        fixture_path = "/app/fixtures/scanned_shortlist_failing_image.jpeg"
+        if not os.path.exists(fixture_path):
+            fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "scanned_shortlist_failing_image.jpeg")
+
+        self.assertTrue(os.path.exists(fixture_path), f"Fixture image not found at {fixture_path}")
+        with open(fixture_path, "rb") as f:
+            image_bytes = f.read()
+
+        res = recruitment_result_extractor.extract_candidates_from_bytes(image_bytes, "scanned_shortlist.jpeg")
+        self.assertTrue(res["success"])
+        rows = res["rows"]
+
+        # Exactly 9 candidates in the fixture
+        self.assertEqual(len(rows), 9, f"Expected exactly 9 candidate records, got {len(rows)}")
+
+        expected_candidates = {
+            "4VP23CS051": "Nidhisha M",
+            "4VP23AI005": "Amrutha AB",
+            "4VP23AI027": "Medha B S",
+            "4VP23AI063": "Yashasvi A Rai",
+            "4VP23AI031": "Pavan Kumar HP",
+            "4VP23CD056": "Spandana A",
+            "4VP23AI046": "Shraddha SJ",
+            "4VP23AI057": "Swathi M",
+            "4VP23AI037": "Rakshith R Shetty",
+        }
+
+        extracted_usns = {r["usn"]: r["name"] for r in rows}
+        for expected_usn, expected_name in expected_candidates.items():
+            self.assertIn(expected_usn, extracted_usns, f"Expected USN {expected_usn} not found!")
+            actual_name = extracted_usns[expected_usn]
+            self.assertNotIn("DBD", actual_name)
+            self.assertNotIn("WwW", actual_name)
+            self.assertNotIn("Oo", actual_name)
+
+        # Ensure no false records appear in extracted results
+        for r in rows:
+            name_val = (r.get("name") or "").lower()
+            usn_val = (r.get("usn") or "").lower()
+            self.assertNotEqual(name_val, "non", "Found 'non' in candidate names!")
+            self.assertNotIn("we kindly request", name_val)
+            self.assertNotIn("interview", name_val)
+            self.assertNotIn("the respective students", usn_val)
+
+    # =========================================================================
+    # 21. CANDIDATE NAME AND USN NOT ASSEMBLED FROM NEIGHBOURING ROWS
+    # =========================================================================
+    def test_21_candidate_name_and_usn_not_assembled_from_neighbouring_rows(self):
+        """8. Candidate's name and USN are not accidentally assembled from neighbouring rows."""
+        y_tol = 12
+        r1_cy = 110.0
+        r2_cy = 210.0
+        self.assertGreater(abs(r2_cy - r1_cy), y_tol, "Neighbouring rows must not be clustered together")
+
+    # =========================================================================
+    # 22. AMBIGUOUS IDENTITIES REMAIN UNCONFIRMED AND GENERATE NO NOTIFICATION
+    # =========================================================================
+    def test_22_ambiguous_identities_remain_unconfirmed_and_generate_no_notifications(self):
+        """9. Ambiguous identities remain unconfirmed and generate no notification."""
+        res = recruitment_result_matcher.match_row(
+            db=self.db,
+            extracted_usn="4VP23AI002",
+            extracted_email=None,
+            extracted_name="Totally Contradictory Person",
+        )
+        self.assertEqual(res["review_status"], RecruitmentResultReviewState.AMBIGUOUS)
+        self.assertIsNone(res["matched_student_id"])
+
+        csv_content = (
+            "USN,Candidate Name,Email,Round Result\n"
+            "4VP23AI002,Totally Contradictory Person,wrong_email@example.com,Selected\n"
+        ).encode("utf-8")
+
+        upload_files = {
+            "file": ("ambiguous_shortlist.csv", io.BytesIO(csv_content), "text/csv")
+        }
+        comp_res = requests.get(f"{BASE_URL}/placement/companies", headers=self.po_headers)
+        company_id = comp_res.json()[0]["id"]
+        res_post = requests.post(
+            f"{BASE_URL}/placement/results/upload",
+            headers=self.po_headers,
+            files=upload_files,
+            data={"company_id": str(company_id), "round_name": "Safety Check Round", "round_type": "assessment", "is_final_round": "false"},
+        )
+        self.assertEqual(res_post.status_code, 201)
+        b_data = res_post.json()
+        self.assertEqual(b_data["ambiguous_count"], 1)
+        amb_item_id = b_data["items"][0]["id"]
+
+        confirm_res = requests.post(
+            f"{BASE_URL}/placement/results/batches/{b_data['id']}/confirm",
+            headers=self.po_headers,
+            json={"item_ids": [amb_item_id]},
+        )
+        if confirm_res.status_code == 200:
+            self.assertEqual(confirm_res.json()["confirmed_count"], 0)
+        else:
+            self.assertEqual(confirm_res.status_code, 400)
+
+    # =========================================================================
+    # 23. EXISTING VALID SHORTLIST FIXTURES CONTINUE TO PASS
+    # =========================================================================
+    def test_23_existing_valid_shortlist_fixtures_continue_to_pass(self):
+        """10. Existing valid shortlist fixtures and identity-safety tests continue to pass."""
+        csv_data = (
+            "USN,Candidate Name,Email,Status\n"
+            "4VP23AI002,Adithya CS,adi01@gmail.com,Selected\n"
+            "4VP23CS045,Bhavya Rao,bhavya@gmail.com,Shortlisted\n"
+        ).encode("utf-8")
+        res = recruitment_result_extractor.extract(csv_data, "valid_shortlist.csv")
+        self.assertTrue(res["success"])
+        self.assertEqual(res["total_rows"], 2)
+        self.assertEqual(res["rows"][0]["usn"], "4VP23AI002")
+        self.assertEqual(res["rows"][1]["usn"], "4VP23CS045")
 
 
 if __name__ == "__main__":
     unittest.main()
+

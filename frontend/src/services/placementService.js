@@ -2,7 +2,7 @@
  * Placement Service - API calls for placement management
  */
 
-import api from './api';
+import api, { API_URL } from './api';
 
 // ============================================
 // COMPANY ENDPOINTS
@@ -254,13 +254,13 @@ export const previewJobFileAuth = async (jobId, fileId) => {
 
 export const getJobFileDownloadUrl = (jobId, fileId) => {
   const token = getStoredAuthToken();
-  const base = `/api/v1/placement/jobs/${jobId}/files/${fileId}/download`;
+  const base = `${API_URL}/placement/jobs/${jobId}/files/${fileId}/download`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 
 export const getJobFilePreviewUrl = (jobId, fileId) => {
   const token = getStoredAuthToken();
-  const base = `/api/v1/placement/jobs/${jobId}/files/${fileId}/preview`;
+  const base = `${API_URL}/placement/jobs/${jobId}/files/${fileId}/preview`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 
@@ -428,13 +428,13 @@ export const previewCircularAttachmentAuth = async (circularId, attachmentId) =>
 
 export const getCircularAttachmentDownloadUrl = (circularId, attachmentId) => {
   const token = getStoredAuthToken();
-  const base = `/api/v1/placement/circulars/${circularId}/attachments/${attachmentId}/download`;
+  const base = `${API_URL}/placement/circulars/${circularId}/attachments/${attachmentId}/download`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 
 export const getCircularAttachmentPreviewUrl = (circularId, attachmentId) => {
   const token = getStoredAuthToken();
-  const base = `/api/v1/placement/circulars/${circularId}/attachments/${attachmentId}/preview`;
+  const base = `${API_URL}/placement/circulars/${circularId}/attachments/${attachmentId}/preview`;
   return token ? `${base}?token=${encodeURIComponent(token)}` : base;
 };
 

@@ -397,5 +397,217 @@ class TestCandidateIdentitySafety(unittest.TestCase):
             self.db.commit()
 
 
+    # =========================================================================
+    # TEST 9: Harmless formatting cleanup vs identity-changing OCR corrections
+    # =========================================================================
+    def test_09_formatting_cleanup_vs_identity_changing_correction(self):
+        """
+        Verify:
+        1. Harmless formatting cleanup (spaces, hyphens) preserves ordinary exact-USN matching (MATCHED, 1.00).
+        2. Identity-changing character correction without name/email corroboration routes to UNCERTAIN_OCR_USN (AMBIGUOUS, matched_student_id=None).
+        3. Identity-changing character correction WITH corroborating name confirms safely (MATCHED, 1.00).
+        """
+        # Case A: Harmless whitespace/hyphen cleanup on Student 104 (4VP23AI037) with no candidate name
+        res_harmless = recruitment_result_matcher.match_row(
+            db=self.db,
+            extracted_usn="4VP23AI037",
+            extracted_email=None,
+            extracted_name=None,
+            raw_usn=" 4VP-23-AI-037 ",
+        )
+        self.assertEqual(res_harmless["matched_student_id"], 104)
+        self.assertEqual(res_harmless["match_confidence"], 1.00)
+        self.assertEqual(res_harmless["match_method"], "EXACT_USN")
+        self.assertEqual(res_harmless["review_status"], RecruitmentResultReviewState.MATCHED)
+
+        ev_harmless = res_harmless["match_evidence"]
+        self.assertTrue(ev_harmless["usn_normalization_applied"])
+        self.assertTrue(ev_harmless["formatting_cleanup_only"])
+        self.assertFalse(ev_harmless["identity_changing_correction"])
+        self.assertFalse(ev_harmless["name_verified"])
+        self.assertEqual(ev_harmless["raw_extracted_usn"], "4VP-23-AI-037")
+
+        # Case B: Identity-changing OCR correction (AVP -> 4VP) with NO extracted name or email
+        res_ocr_uncorroborated = recruitment_result_matcher.match_row(
+            db=self.db,
+            extracted_usn="4VP23AI037",
+            extracted_email=None,
+            extracted_name=None,
+            raw_usn="AVP23AI037",
+        )
+        self.assertIsNone(res_ocr_uncorroborated["matched_student_id"])
+        self.assertEqual(res_ocr_uncorroborated["match_confidence"], 0.60)
+        self.assertEqual(res_ocr_uncorroborated["match_method"], "UNCERTAIN_OCR_USN")
+        self.assertEqual(res_ocr_uncorroborated["review_status"], RecruitmentResultReviewState.AMBIGUOUS)
+
+        ev_ocr = res_ocr_uncorroborated["match_evidence"]
+        self.assertTrue(ev_ocr["usn_normalization_applied"])
+        self.assertTrue(ev_ocr["identity_changing_correction"])
+        self.assertFalse(ev_ocr["formatting_cleanup_only"])
+        self.assertEqual(ev_ocr["raw_extracted_usn"], "AVP23AI037")
+        self.assertEqual(ev_ocr["normalized_usn"], "4VP23AI037")
+        self.assertIn("required character-level OCR correction", ev_ocr["reason"])
+
+        # Case C: Identity-changing OCR correction WITH corroborating candidate name
+        res_ocr_corroborated = recruitment_result_matcher.match_row(
+            db=self.db,
+            extracted_usn="4VP23AI037",
+            extracted_email=None,
+            extracted_name="Rakshith R Shetty",
+            raw_usn="AVP23AI037",
+        )
+        self.assertEqual(res_ocr_corroborated["matched_student_id"], 104)
+        self.assertEqual(res_ocr_corroborated["match_confidence"], 1.00)
+        self.assertEqual(res_ocr_corroborated["match_method"], "EXACT_USN")
+        self.assertEqual(res_ocr_corroborated["review_status"], RecruitmentResultReviewState.MATCHED)
+
+        ev_corroborated = res_ocr_corroborated["match_evidence"]
+        self.assertTrue(ev_corroborated["usn_normalization_applied"])
+        self.assertTrue(ev_corroborated["identity_changing_correction"])
+        self.assertFalse(ev_corroborated["formatting_cleanup_only"])
+        self.assertTrue(ev_corroborated["name_verified"])
+        self.assertEqual(ev_corroborated["corroborated_name"], "rakshith r shetty")
+
+    # =========================================================================
+    # TEST 10: Short initials and common surnames contradiction handling
+    # =========================================================================
+    def test_10_short_initials_and_common_surnames(self):
+        """
+        Verify:
+        1. Short initial with contradictory given name and common surname (e.g. 'A Kumar' vs 'Suresh Kumar') -> AMBIGUOUS.
+        2. Short initial with matching given name and common surname (e.g. 'A Kumar' vs 'Adithya Kumar') -> MATCHED.
+        3. 'R Sharma' vs 'Deepak Sharma' -> AMBIGUOUS.
+        4. 'R Shetty' vs 'Rakshith R Shetty' -> MATCHED.
+        5. 'K Shetty' vs 'Rakshith R Shetty' -> AMBIGUOUS.
+        """
+        # Create temporary students for testing initial contradictions
+        u_suresh = self.db.query(User).filter(User.email == "test_suresh_kumar@example.com").first()
+        if not u_suresh:
+            u_suresh = User(
+                email="test_suresh_kumar@example.com",
+                name="Suresh Kumar",
+                password_hash="fakehash",
+                role=UserRole.STUDENT,
+                is_active=True,
+            )
+            self.db.add(u_suresh)
+            self.db.flush()
+            p_suresh = StudentProfileExtended(
+                user_id=u_suresh.id,
+                enrollment_number="4VP88CS101",
+                full_name="Suresh Kumar",
+                branch="CSE",
+            )
+            self.db.add(p_suresh)
+
+        u_adithya = self.db.query(User).filter(User.email == "test_adithya_kumar@example.com").first()
+        if not u_adithya:
+            u_adithya = User(
+                email="test_adithya_kumar@example.com",
+                name="Adithya Kumar",
+                password_hash="fakehash",
+                role=UserRole.STUDENT,
+                is_active=True,
+            )
+            self.db.add(u_adithya)
+            self.db.flush()
+            p_adithya = StudentProfileExtended(
+                user_id=u_adithya.id,
+                enrollment_number="4VP88CS102",
+                full_name="Adithya Kumar",
+                branch="CSE",
+            )
+            self.db.add(p_adithya)
+
+        u_deepak = self.db.query(User).filter(User.email == "test_deepak_sharma@example.com").first()
+        if not u_deepak:
+            u_deepak = User(
+                email="test_deepak_sharma@example.com",
+                name="Deepak Sharma",
+                password_hash="fakehash",
+                role=UserRole.STUDENT,
+                is_active=True,
+            )
+            self.db.add(u_deepak)
+            self.db.flush()
+            p_deepak = StudentProfileExtended(
+                user_id=u_deepak.id,
+                enrollment_number="4VP88CS103",
+                full_name="Deepak Sharma",
+                branch="CSE",
+            )
+            self.db.add(p_deepak)
+
+        self.db.commit()
+
+        try:
+            # 1. 'A Kumar' vs registered 'Suresh Kumar' (USN 4VP88CS101) -> CONTRADICTION!
+            res1 = recruitment_result_matcher.match_row(
+                db=self.db,
+                extracted_usn="4VP88CS101",
+                extracted_email=None,
+                extracted_name="A Kumar",
+            )
+            self.assertIsNone(res1["matched_student_id"])
+            self.assertEqual(res1["match_method"], "NAME_USN_CONTRADICTION")
+            self.assertEqual(res1["review_status"], RecruitmentResultReviewState.AMBIGUOUS)
+
+            # 2. 'A Kumar' vs registered 'Adithya Kumar' (USN 4VP88CS102) -> MATCHED!
+            res2 = recruitment_result_matcher.match_row(
+                db=self.db,
+                extracted_usn="4VP88CS102",
+                extracted_email=None,
+                extracted_name="A Kumar",
+            )
+            self.assertEqual(res2["matched_student_id"], u_adithya.id)
+            self.assertEqual(res2["match_method"], "EXACT_USN")
+            self.assertEqual(res2["review_status"], RecruitmentResultReviewState.MATCHED)
+
+            # 3. 'R Sharma' vs registered 'Deepak Sharma' (USN 4VP88CS103) -> CONTRADICTION!
+            res3 = recruitment_result_matcher.match_row(
+                db=self.db,
+                extracted_usn="4VP88CS103",
+                extracted_email=None,
+                extracted_name="R Sharma",
+            )
+            self.assertIsNone(res3["matched_student_id"])
+            self.assertEqual(res3["match_method"], "NAME_USN_CONTRADICTION")
+            self.assertEqual(res3["review_status"], RecruitmentResultReviewState.AMBIGUOUS)
+
+            # 4. 'R Shetty' vs registered Student 104 'Rakshith R Shetty' (USN 4VP23AI037) -> MATCHED!
+            res4 = recruitment_result_matcher.match_row(
+                db=self.db,
+                extracted_usn="4VP23AI037",
+                extracted_email=None,
+                extracted_name="R Shetty",
+            )
+            self.assertEqual(res4["matched_student_id"], 104)
+            self.assertEqual(res4["match_method"], "EXACT_USN")
+            self.assertEqual(res4["review_status"], RecruitmentResultReviewState.MATCHED)
+
+            # 5. 'K Shetty' vs registered Student 104 'Rakshith R Shetty' (USN 4VP23AI037) -> CONTRADICTION!
+            res5 = recruitment_result_matcher.match_row(
+                db=self.db,
+                extracted_usn="4VP23AI037",
+                extracted_email=None,
+                extracted_name="K Shetty",
+            )
+            self.assertIsNone(res5["matched_student_id"])
+            self.assertEqual(res5["match_method"], "NAME_USN_CONTRADICTION")
+            self.assertEqual(res5["review_status"], RecruitmentResultReviewState.AMBIGUOUS)
+
+        finally:
+            # Clean up temporary users
+            for email in ["test_suresh_kumar@example.com", "test_adithya_kumar@example.com", "test_deepak_sharma@example.com"]:
+                u = self.db.query(User).filter(User.email == email).first()
+                if u:
+                    prof = self.db.query(StudentProfileExtended).filter(StudentProfileExtended.user_id == u.id).first()
+                    if prof:
+                        self.db.delete(prof)
+                    self.db.delete(u)
+            self.db.commit()
+
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -473,14 +473,29 @@ def close_expired_jobs(db=None):
             JobPosting.application_deadline < now
         ).all()
         
+        closed_count = 0
         for job in expired_jobs:
+            # Check if linked to an active published circular whose drive date or circular deadline is in the future
+            from ..models.recruitment_circular import RecruitmentCircular, RecruitmentCircularJob, RecruitmentCircularStatus
+            active_circular = db.query(RecruitmentCircular).join(
+                RecruitmentCircularJob, RecruitmentCircular.id == RecruitmentCircularJob.circular_id
+            ).filter(
+                RecruitmentCircularJob.job_posting_id == job.id,
+                RecruitmentCircular.status == RecruitmentCircularStatus.PUBLISHED
+            ).first()
+            if active_circular:
+                effective_deadline = active_circular.drive_date or active_circular.application_deadline
+                if effective_deadline and effective_deadline >= now:
+                    continue  # Keep open for active recruitment drive
+            
             job.status = JobStatus.CLOSED
             job.updated_at = now
+            closed_count += 1
             logger.info(f"🔒 Job closed: {job.title} (ID: {job.id})")
         
         db.commit()
-        logger.info(f"✅ Closed {len(expired_jobs)} expired jobs")
-        return len(expired_jobs)
+        logger.info(f"✅ Closed {closed_count} expired jobs (skipped active drive-linked jobs)")
+        return closed_count
     except Exception as e:
         logger.error(f"❌ Failed to close expired jobs: {str(e)}")
         db.rollback()

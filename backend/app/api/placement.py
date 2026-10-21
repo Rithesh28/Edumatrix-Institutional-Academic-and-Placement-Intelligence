@@ -34,7 +34,8 @@ from ..models.shortlist import Shortlist
 from ..models.profile import StudentProfileExtended, Skill, Project
 from ..models.certification import Certification
 from ..models.resume import Resume
-from ..models.recruitment_circular import RecruitmentCircular, RecruitmentCircularJob
+from ..models.recruitment_circular import RecruitmentCircular, RecruitmentCircularJob, RecruitmentCircularStatus
+from ..services.recruitment_circular_service import is_branch_eligible, resolve_student_branch
 from ..models.audit_log import AuditLog
 from ..models.recruitment_round import (
     PlacementOffer,
@@ -223,6 +224,25 @@ async def get_job_postings(
     return responses
 
 
+def is_job_accessible_to_student(db: Session, job: JobPosting) -> bool:
+    """
+    Determine if a job posting is visible/accessible to students:
+    - Jobs with status OPEN or CLOSED are accessible (allowing role review, criteria inspection, etc.)
+    - DRAFT jobs are only accessible if linked to an active PUBLISHED recruitment circular
+    """
+    if not job:
+        return False
+    if job.status != JobStatus.DRAFT:
+        return True
+    is_linked_published = db.query(RecruitmentCircularJob).join(
+        RecruitmentCircular, RecruitmentCircular.id == RecruitmentCircularJob.circular_id
+    ).filter(
+        RecruitmentCircularJob.job_posting_id == job.id,
+        RecruitmentCircular.status == RecruitmentCircularStatus.PUBLISHED
+    ).first()
+    return bool(is_linked_published)
+
+
 @router.get("/jobs/{job_id}", response_model=JobPostingResponse)
 async def get_job_posting(
     job_id: int,
@@ -232,10 +252,27 @@ async def get_job_posting(
     """Get a job posting by ID."""
     job = placement_service.get_job_posting(db, job_id)
     if not job:
+        # Graceful fallback: check if the requested ID is actually an active published recruitment circular
+        circ = db.query(RecruitmentCircular).filter(
+            RecruitmentCircular.id == job_id,
+            RecruitmentCircular.status == RecruitmentCircularStatus.PUBLISHED
+        ).first()
+        if circ:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "message": f"Job posting not found. Reference ID {job_id} belongs to recruitment circular '{circ.title}'.",
+                    "circular_fallback": {
+                        "circular_id": circ.id,
+                        "circular_title": circ.title,
+                        "company": circ.company.name if circ.company else None,
+                    }
+                }
+            )
         raise HTTPException(status_code=404, detail="Job posting not found")
     
-    # RBAC: Students cannot view draft jobs
-    if current_user.role == UserRole.STUDENT and job.status != JobStatus.OPEN:
+    # RBAC: Students cannot view unlinked draft jobs
+    if current_user.role == UserRole.STUDENT and not is_job_accessible_to_student(db, job):
         raise HTTPException(status_code=404, detail="Job posting not found")
 
     response = JobPostingResponse.model_validate(job)
@@ -345,16 +382,11 @@ async def download_job_file(
         raise HTTPException(status_code=404, detail="File is not attached to this job posting")
 
     if current_user.role == UserRole.STUDENT:
-        if job.status != JobStatus.OPEN:
+        if not is_job_accessible_to_student(db, job):
             raise HTTPException(status_code=404, detail="Job posting not found")
         if job.branch_eligibility and len(job.branch_eligibility) > 0:
-            student_branch = None
-            if current_user.student_profile and current_user.student_profile.branch:
-                student_branch = current_user.student_profile.branch
-            elif current_user.department:
-                student_branch = current_user.department
-            target_branches = {str(b).strip().lower() for b in job.branch_eligibility if b}
-            if not student_branch or str(student_branch).strip().lower() not in target_branches:
+            student_branch = resolve_student_branch(current_user)
+            if not is_branch_eligible(student_branch, job.branch_eligibility):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: You are not eligible for this job posting.")
     elif current_user.role not in [UserRole.ADMIN, UserRole.PLACEMENT_OFFICER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
@@ -428,16 +460,11 @@ async def preview_job_file(
         raise HTTPException(status_code=404, detail="File is not attached to this job posting")
 
     if current_user.role == UserRole.STUDENT:
-        if job.status != JobStatus.OPEN:
+        if not is_job_accessible_to_student(db, job):
             raise HTTPException(status_code=404, detail="Job posting not found")
         if job.branch_eligibility and len(job.branch_eligibility) > 0:
-            student_branch = None
-            if current_user.student_profile and current_user.student_profile.branch:
-                student_branch = current_user.student_profile.branch
-            elif current_user.department:
-                student_branch = current_user.department
-            target_branches = {str(b).strip().lower() for b in job.branch_eligibility if b}
-            if not student_branch or str(student_branch).strip().lower() not in target_branches:
+            student_branch = resolve_student_branch(current_user)
+            if not is_branch_eligible(student_branch, job.branch_eligibility):
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied: You are not eligible for this job posting.")
     elif current_user.role not in [UserRole.ADMIN, UserRole.PLACEMENT_OFFICER]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
@@ -989,10 +1016,10 @@ async def check_student_eligibility(
             detail="You can only check your own eligibility"
         )
     
-    # RBAC: Students can only check eligibility for OPEN jobs
+    # RBAC: Students can check eligibility for accessible (non-draft / drive-linked) jobs
     if current_user.role == UserRole.STUDENT:
         job = placement_service.get_job_posting(db, job_id)
-        if not job or job.status != JobStatus.OPEN:
+        if not job or not is_job_accessible_to_student(db, job):
             raise HTTPException(status_code=404, detail="Job posting not found or not open for applications")
 
     try:

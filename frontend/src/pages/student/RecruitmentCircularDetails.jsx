@@ -69,6 +69,17 @@ const StudentRecruitmentCircularDetails = () => {
   const isDeadlinePassed =
     circ.application_deadline && new Date(circ.application_deadline) < new Date();
 
+  const handleDownloadAttachment = async (att) => {
+    if (!circ?.id || !att?.id) return;
+    const toastId = toast.loading(`Downloading ${att.filename || 'document'}...`);
+    try {
+      const downloadedAs = await downloadCircularAttachmentAuth(circ.id, att.id, att.filename);
+      toast.success(`Downloaded ${downloadedAs || att.filename}`, { id: toastId });
+    } catch (err) {
+      toast.error(err.message || 'Failed to download attachment', { id: toastId });
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-16">
       {/* Back button and banner */}
@@ -301,7 +312,7 @@ const StudentRecruitmentCircularDetails = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => downloadCircularAttachmentAuth(circ.id, att.id, att.filename)}
+                    onClick={() => handleDownloadAttachment(att)}
                     className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition-colors cursor-pointer"
                     title="Download attachment"
                   >
@@ -315,36 +326,97 @@ const StudentRecruitmentCircularDetails = () => {
       </div>
 
       {/* Attachment Preview Modal */}
-      {previewFile && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col border border-gray-200 dark:border-gray-800 shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
-              <div>
-                <h3 className="font-bold text-sm text-gray-900 dark:text-white">
-                  {previewFile.filename}
-                </h3>
-                <span className="text-[10px] uppercase font-bold text-gray-400">
-                  {previewFile.attachment_type}
-                </span>
-              </div>
-              <button
-                onClick={() => setPreviewFile(null)}
-                className="p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {previewFile && (() => {
+        const previewUrl = getCircularAttachmentPreviewUrl(circ.id, previewFile.id);
+        const filename = previewFile.filename || '';
+        const ext = filename.split('.').pop().toLowerCase();
+        const mime = previewFile.mime_type || '';
+        const isImage = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext) || mime.startsWith('image/');
+        const isPdf = ext === 'pdf' || mime === 'application/pdf';
 
-            <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-              <iframe
-                src={getCircularAttachmentPreviewUrl(circ.id, previewFile.id)}
-                title={previewFile.filename}
-                className="w-full h-[65vh] rounded-lg border border-gray-200 dark:border-gray-800"
-              />
+        return (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-900 rounded-2xl max-w-4xl w-full max-h-[90vh] flex flex-col border border-gray-200 dark:border-gray-800 shadow-2xl overflow-hidden">
+              <div className="p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-sm text-gray-900 dark:text-white">
+                    {previewFile.filename}
+                  </h3>
+                  <span className="text-[10px] uppercase font-bold text-gray-400">
+                    {previewFile.attachment_type?.replace('_', ' ')}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadAttachment(previewFile)}
+                    className="px-3 py-1.5 bg-blue-50 dark:bg-blue-950/60 hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-600 dark:text-blue-400 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-blue-200 dark:border-blue-800"
+                    title="Download attachment"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewFile(null)}
+                    className="p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-auto p-4 flex items-center justify-center bg-gray-50 dark:bg-gray-950 min-h-[350px]">
+                {isImage ? (
+                  <div className="max-w-full max-h-[65vh] flex items-center justify-center">
+                    <img
+                      src={previewUrl}
+                      alt={previewFile.filename}
+                      className="max-w-full max-h-[65vh] object-contain rounded-lg border border-gray-200 dark:border-gray-800 shadow-sm"
+                      onError={(e) => {
+                        e.target.style.display = 'none';
+                        const parent = e.target.parentElement;
+                        if (parent) {
+                          parent.innerHTML = `
+                            <div class="text-center p-6 space-y-2">
+                              <p class="text-sm text-red-500 font-semibold">Unable to display image preview inline</p>
+                              <p class="text-xs text-gray-400">Please click the Download button above to view the file.</p>
+                            </div>
+                          `;
+                        }
+                      }}
+                    />
+                  </div>
+                ) : isPdf ? (
+                  <iframe
+                    src={previewUrl}
+                    title={previewFile.filename}
+                    className="w-full h-[65vh] rounded-lg border border-gray-200 dark:border-gray-800"
+                  />
+                ) : (
+                  <div className="text-center p-8 bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 max-w-sm space-y-3">
+                    <Paperclip className="w-10 h-10 text-gray-400 mx-auto" />
+                    <h4 className="text-sm font-bold text-gray-900 dark:text-white">
+                      Inline preview not supported
+                    </h4>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Files of type <span className="font-semibold uppercase">{ext || 'document'}</span> cannot be displayed directly inside the browser.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadAttachment(previewFile)}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download {previewFile.filename}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

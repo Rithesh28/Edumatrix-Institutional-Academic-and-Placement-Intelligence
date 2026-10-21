@@ -463,12 +463,12 @@ const Results = () => {
               {/* File upload input */}
               <div>
                 <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  Upload Result File (.csv, .xlsx, .pdf) <span className="text-rose-500">*</span>
+                  Upload Result File (.csv, .xlsx, .pdf, .jpg, .png) <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="file"
                   required
-                  accept=".csv,.xlsx,.xls,.pdf"
+                  accept=".csv,.xlsx,.xls,.pdf,.docx,.png,.jpg,.jpeg"
                   onChange={(e) => setUploadFile(e.target.files[0] || null)}
                   className="w-full text-xs text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-indigo-950/50 dark:file:text-indigo-300"
                 />

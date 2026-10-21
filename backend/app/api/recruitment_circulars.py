@@ -795,6 +795,11 @@ async def create_and_post_drive(
                 notification_sent=False
             )
             db.add(item)
+    else:
+        # Fallback: if candidates are confirmed without an attached file, collect their IDs for notification
+        for cand in data.candidates:
+            if bool(cand.get("is_confirmed")) and cand.get("matched_student_id"):
+                confirmed_student_ids.append(cand.get("matched_student_id"))
 
     # Commit circular, attachments, and candidate outcome records
     db.commit()

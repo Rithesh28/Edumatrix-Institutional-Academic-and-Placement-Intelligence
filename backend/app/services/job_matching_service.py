@@ -376,9 +376,8 @@ class JobMatchingService:
                 student_branch = user_dept
 
             if student_branch and str(student_branch).strip():
-                student_branch_norm = str(student_branch).strip().lower()
-                eligible_branches_norm = [str(eb).strip().lower() for eb in job.branch_eligibility if eb]
-                branch_match = student_branch_norm in eligible_branches_norm
+                from .recruitment_circular_service import is_branch_eligible
+                branch_match = is_branch_eligible(student_branch, job.branch_eligibility)
                 if not branch_match:
                     is_eligible = False
                     eligibility_reasons.append(
