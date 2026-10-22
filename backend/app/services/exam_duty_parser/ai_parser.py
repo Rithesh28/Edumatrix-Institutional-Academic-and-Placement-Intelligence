@@ -283,8 +283,8 @@ class AIParser:
                     'date': date_val,
                     'session': session_val,
                     'time': time_val,
-                    'venue': duty_dict.get('venue') or 'Examination Hall',
-                    'exam_name': duty_dict.get('exam_name') or 'Exam Duty',
+                    'venue': duty_dict.get('venue') or '',
+                    'exam_name': duty_dict.get('exam_name') or '',
                     'confidence': float(duty_dict.get('confidence', 0.88)),
                     'faculty_names': [raw_name]
                 })

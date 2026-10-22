@@ -295,40 +295,10 @@ async def create_circular_with_file(
         db.commit()
         
         # ============================================
-        # CREATE REMINDERS FOR ALL STUDENTS
+        # SCHEDULE REMINDERS FOR STUDENTS
         # ============================================
-        if due_date_parsed:
-            reminder_count = 0
-            reminder_types = [
-                ('SEVEN_DAY', due_date_parsed - timedelta(days=7)),
-                ('THREE_DAY', due_date_parsed - timedelta(days=3)),
-                ('ONE_DAY', due_date_parsed - timedelta(days=1)),
-                ('DEADLINE_DAY', due_date_parsed),
-            ]
-            
-            for student in students:
-                for reminder_type, scheduled_at in reminder_types:
-                    # Check if reminder already exists
-                    existing = db.query(Reminder).filter(
-                        Reminder.circular_id == new_circular.id,
-                        Reminder.user_id == student.id,
-                        Reminder.reminder_type == reminder_type
-                    ).first()
-                    
-                    if not existing:
-                        reminder = Reminder(
-                            circular_id=new_circular.id,
-                            user_id=student.id,
-                            reminder_type=reminder_type,
-                            scheduled_at=scheduled_at,
-                            status=ReminderStatus.PENDING,
-                            channel='IN_APP'
-                        )
-                        db.add(reminder)
-                        reminder_count += 1
-            
-            db.commit()
-            logger.info(f"⏰ Created {reminder_count} reminders for {len(students)} students for circular {new_circular.id}")
+        if new_circular.due_date:
+            reminder_scheduler.schedule_reminders(new_circular.id, new_circular.due_date)
         
         # Build response
         response = CircularResponse.model_validate(new_circular)

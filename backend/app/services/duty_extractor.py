@@ -66,7 +66,7 @@ class DutyExtractor:
             if faculty and date_match:
                 date_str = date_match.group(0)
                 time_str = session_match.group(0) if session_match else "09:30 AM"
-                venue_str = venue_match.group(0) if venue_match else "Examination Hall"
+                venue_str = venue_match.group(0) if venue_match else ""
                 
                 duty = self._parse_duty(faculty, date_str, time_str, venue_str)
                 if duty:

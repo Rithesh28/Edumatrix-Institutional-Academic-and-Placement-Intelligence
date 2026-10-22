@@ -111,7 +111,7 @@ except Exception:
 class ExtractedDuty:
     """Represents an extracted exam duty."""
     faculty_name: str
-    exam_name: str = 'Semester Examination'
+    exam_name: str = ''
     date: str = 'N/A'
     session: str = 'Forenoon'
     venue: str = ''
@@ -741,7 +741,7 @@ class TableTransformerParser:
                 return []
 
             # Document Exam Name
-            doc_exam = 'Semester Examination'
+            doc_exam = ''
             for w in words[:25]:
                 if any(k in w['text'].lower() for k in ['vtu', 'exam', 'theory', 'assessment', 'semester']):
                     doc_exam = 'VTU Theory Examination'
@@ -871,7 +871,7 @@ class TableTransformerParser:
                             exam_name=doc_exam,
                             date=d['date_str'],
                             session=d['session'],
-                            venue='Examination Hall',
+                            venue='',
                             confidence=0.95
                         ))
 
@@ -895,7 +895,7 @@ class TableTransformerParser:
         raw_lines = text.split('\n')
 
         # Detect document-level exam name if mentioned in headers
-        doc_exam = 'Semester Examination'
+        doc_exam = ''
         for line in raw_lines[:6]:
             line_str = line.strip()
             if any(k in line_str.lower() for k in ['exam', 'semester', 'mid term', 'cie', 'term', 'b.tech', 'mca', 'm.tech', 'assessment']):
@@ -1030,7 +1030,7 @@ class TableTransformerParser:
         for i, name in enumerate(faculty_names):
             duties.append(ExtractedDuty(
                 faculty_name=name,
-                exam_name='Semester Examination',
+                exam_name='',
                 date=dates[i] if i < len(dates) else datetime.now().strftime('%Y-%m-%d'),
                 session=sessions[i] if i < len(sessions) else 'Forenoon',
                 venue=venues[i] if i < len(venues) else '',
@@ -1076,7 +1076,7 @@ class TableTransformerParser:
     def _extract_duty_from_row(self, row: List[str], mapping: Dict[str, int]) -> Optional[ExtractedDuty]:
         try:
             faculty = row[mapping['faculty_name']] if 0 <= mapping['faculty_name'] < len(row) else ''
-            exam = row[mapping['exam_name']] if 0 <= mapping['exam_name'] < len(row) else 'Semester Examination'
+            exam = row[mapping['exam_name']] if 0 <= mapping['exam_name'] < len(row) else ''
             date_str = row[mapping['date']] if 0 <= mapping['date'] < len(row) else ''
             session_str = row[mapping['session']] if 0 <= mapping['session'] < len(row) else ''
             venue_str = row[mapping['venue']] if 0 <= mapping['venue'] < len(row) else ''
@@ -1087,7 +1087,7 @@ class TableTransformerParser:
 
             return ExtractedDuty(
                 faculty_name=faculty,
-                exam_name=self._clean_exam_name(exam) or 'Semester Examination',
+                exam_name=self._clean_exam_name(exam),
                 date=self._parse_date(date_str) or datetime.now().strftime('%Y-%m-%d'),
                 session=self._parse_session(session_str) or 'Forenoon',
                 venue=venue_str,
@@ -1105,7 +1105,7 @@ class TableTransformerParser:
 
     def _clean_exam_name(self, exam: str) -> str:
         if not exam:
-            return 'Semester Examination'
+            return ''
         return ' '.join(str(exam).split()).strip()
 
     def _parse_date(self, date_text: str) -> str:

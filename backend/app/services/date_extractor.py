@@ -14,16 +14,16 @@ logger = logging.getLogger(__name__)
 class DateExtractor:
     """Extract dates from text content."""
     
-    # Month names (full and abbreviated)
-    _MONTHS_PATTERN = r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)'
+    # Month names (full and abbreviated, with optional trailing period for abbreviations)
+    _MONTHS_PATTERN = r'(?:Jan(?:uary)?\.?|Feb(?:ruary)?\.?|Mar(?:ch)?\.?|Apr(?:il)?\.?|May\.?|Jun(?:e)?\.?|Jul(?:y)?\.?|Aug(?:ust)?\.?|Sep(?:tember)?\.?|Sept\.?|Oct(?:ober)?\.?|Nov(?:ember)?\.?|Dec(?:ember)?\.?)'
 
     # Common date patterns
     DATE_PATTERNS = [
         # DD/MM/YYYY or MM/DD/YYYY
         r'\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b',
-        # DD Month YYYY (e.g., 25 December 2026, 25 Dec 2026)
+        # DD Month YYYY (e.g., 25 December 2026, 25 Dec 2026, 25 Dec. 2026)
         r'\b(\d{1,2}\s+' + _MONTHS_PATTERN + r'\s+\d{2,4})\b',
-        # Month DD, YYYY or Month DD YYYY (e.g., December 25, 2026 or Dec 25 2026)
+        # Month DD, YYYY or Month DD YYYY (e.g., December 25, 2026, Dec 25 2026, Dec. 25, 2026)
         r'\b(' + _MONTHS_PATTERN + r'\s+\d{1,2},?\s+\d{2,4})\b',
         # YYYY-MM-DD
         r'\b(\d{4}[/-]\d{1,2}[/-]\d{1,2})\b',
@@ -83,11 +83,13 @@ class DateExtractor:
         """Parse date string to datetime object."""
         date_str = date_str.strip()
         
-        # Normalize internal whitespace and optional comma for uniform matching
+        # Normalize internal whitespace
         normalized = re.sub(r'\s+', ' ', date_str)
-        cleaned = re.sub(r',', '', normalized).strip()
+        # Strip trailing dot from month abbreviations (e.g., 'Dec.' -> 'Dec')
+        normalized_nodot = re.sub(r'\b([A-Za-z]+)\.', r'\1', normalized)
+        cleaned = re.sub(r',', '', normalized_nodot).strip()
         
-        # Try different formats against both raw and cleaned strings
+        # Try different formats against raw, nodot, and cleaned strings
         formats = [
             '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y', '%m-%d-%Y',
             '%d/%m/%y', '%d-%m-%y', '%m/%d/%y', '%m-%d-%y',
@@ -96,7 +98,11 @@ class DateExtractor:
             '%Y/%m/%d', '%Y-%m-%d',
         ]
         
-        candidates = [normalized, cleaned] if cleaned != normalized else [normalized]
+        candidates = []
+        for s in [normalized_nodot, cleaned, normalized]:
+            if s and s not in candidates:
+                candidates.append(s)
+                
         for candidate in candidates:
             for fmt in formats:
                 try:

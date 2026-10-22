@@ -210,11 +210,11 @@ async def upload_exam_duty(
             lecturer_id=duty_data["lecturer_id"],
             hod_id=current_user.id,
             department=current_user.department,
-            exam_name=duty_data.get("exam_name", "Semester Examination"),
+            exam_name=duty_data.get("exam_name") or "Unspecified Exam",
             date=duty_date_obj,
             start_time=start_time_obj,
             end_time=end_time_obj,
-            venue=duty_data.get("venue", ""),
+            venue=duty_data.get("venue") or "",
             status=DutyStatus.PENDING
         )
         db.add(new_duty)

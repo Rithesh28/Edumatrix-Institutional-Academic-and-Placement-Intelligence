@@ -62,6 +62,7 @@ from app.tasks.reminder_tasks import (
 )
 from app.services.study_buddy_chat_service import study_buddy_chat_service
 from app.services.study_buddy_content_service import study_buddy_content_service
+from app.services.student_documents_indexing_service import student_documents_indexing_service
 from app.services.file_storage.text_extractor import text_extractor
 
 
@@ -757,7 +758,7 @@ class TestModuleD_StudyBuddyRAGPipeline(BasePhase2BTest):
         self.assertEqual(res.status_code, 403, "HOD of ECE was able to modify AIML subject")
 
     def test_02_text_extraction_and_chunking(self):
-        """Test text extraction from synthetic notes and sliding window chunking"""
+        """Test text extraction from synthetic notes and sliding window chunking via indexing service"""
         synthetic_passage = """
         Unit 1: Machine Learning Foundations
         Supervised learning algorithms model the relationship between input features and target labels.
@@ -773,13 +774,31 @@ class TestModuleD_StudyBuddyRAGPipeline(BasePhase2BTest):
         self.assertTrue(res["success"])
         self.assertIn("Supervised learning algorithms", res["text"])
         
-        # Test chunking helper from content service
-        chunks = study_buddy_content_service._chunk_text(res["text"], max_chars=250, overlap_chars=50)
-        self.assertGreaterEqual(len(chunks), 2, "Expected at least 2 chunks for sliding window")
+        # Create synthetic StudentStudyDocument to test chunking
+        stu = self.get_user("stu_aiml1_p2b@test.edu")
+        doc = StudentStudyDocument(
+            id=999,
+            student_id=stu.id if stu else 1,
+            title="ML Foundations Notes",
+            original_filename="notes.txt",
+            extracted_text=res["text"]
+        )
+        
+        # Test chunking helper from student documents indexing service
+        chunks = student_documents_indexing_service.create_chunks(doc)
+        self.assertGreaterEqual(len(chunks), 1, "Expected at least 1 chunk created")
         for idx, chunk in enumerate(chunks):
-            self.assertLessEqual(len(chunk), 300, f"Chunk {idx} exceeded max length")
-            self.assertGreater(len(chunk), 10, f"Chunk {idx} is too short")
-        print(f"\n[RAG CHUNKING] Created {len(chunks)} chunks with sliding window overlap")
+            chunk_text = chunk.get("text", "")
+            self.assertIn("Machine Learning Foundations", chunk_text)
+            self.assertLessEqual(len(chunk_text), 1000, f"Chunk {idx} exceeded max length")
+            self.assertGreater(len(chunk_text), 10, f"Chunk {idx} is too short")
+            self.assertEqual(chunk["payload"]["student_id"], doc.student_id)
+        
+        # Verify empty input produces 0 chunks
+        empty_doc = StudentStudyDocument(id=1000, student_id=doc.student_id, title="Empty", extracted_text="")
+        self.assertEqual(student_documents_indexing_service.create_chunks(empty_doc), [])
+        
+        print(f"\n[RAG CHUNKING] Created {len(chunks)} provenance-linked chunks with payload metadata")
 
     def test_03_rag_retrieval_relevance_and_grounding(self):
         """
