@@ -37,6 +37,12 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
+try:
+    import pdf2image
+    PDF2IMAGE_AVAILABLE = True
+except ImportError:
+    PDF2IMAGE_AVAILABLE = False
+
 # NLP
 try:
     import spacy
@@ -119,26 +125,40 @@ class ResumeParser:
             # Extract text based on file type
             if ext == '.pdf':
                 result['file_type'] = 'pdf'
-                text = self._extract_from_pdf(file_path, content)
-                result['extractor_used'] = 'pdfplumber'
+                text, extractor_used, warning, extraction_status = self._extract_from_pdf(
+                    file_path, content, return_metadata=True
+                )
+                result['extractor_used'] = extractor_used
+                result['warning'] = warning
+                result['extraction_status'] = extraction_status
             elif ext in ['.docx', '.doc']:
                 result['file_type'] = 'docx'
                 text = self._extract_from_docx(file_path, content)
                 result['extractor_used'] = 'python-docx'
+                result['extraction_status'] = 'SUCCESS' if (text and len(text.strip()) >= 10) else 'EMPTY_TEXT'
             elif ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']:
                 result['file_type'] = 'image'
                 text = self._extract_from_image(file_path, content)
                 result['extractor_used'] = 'tesseract'
+                result['extraction_status'] = 'SUCCESS' if (text and len(text.strip()) >= 10) else 'EMPTY_TEXT'
             elif ext == '.txt':
                 result['file_type'] = 'text'
                 text = content.decode('utf-8', errors='ignore') if content else (open(file_path, 'r', errors='ignore').read() if os.path.exists(file_path) else '')
                 result['extractor_used'] = 'text'
+                result['extraction_status'] = 'SUCCESS' if (text and len(text.strip()) >= 10) else 'EMPTY_TEXT'
             else:
                 result['error'] = f"Unsupported file type: {ext}"
+                result['extraction_status'] = 'UNSUPPORTED_FORMAT'
                 return result
             
             if not text or len(text.strip()) < 10:
-                result['error'] = "No text could be extracted from the file"
+                result['success'] = False
+                if result.get('extraction_status') == 'SCANNED_PDF_NO_TEXT':
+                    result['error'] = result.get('warning') or "PDF appears to be scanned or image-based, but readable text could not be extracted (fewer than 20 characters). Please provide a text-based PDF or higher resolution document."
+                elif result.get('warning'):
+                    result['error'] = result['warning']
+                else:
+                    result['error'] = "No text could be extracted from the file"
                 return result
             
             result['text'] = text
@@ -184,12 +204,50 @@ class ResumeParser:
         except Exception as e:
             logger.error(f"❌ Resume parsing failed: {str(e)}", exc_info=True)
             result['error'] = str(e)
+            result['extraction_status'] = 'FAILED'
         
         return result
     
-    def _extract_from_pdf(self, file_path: str, content: Optional[bytes] = None) -> str:
-        """Extract text from PDF using pdfplumber or PyPDF2."""
+    def _extract_from_pdf_ocr(self, file_path: str, content: Optional[bytes] = None, max_pages: int = 5) -> str:
+        """
+        Fallback OCR extraction for scanned or image-based PDFs.
+        Converts PDF pages to images using pdf2image and performs OCR with pytesseract.
+        """
+        if not (OCR_AVAILABLE and PDF2IMAGE_AVAILABLE):
+            logger.warning("OCR (pytesseract) or pdf2image not available for scanned PDF fallback")
+            return ""
+        
+        try:
+            if content:
+                images = pdf2image.convert_from_bytes(content, first_page=1, last_page=max_pages)
+            elif file_path and os.path.exists(file_path):
+                images = pdf2image.convert_from_path(file_path, first_page=1, last_page=max_pages)
+            else:
+                return ""
+            
+            ocr_text_parts = []
+            for img in images:
+                processed = self._preprocess_image(img)
+                custom_config = r'--oem 3 --psm 6'
+                txt = pytesseract.image_to_string(processed, config=custom_config)
+                if txt and txt.strip():
+                    ocr_text_parts.append(txt.strip())
+            
+            return "\n\n".join(ocr_text_parts).strip()
+        except Exception as e:
+            logger.warning(f"Scanned PDF OCR fallback failed: {str(e)}")
+            return ""
+
+    def _extract_from_pdf(self, file_path: str, content: Optional[bytes] = None, return_metadata: bool = False):
+        """
+        Extract text from PDF using pdfplumber, PyPDF2, or OCR fallback for scanned PDFs.
+        Returns:
+            str if return_metadata=False
+            (text, extractor_used, warning, extraction_status) if return_metadata=True
+        """
         text_parts = []
+        page_count = 0
+        is_empty_or_corrupt = False
         
         try:
             # 1. Try pdfplumber
@@ -197,6 +255,9 @@ class ResumeParser:
                 try:
                     pdf_input = BytesIO(content) if content else file_path
                     with pdfplumber.open(pdf_input) as pdf:
+                        page_count = len(pdf.pages)
+                        if page_count == 0:
+                            is_empty_or_corrupt = True
                         for page in pdf.pages:
                             page_text = page.extract_text()
                             if page_text:
@@ -212,14 +273,19 @@ class ResumeParser:
                 except Exception as e:
                     logger.warning(f"pdfplumber extraction warning: {str(e)}")
             
-            if text_parts:
-                return '\n\n'.join(text_parts)
+            raw_text = '\n\n'.join(text_parts).strip()
+            if len(raw_text) >= 20:
+                if return_metadata:
+                    return raw_text, 'pdfplumber', None, 'SUCCESS'
+                return raw_text
             
-            # 2. Fallback to PyPDF2
+            # 2. Fallback to PyPDF2 if fewer than 20 characters
             if PYPDF2_AVAILABLE:
                 try:
                     pdf_input = BytesIO(content) if content else file_path
                     reader = PyPDF2.PdfReader(pdf_input)
+                    if page_count == 0:
+                        page_count = len(reader.pages)
                     for page in reader.pages:
                         page_text = page.extract_text()
                         if page_text:
@@ -227,20 +293,38 @@ class ResumeParser:
                 except Exception as e:
                     logger.warning(f"PyPDF2 extraction warning: {str(e)}")
             
-            if text_parts:
-                return '\n\n'.join(text_parts)
+            raw_text = '\n\n'.join(text_parts).strip()
+            if len(raw_text) >= 20:
+                if return_metadata:
+                    return raw_text, 'PyPDF2', None, 'SUCCESS'
+                return raw_text
 
-            # 3. Fallback to image OCR if text is empty (scanned PDF)
-            if OCR_AVAILABLE and content:
-                try:
-                    return self._extract_from_image(file_path, content)
-                except Exception:
-                    pass
+            # 3. Detect scanned / image-based PDF (< 20 characters extracted)
+            logger.info("PDF yielded fewer than 20 characters from text streams; attempting OCR fallback for scanned document...")
+            ocr_text = self._extract_from_pdf_ocr(file_path, content)
+            if len(ocr_text.strip()) >= 20:
+                warning_msg = "Scanned/image-based PDF detected; extracted text using OCR fallback."
+                logger.info(f"✅ {warning_msg}")
+                if return_metadata:
+                    return ocr_text.strip(), 'tesseract_ocr', warning_msg, 'OCR_FALLBACK'
+                return ocr_text.strip()
             
-            return '\n\n'.join(text_parts)
+            # 4. If OCR failed or produced < 20 characters
+            if is_empty_or_corrupt or (content is not None and len(content) == 0):
+                err_msg = "Empty or corrupted PDF file"
+                if return_metadata:
+                    return '', 'none', err_msg, 'FAILED'
+                return ''
+            
+            warning_msg = "PDF appears to be scanned or image-based, but readable text could not be extracted (fewer than 20 characters). Please provide a text-based PDF or high-resolution document."
+            if return_metadata:
+                return '', 'none', warning_msg, 'SCANNED_PDF_NO_TEXT'
+            return ''
             
         except Exception as e:
             logger.warning(f"PDF extraction failed: {str(e)}")
+            if return_metadata:
+                return '', 'none', f"PDF extraction failed: {str(e)}", 'FAILED'
             return ''
     
     def _extract_from_docx(self, file_path: str, content: Optional[bytes] = None) -> str:

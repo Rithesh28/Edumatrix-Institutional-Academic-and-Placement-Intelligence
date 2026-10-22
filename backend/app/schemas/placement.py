@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any, Union
 from enum import Enum
 from uuid import UUID
+from ..services.salary_normalizer import normalize_salary_range, extract_ctc_lpa_bounds
 
 
 
@@ -177,6 +178,13 @@ class JobPostingBase(BaseModel):
     def check_application_url(cls, v: Optional[str]) -> Optional[str]:
         return validate_http_or_https_url(v)
 
+    @field_validator("salary_range", mode="before")
+    @classmethod
+    def validate_and_normalize_salary(cls, v: Any) -> Optional[str]:
+        if v is None or v == "" or (isinstance(v, str) and not v.strip()):
+            return None
+        return normalize_salary_range(v)
+
     @field_validator("application_deadline", "drive_date", mode="before")
     @classmethod
     def clean_optional_datetimes(cls, v: Any) -> Optional[Any]:
@@ -210,6 +218,13 @@ class JobPostingUpdate(BaseModel):
     drive_date: Optional[datetime] = None
     status: Optional[JobStatus] = None
 
+    @field_validator("salary_range", mode="before")
+    @classmethod
+    def validate_and_normalize_salary(cls, v: Any) -> Optional[str]:
+        if v is None or v == "" or (isinstance(v, str) and not v.strip()):
+            return None
+        return normalize_salary_range(v)
+
     @field_validator("application_url")
     @classmethod
     def check_application_url(cls, v: Optional[str]) -> Optional[str]:
@@ -229,6 +244,10 @@ class JobPostingResponse(JobPostingBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     
+    # Structured CTC bounds
+    min_ctc_lpa: Optional[float] = Field(None, description="Minimum CTC in LPA derived from salary_range")
+    max_ctc_lpa: Optional[float] = Field(None, description="Maximum CTC in LPA derived from salary_range")
+
     # Additional fields from relationships
     company_name: Optional[str] = None  # Make sure this exists
     file_name: Optional[str] = Field(None, description="Filename of attached document if present")
@@ -237,6 +256,14 @@ class JobPostingResponse(JobPostingBase):
     shortlisted_count: Optional[int] = Field(0, description="Number of shortlisted students")
     
     model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="after")
+    def populate_ctc_bounds(self) -> "JobPostingResponse":
+        if self.salary_range:
+            low, high = extract_ctc_lpa_bounds(self.salary_range)
+            self.min_ctc_lpa = low
+            self.max_ctc_lpa = high
+        return self
 
 
 # ============================================

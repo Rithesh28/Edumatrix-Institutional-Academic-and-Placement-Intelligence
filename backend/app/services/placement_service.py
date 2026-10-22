@@ -231,6 +231,11 @@ class PlacementService:
     
     def create_job_posting(self, db: Session, job_data: JobPostingCreate, created_by: int) -> JobPosting:
         """Create a new job posting (defaults to DRAFT status) with multi-document attachment support."""
+        # 0. Validate that referenced company exists
+        company = db.query(Company).filter(Company.id == job_data.company_id).first()
+        if not company:
+            raise ValueError(f"Company with ID {job_data.company_id} not found")
+
         # 1. Collect and validate attached files
         attachment_ids: List[Any] = []
         if getattr(job_data, "attachment_file_ids", None):
@@ -433,6 +438,12 @@ class PlacementService:
         
         old_status = job.status
         update_dict = job_data.model_dump(exclude_unset=True)
+
+        # Validate company exists if company_id is being updated
+        if "company_id" in update_dict and update_dict["company_id"] is not None:
+            company = db.query(Company).filter(Company.id == update_dict["company_id"]).first()
+            if not company:
+                raise ValueError(f"Company with ID {update_dict['company_id']} not found")
 
         # Synchronize attachments if specified
         new_attachment_ids = update_dict.pop("attachment_file_ids", None)

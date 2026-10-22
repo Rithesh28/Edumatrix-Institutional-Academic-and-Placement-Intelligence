@@ -3,7 +3,6 @@ Date Extraction Service
 Extracts dates from text using regex and NLP
 """
 
-from datetime import datetime  # Add this at the top
 import re
 from datetime import datetime
 from typing import List, Optional, Tuple
@@ -15,13 +14,17 @@ logger = logging.getLogger(__name__)
 class DateExtractor:
     """Extract dates from text content."""
     
+    # Month names (full and abbreviated)
+    _MONTHS_PATTERN = r'(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)'
+
     # Common date patterns
     DATE_PATTERNS = [
         # DD/MM/YYYY or MM/DD/YYYY
         r'\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b',
-        # DD Month YYYY or Month DD, YYYY
-        r'\b(\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{2,4})\b',
-        r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2},?\s+\d{2,4}\b',
+        # DD Month YYYY (e.g., 25 December 2026, 25 Dec 2026)
+        r'\b(\d{1,2}\s+' + _MONTHS_PATTERN + r'\s+\d{2,4})\b',
+        # Month DD, YYYY or Month DD YYYY (e.g., December 25, 2026 or Dec 25 2026)
+        r'\b(' + _MONTHS_PATTERN + r'\s+\d{1,2},?\s+\d{2,4})\b',
         # YYYY-MM-DD
         r'\b(\d{4}[/-]\d{1,2}[/-]\d{1,2})\b',
     ]
@@ -41,14 +44,16 @@ class DateExtractor:
         for pattern in self.DATE_PATTERNS:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
+                # re.findall with a single group returns string
+                match_str = match if isinstance(match, str) else match[0]
                 try:
-                    dt = self._parse_date(match)
+                    dt = self._parse_date(match_str)
                     if dt:
-                        dates.append((match, dt))
+                        dates.append((match_str.strip(), dt))
                 except Exception as e:
-                    logger.debug(f"Failed to parse date '{match}': {e}")
+                    logger.debug(f"Failed to parse date '{match_str}': {e}")
         
-        # Remove duplicates
+        # Remove duplicates by parsed date value
         unique_dates = []
         seen = set()
         for date_str, dt in dates:
@@ -78,19 +83,26 @@ class DateExtractor:
         """Parse date string to datetime object."""
         date_str = date_str.strip()
         
-        # Try different formats
+        # Normalize internal whitespace and optional comma for uniform matching
+        normalized = re.sub(r'\s+', ' ', date_str)
+        cleaned = re.sub(r',', '', normalized).strip()
+        
+        # Try different formats against both raw and cleaned strings
         formats = [
             '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y', '%m-%d-%Y',
             '%d/%m/%y', '%d-%m-%y', '%m/%d/%y', '%m-%d-%y',
             '%d %b %Y', '%d %B %Y', '%b %d %Y', '%B %d %Y',
+            '%b %d, %Y', '%B %d, %Y',
             '%Y/%m/%d', '%Y-%m-%d',
         ]
         
-        for fmt in formats:
-            try:
-                return datetime.strptime(date_str, fmt)
-            except ValueError:
-                continue
+        candidates = [normalized, cleaned] if cleaned != normalized else [normalized]
+        for candidate in candidates:
+            for fmt in formats:
+                try:
+                    return datetime.strptime(candidate, fmt)
+                except ValueError:
+                    continue
         
         return None
 

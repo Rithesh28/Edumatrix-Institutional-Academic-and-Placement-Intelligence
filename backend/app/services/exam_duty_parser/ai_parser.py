@@ -114,25 +114,61 @@ class AIParser:
             # Step 1: Convert to image if PDF
             image_path = self._prepare_image(file_path)
             
-            # Step 2: Run AI inference
+            # Step 2: Run AI inference (table structure detection)
             result = self.recognizer.predict(image_path)
+            confidence = float(result.get('table_confidence', 0.0))
+            table_detected = bool(result.get('table_detected', False))
             
-            # Step 3: Extract duties from structure
-            duties = self._extract_duties_from_result(result)
+            # If AI model did not detect a table with sufficient confidence, fail safely
+            has_table_structure = table_detected or (confidence >= 0.40 and result.get('rows', 0) > 0 and result.get('cols', 0) > 0)
+            if not has_table_structure or confidence < 0.35:
+                logger.info(f"AI model did not detect table structure with confidence (detected={table_detected}, conf={confidence:.2f})")
+                return {
+                    'success': False,
+                    'table_detected': False,
+                    'rows': result.get('rows', 0),
+                    'cols': result.get('cols', 0),
+                    'duties': [],
+                    'confidence': confidence,
+                    'raw_result': result,
+                    'error': 'No table structure detected in timetable image',
+                    'review_required': True,
+                    'fallback_needed': True
+                }
             
-            # Step 4: Add confidence
-            confidence = result.get('table_confidence', 0.0)
+            # Step 3: Extract genuine duties from recognized cell regions via OCR
+            duties = self._extract_duties_from_result(result, image_path=image_path)
             
-            return {
-                'success': True,
-                'table_detected': result.get('table_detected', False),
-                'rows': result.get('rows', 0),
-                'cols': result.get('cols', 0),
-                'duties': duties,
-                'confidence': confidence,
-                'raw_result': result,
-                'fallback_needed': confidence < 0.6
-            }
+            if duties:
+                logger.info(f"✅ AI Parser successfully extracted {len(duties)} genuine duties via OCR")
+                return {
+                    'success': True,
+                    'table_detected': True,
+                    'rows': result.get('rows', 0),
+                    'cols': result.get('cols', 0),
+                    'duties': duties,
+                    'total_duties': len(duties),
+                    'confidence': confidence,
+                    'raw_result': result,
+                    'review_required': False,
+                    'fallback_needed': False
+                }
+            else:
+                # Structure detected, but text could not be reliably extracted from cells
+                logger.warning("Table structure detected by AI model, but cell OCR text was unreadable or insufficient")
+                return {
+                    'success': False,
+                    'table_detected': True,
+                    'rows': result.get('rows', 0),
+                    'cols': result.get('cols', 0),
+                    'duties': [],
+                    'total_duties': 0,
+                    'confidence': confidence,
+                    'raw_result': result,
+                    'error': 'Table structure detected but cell text/duties could not be reliably extracted from image',
+                    'review_required': True,
+                    'fallback_needed': True
+                }
             
         except Exception as e:
             logger.error(f"AI parsing failed: {str(e)}")
@@ -166,37 +202,96 @@ class AIParser:
         # If already image, return as is
         return file_path
     
-    def _extract_duties_from_result(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_duties_from_result(
+        self,
+        result: Dict[str, Any],
+        image_path: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Extract duties from AI model result.
+        Extract genuine duties from recognized table cell regions.
+        Zero placeholders: If cell text is unreadable or absent, returns empty list.
         """
         duties = []
         
-        # If no table detected, return empty
-        if not result.get('table_detected', False):
+        # If no table structure detected, return empty
+        if not result.get('table_detected', False) and result.get('table_confidence', 0.0) < 0.40:
             return duties
         
-        # Get table structure
-        rows = result.get('rows', 0)
-        cols = result.get('cols', 0)
+        img_target = image_path or result.get('image_path')
+        if not img_target or not os.path.exists(img_target):
+            # No image available to perform OCR extraction; never fabricate mock data
+            return []
         
-        # For now, create sample duties based on structure
-        # In production, you would extract text from cells using OCR
-        # and then use GLiNER + EntityMapper
-        
-        for row in range(min(rows, 20)):  # Limit to 20 rows for demo
-            # Check if row has a checkmark (simplified)
-            # In production, use checkmark_detector
-            if row % 2 == 0:  # Just for demo
-                duty = {
-                    'faculty_name': f"Faculty_{row+1}",
-                    'date': f"{row+1}-Aug",
-                    'time': 'M' if row % 4 == 0 else 'A',
-                    'venue': f"Hall {chr(65 + row % 5)}",
-                    'exam_name': 'Exam Duty',
-                    'faculty_names': [f"Faculty_{row+1}"]
-                }
-                duties.append(duty)
+        try:
+            from .table_transformer_parser import table_transformer_parser
+            import pytesseract
+            
+            pil_img = Image.open(img_target) if Image else None
+            extracted_raw_duties = []
+            
+            # Strategy A: Matrix timetable parser for multi-column grid timetables
+            if pil_img is not None:
+                try:
+                    matrix_duties = table_transformer_parser._extract_matrix_duties_from_image(pil_img)
+                    if matrix_duties:
+                        extracted_raw_duties.extend(matrix_duties)
+                except Exception as e:
+                    logger.debug(f"Matrix grid parse error in AI parser: {e}")
+            
+            # Strategy B: Local OCR extraction across table text lines
+            if not extracted_raw_duties and pil_img is not None:
+                try:
+                    # Preprocess for contrast enhancement
+                    prep_img = pil_img.convert('L')
+                    if CV2_AVAILABLE and np is not None:
+                        np_img = np.array(prep_img)
+                        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                        enhanced = clahe.apply(np_img)
+                        prep_img = Image.fromarray(enhanced)
+                    
+                    ocr_text = pytesseract.image_to_string(prep_img, config='--oem 3 --psm 6')
+                    if not ocr_text or len(ocr_text.strip()) < 15:
+                        ocr_text = pytesseract.image_to_string(prep_img, config='--oem 3 --psm 3')
+                    
+                    if ocr_text and len(ocr_text.strip()) > 15:
+                        line_duties = table_transformer_parser._extract_duties_from_raw_text(ocr_text)
+                        if line_duties:
+                            extracted_raw_duties.extend(line_duties)
+                except Exception as e:
+                    logger.debug(f"OCR text extraction error in AI parser: {e}")
+            
+            # Normalize and strictly validate extracted records
+            for ed in extracted_raw_duties:
+                duty_dict = ed.to_dict() if hasattr(ed, 'to_dict') else ed
+                if not isinstance(duty_dict, dict):
+                    continue
+                
+                raw_name = str(duty_dict.get('faculty_name', '')).strip()
+                # Strict anti-fabrication check: reject placeholder strings and headers
+                if not raw_name or raw_name.lower().startswith('faculty_') or raw_name.lower() in ['staff', 'date', 'page', 'signature', 'name']:
+                    continue
+                
+                date_val = duty_dict.get('date')
+                if not date_val:
+                    continue
+                
+                session_val = duty_dict.get('session') or ('Forenoon' if duty_dict.get('time') == 'M' else 'Afternoon')
+                time_val = duty_dict.get('time') or ('M' if session_val.lower() == 'forenoon' else 'A')
+                
+                duties.append({
+                    'faculty_name': raw_name,
+                    'date': date_val,
+                    'session': session_val,
+                    'time': time_val,
+                    'venue': duty_dict.get('venue') or 'Examination Hall',
+                    'exam_name': duty_dict.get('exam_name') or 'Exam Duty',
+                    'confidence': float(duty_dict.get('confidence', 0.88)),
+                    'faculty_names': [raw_name]
+                })
+                
+        except Exception as e:
+            logger.error(f"Error during OCR extraction from recognized cells: {e}")
+            return []
         
         return duties
     

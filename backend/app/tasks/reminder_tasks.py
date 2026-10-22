@@ -4,7 +4,9 @@ Reminder Celery Tasks - 5 types of automated reminders
 
 from celery import Celery
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 import logging
 
 from ..core.database import SessionLocal
@@ -54,22 +56,26 @@ def get_reminder_message(reminder_type: ReminderType, circular_title: str, due_d
     return messages.get(reminder_type, messages[ReminderType.SEVEN_DAY])
 
 
-def create_reminder_record(user_id: int, circular_id: int, reminder_type: ReminderType):
-    """Create a reminder record in the database"""
-    db = SessionLocal()
+def create_reminder_record(user_id: int, circular_id: int, reminder_type: ReminderType, db: Optional[Session] = None):
+    """Create a reminder record in the database idempotently"""
+    should_close = False
+    if db is None:
+        db = SessionLocal()
+        should_close = True
+        
     try:
-        scheduled_at = db.query(Reminder).filter(
+        existing = db.query(Reminder).filter(
             Reminder.user_id == user_id,
             Reminder.circular_id == circular_id,
             Reminder.reminder_type == reminder_type
         ).first()
         
-        if scheduled_at:
-            return
+        if existing:
+            return existing
         
         circular = db.query(Circular).filter(Circular.id == circular_id).first()
         if not circular:
-            return
+            return None
         
         # Calculate scheduled time based on reminder type
         if reminder_type == ReminderType.SEVEN_DAY:
@@ -91,20 +97,44 @@ def create_reminder_record(user_id: int, circular_id: int, reminder_type: Remind
             scheduled_at=scheduled_time
         )
         db.add(reminder)
-        db.commit()
+        if should_close:
+            db.commit()
+            db.refresh(reminder)
+        else:
+            db.flush()
         logger.info(f"Created {reminder_type} reminder record for user {user_id}, circular {circular_id}")
+        return reminder
     except Exception as e:
         logger.error(f"Failed to create reminder record: {e}")
-        db.rollback()
+        if should_close:
+            db.rollback()
+        return None
     finally:
-        db.close()
+        if should_close:
+            db.close()
 
 
 def send_reminder_to_user(user_id: int, circular_id: int, reminder_type: ReminderType):
-    """Send reminder to a single user via all channels"""
+    """Send reminder to a single user via in-app notification with strict idempotency"""
+    event_key = f"reminder:{circular_id}:user:{user_id}:stage:{reminder_type.value}"
     db = SessionLocal()
     
     try:
+        # 1. Fast idempotency check: Has this notification already been generated?
+        existing_notif = db.query(Notification).filter(Notification.event_key == event_key).first()
+        existing_reminder = db.query(Reminder).filter(
+            Reminder.user_id == user_id,
+            Reminder.circular_id == circular_id,
+            Reminder.reminder_type == reminder_type
+        ).first()
+
+        if existing_notif and existing_reminder and existing_reminder.status == ReminderStatus.SENT:
+            logger.info(
+                f"Reminder already processed and sent for user {user_id}, "
+                f"circular {circular_id} ({reminder_type.value}) [event_key: {event_key}] - skipping"
+            )
+            return
+
         user = db.query(User).filter(User.id == user_id).first()
         circular = db.query(Circular).filter(Circular.id == circular_id).first()
         
@@ -112,41 +142,56 @@ def send_reminder_to_user(user_id: int, circular_id: int, reminder_type: Reminde
             logger.error(f"User {user_id} or Circular {circular_id} not found")
             return
         
-        # Create reminder record (if not exists)
-        create_reminder_record(user_id, circular_id, reminder_type)
+        # 2. Ensure Reminder record exists in current transaction
+        if not existing_reminder:
+            existing_reminder = create_reminder_record(user_id, circular_id, reminder_type, db=db)
         
-        # Get message
-        title, message = get_reminder_message(reminder_type, circular.title, circular.due_date)
+        # 3. Create In-App Notification with unique event_key if not already created
+        if not existing_notif:
+            title, message = get_reminder_message(reminder_type, circular.title, circular.due_date)
+            notification = Notification(
+                user_id=user_id,
+                type="reminder",
+                title=title,
+                message=message,
+                reference_id=circular_id,
+                event_key=event_key,
+                is_read=False
+            )
+            db.add(notification)
         
-        # Create In-App Notification
-        notification = Notification(
-            user_id=user_id,
-            type="reminder",
-            title=title,
-            message=message,
-            reference_id=circular_id,
-            is_read=False
-        )
-        db.add(notification)
+        # 4. Mark reminder as SENT in the same transaction
+        if existing_reminder:
+            existing_reminder.status = ReminderStatus.SENT
+            existing_reminder.sent_at = datetime.now(timezone.utc)
+            existing_reminder.channel = ReminderChannel.IN_APP
         
-        # Update reminder record
-        reminder = db.query(Reminder).filter(
-            Reminder.user_id == user_id,
-            Reminder.circular_id == circular_id,
-            Reminder.reminder_type == reminder_type
-        ).first()
-        
-        if reminder:
-            reminder.status = ReminderStatus.SENT
-            reminder.sent_at = datetime.now(timezone.utc)
-            reminder.channel = ReminderChannel.IN_APP
-        
-        db.commit()
-        logger.info(f"Reminder sent to user {user_id} for circular {circular_id} ({reminder_type})")
+        # 5. Commit atomically with unique constraint conflict handling
+        try:
+            db.commit()
+            logger.info(f"Reminder sent to user {user_id} for circular {circular_id} ({reminder_type.value})")
+        except IntegrityError as ie:
+            # Concurrent worker or retry attempt inserted the notification concurrently
+            db.rollback()
+            logger.warning(
+                f"Concurrent reminder delivery detected for {event_key}; unique constraint prevented duplicate. ({ie})"
+            )
+            # Ensure the reminder status is reconciled to SENT in a clean session
+            with SessionLocal() as recovery_db:
+                rem = recovery_db.query(Reminder).filter(
+                    Reminder.user_id == user_id,
+                    Reminder.circular_id == circular_id,
+                    Reminder.reminder_type == reminder_type
+                ).first()
+                if rem and rem.status != ReminderStatus.SENT:
+                    rem.status = ReminderStatus.SENT
+                    rem.sent_at = datetime.now(timezone.utc)
+                    recovery_db.commit()
         
     except Exception as e:
         logger.error(f"Failed to send reminder to user {user_id}: {e}")
         db.rollback()
+        raise
     finally:
         db.close()
 
