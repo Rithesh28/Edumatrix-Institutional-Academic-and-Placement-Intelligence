@@ -14,7 +14,7 @@ from ..models.file import File
 from ..models.notification import Notification
 from ..models.reminder import Reminder, ReminderType, ReminderStatus
 from ..schemas.circular import CircularCreate, CircularUpdate, CircularResponse
-from ..services.reminder_scheduler import reminder_scheduler
+from ..services.reminder_scheduler import reminder_scheduler, normalize_to_utc
 from ..services.file_storage.file_service import file_service
 from ..services.file_storage.text_extractor import text_extractor
 from ..services.date_extractor import date_extractor
@@ -38,13 +38,16 @@ async def create_circular(
             detail="Only lecturers, HODs, and admins can create circulars"
         )
     
+    # Normalize due date to UTC
+    normalized_due_date = normalize_to_utc(circular.due_date) if circular.due_date else None
+
     # Create circular
     new_circular = Circular(
         lecturer_id=current_user.id,
         type=circular.type,
         title=circular.title,
         content=circular.content,
-        due_date=circular.due_date,
+        due_date=normalized_due_date,
         file_id=circular.file_id
     )
     
@@ -98,9 +101,16 @@ async def create_circular(
     
     db.commit()
     
-    # Schedule reminders if due date exists
+    # Schedule reminders post-commit if due date exists
     if new_circular.due_date:
-        reminder_scheduler.schedule_reminders(new_circular.id, new_circular.due_date)
+        try:
+            reminder_scheduler.schedule_reminders(new_circular.id, new_circular.due_date)
+        except Exception as exc:
+            logger.error(
+                f"Post-commit Celery reminder scheduling failed for circular {new_circular.id}: {exc}. "
+                "Committed circular and pending reminder records are preserved; "
+                "note that automatic dispatch recovery is not guaranteed without persistent dispatch tracking."
+            )
     
     # Build response with file details
     result = CircularResponse.model_validate(new_circular)
@@ -202,6 +212,10 @@ async def create_circular_with_file(
             due_date_parsed = auto_due_date
             logger.info(f"✅ Using auto-extracted due date: {due_date_parsed}")
         
+        # Normalize to UTC (interpreting naive dates as Asia/Kolkata)
+        if due_date_parsed:
+            due_date_parsed = normalize_to_utc(due_date_parsed)
+        
         # Reset file pointer before uploading to MinIO
         await file.seek(0)
         
@@ -298,7 +312,14 @@ async def create_circular_with_file(
         # SCHEDULE REMINDERS FOR STUDENTS
         # ============================================
         if new_circular.due_date:
-            reminder_scheduler.schedule_reminders(new_circular.id, new_circular.due_date)
+            try:
+                reminder_scheduler.schedule_reminders(new_circular.id, new_circular.due_date)
+            except Exception as exc:
+                logger.error(
+                    f"Post-commit Celery reminder scheduling failed for circular {new_circular.id}: {exc}. "
+                    "Committed circular and pending reminder records are preserved; "
+                    "note that automatic dispatch recovery is not guaranteed without persistent dispatch tracking."
+                )
         
         # Build response
         response = CircularResponse.model_validate(new_circular)
@@ -437,7 +458,7 @@ async def update_circular(
 ):
     """Update a circular"""
     
-    circular = db.query(Circular).filter(Circular.id == circular_id).first()
+    circular = db.query(Circular).with_for_update().filter(Circular.id == circular_id).first()
     if not circular:
         raise HTTPException(status_code=404, detail="Circular not found")
     
@@ -458,13 +479,47 @@ async def update_circular(
         circular.title = circular_update.title
     if circular_update.content is not None:
         circular.content = circular_update.content
-    if circular_update.due_date is not None:
-        circular.due_date = circular_update.due_date
     if circular_update.file_id is not None:
         circular.file_id = circular_update.file_id
+
+    # Check and reconcile deadline changes
+    deadline_changed = False
+    new_due_date_utc = None
+    if circular_update.due_date is not None:
+        normalized_new = normalize_to_utc(circular_update.due_date)
+        current_normalized = normalize_to_utc(circular.due_date) if circular.due_date else None
+        if normalized_new != current_normalized:
+            deadline_changed = True
+            new_due_date_utc = normalized_new
+            circular.due_date = new_due_date_utc
+    elif circular_update.due_date is None and "due_date" in circular_update.model_fields_set:
+        if circular.due_date is not None:
+            deadline_changed = True
+            circular.due_date = None
+
+    # Reconcile reminders inside the same transaction while holding the circular lock
+    if deadline_changed:
+        if new_due_date_utc:
+            reminder_scheduler.reconcile_reminders(circular.id, new_due_date_utc, db=db)
+        else:
+            db.query(Reminder).filter(
+                Reminder.circular_id == circular.id,
+                Reminder.status == ReminderStatus.PENDING
+            ).delete(synchronize_session=False)
     
     db.commit()
     db.refresh(circular)
+
+    # Post-commit Celery dispatch outside the database transaction
+    if deadline_changed and new_due_date_utc:
+        try:
+            reminder_scheduler.dispatch_reconciled_tasks(circular.id, new_due_date_utc)
+        except Exception as exc:
+            logger.error(
+                f"Post-commit Celery reminder dispatch failed for updated circular {circular.id}: {exc}. "
+                "Committed circular and reconciled pending reminder records are preserved; "
+                "note that automatic dispatch recovery is not guaranteed without persistent dispatch tracking."
+            )
     
     # Notify students about update
     students = db.query(User).filter(User.role == UserRole.STUDENT, User.is_active == True).all()
