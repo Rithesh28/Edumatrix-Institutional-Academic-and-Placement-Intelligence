@@ -118,8 +118,34 @@ def send_reminder_to_user(user_id: int, circular_id: int, reminder_type: Reminde
     """Send reminder to a single user via in-app notification with strict idempotency"""
     event_key = f"reminder:{circular_id}:user:{user_id}:stage:{reminder_type.value}"
     db = SessionLocal()
-    
+
     try:
+        user = db.query(User).filter(User.id == user_id).first()
+        circular = db.query(Circular).filter(Circular.id == circular_id).first()
+
+        if not user or not circular:
+            logger.error(f"User {user_id} or Circular {circular_id} not found")
+            return
+
+        # GUARD: Verify this stage is still valid
+        now = datetime.now(timezone.utc)
+        due_date = circular.due_date
+        if due_date.tzinfo is None:
+            due_date = due_date.replace(tzinfo=timezone.utc)
+
+        # Calculate target time for this stage
+        if reminder_type == ReminderType.SEVEN_DAY: target = due_date - timedelta(days=7)
+        elif reminder_type == ReminderType.THREE_DAY: target = due_date - timedelta(days=3)
+        elif reminder_type == ReminderType.ONE_DAY: target = due_date - timedelta(days=1)
+        elif reminder_type == ReminderType.DEADLINE_DAY: target = due_date
+        else: target = due_date + timedelta(days=1) # MISSED_DEADLINE
+
+        # If task is significantly delayed (e.g. deadline has passed for 7-day reminder), do not proceed
+        # For non-missed-deadline, target should not be in the past beyond a small drift (e.g. 5 mins)
+        if reminder_type != ReminderType.MISSED_DEADLINE and target < (now - timedelta(minutes=5)):
+             logger.warning(f"Reminder task for circular {circular_id} ({reminder_type.value}) is stale (target: {target}). Skipping.")
+             return
+
         # 1. Fast idempotency check: Has this notification already been generated?
         existing_notif = db.query(Notification).filter(Notification.event_key == event_key).first()
         existing_reminder = db.query(Reminder).filter(
@@ -135,17 +161,10 @@ def send_reminder_to_user(user_id: int, circular_id: int, reminder_type: Reminde
             )
             return
 
-        user = db.query(User).filter(User.id == user_id).first()
-        circular = db.query(Circular).filter(Circular.id == circular_id).first()
-        
-        if not user or not circular:
-            logger.error(f"User {user_id} or Circular {circular_id} not found")
-            return
-        
         # 2. Ensure Reminder record exists in current transaction
         if not existing_reminder:
             existing_reminder = create_reminder_record(user_id, circular_id, reminder_type, db=db)
-        
+
         # 3. Create In-App Notification with unique event_key if not already created
         if not existing_notif:
             title, message = get_reminder_message(reminder_type, circular.title, circular.due_date)
@@ -159,13 +178,13 @@ def send_reminder_to_user(user_id: int, circular_id: int, reminder_type: Reminde
                 is_read=False
             )
             db.add(notification)
-        
+
         # 4. Mark reminder as SENT in the same transaction
         if existing_reminder:
             existing_reminder.status = ReminderStatus.SENT
             existing_reminder.sent_at = datetime.now(timezone.utc)
             existing_reminder.channel = ReminderChannel.IN_APP
-        
+
         # 5. Commit atomically with unique constraint conflict handling
         try:
             db.commit()
@@ -187,7 +206,7 @@ def send_reminder_to_user(user_id: int, circular_id: int, reminder_type: Reminde
                     rem.status = ReminderStatus.SENT
                     rem.sent_at = datetime.now(timezone.utc)
                     recovery_db.commit()
-        
+
     except Exception as e:
         logger.error(f"Failed to send reminder to user {user_id}: {e}")
         db.rollback()
@@ -312,6 +331,48 @@ def cancel_reminders(circular_id: int):
         logger.info(f"Cancelled {reminders} pending reminders for circular {circular_id}")
     except Exception as e:
         logger.error(f"Failed to cancel reminders: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@celery_app.task
+def cleanup_expired_reminders():
+    """
+    Periodic cleanup task: Removes expired reminder records and their associated
+    notifications once the deadline + missed deadline window has passed.
+    Safe and idempotent.
+    """
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        # Expired window: reminders whose scheduled_at is older than 2 days (past missed deadline)
+        # or where circular due_date is passed by > 2 days and status is PENDING / CANCELLED.
+        cutoff = now - timedelta(days=2)
+
+        expired_reminders = db.query(Reminder).filter(
+            (Reminder.scheduled_at < cutoff) | (Reminder.status == ReminderStatus.CANCELLED)
+        ).all()
+
+        reminders_deleted = 0
+        notifications_deleted = 0
+
+        for rem in expired_reminders:
+            # Delete associated notification by event_key if exists
+            event_key = f"reminder:{rem.circular_id}:user:{rem.user_id}:stage:{rem.reminder_type.value}"
+            notif = db.query(Notification).filter(Notification.event_key == event_key).first()
+            if notif:
+                db.delete(notif)
+                notifications_deleted += 1
+
+            db.delete(rem)
+            reminders_deleted += 1
+
+        db.commit()
+        if reminders_deleted > 0 or notifications_deleted > 0:
+            logger.info(f"🧹 Cleaned up {reminders_deleted} expired reminders and {notifications_deleted} associated notifications.")
+    except Exception as e:
+        logger.error(f"Failed to cleanup expired reminders: {e}")
         db.rollback()
     finally:
         db.close()

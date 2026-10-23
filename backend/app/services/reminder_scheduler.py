@@ -30,29 +30,29 @@ class ReminderScheduler:
     @staticmethod
     def schedule_reminders(circular_id: int, due_date: datetime):
         """
-        Schedule 5 reminders for a circular with due date
-        Only creates the 7-day reminder immediately, others are created by Celery tasks
+        Schedule reminders for a circular with due date
+        Only creates reminder stages whose scheduled times are in the future.
         """
         if not due_date:
             logger.info(f"No due date for circular {circular_id}, skipping reminders")
             return False
-        
+
         # Ensure due_date is timezone-aware UTC for consistent arithmetic
         if due_date.tzinfo is None:
             due_date = due_date.replace(tzinfo=timezone.utc)
-        
+
         db = SessionLocal()
-        
+
         try:
             # Get all students
             students = db.query(User).filter(User.role == "student", User.is_active == True).all()
-            
+
             if not students:
                 logger.info(f"No students found for circular {circular_id}")
                 return False
-            
+
             now = datetime.now(timezone.utc)
-            
+
             # ============================================
             # IDEMPOTENCY CHECK: Do not duplicate if already scheduled
             # ============================================
@@ -60,42 +60,50 @@ class ReminderScheduler:
             if existing_count > 0:
                 logger.info(f"Reminders for circular {circular_id} already scheduled ({existing_count} existing), skipping to prevent duplicates")
                 return True
-            
+
             # ============================================
-            # ONLY CREATE THE 7-DAY REMINDER IMMEDIATELY (IDEMPOTENT)
+            # CREATE ONLY FUTURE STAGES IMMEDIATELY (IDEMPOTENT)
             # ============================================
             reminders_created = 0
+            # Define all stages and their offset formulas
+            stages = [
+                (ReminderType.SEVEN_DAY, due_date - timedelta(days=7)),
+                (ReminderType.THREE_DAY, due_date - timedelta(days=3)),
+                (ReminderType.ONE_DAY, due_date - timedelta(days=1)),
+                (ReminderType.DEADLINE_DAY, due_date),
+                (ReminderType.MISSED_DEADLINE, due_date + timedelta(days=1)),
+            ]
+
             for student in students:
-                scheduled_at = due_date - timedelta(days=7)
-                
-                # Only create if 7-day reminder is in the future
-                if scheduled_at > now:
-                    existing = db.query(Reminder).filter(
-                        Reminder.circular_id == circular_id,
-                        Reminder.user_id == student.id,
-                        Reminder.reminder_type == ReminderType.SEVEN_DAY
-                    ).first()
-                    
-                    if not existing:
-                        reminder = Reminder(
-                            circular_id=circular_id,
-                            user_id=student.id,
-                            reminder_type=ReminderType.SEVEN_DAY,
-                            status=ReminderStatus.PENDING,
-                            scheduled_at=scheduled_at
-                        )
-                        db.add(reminder)
-                        reminders_created += 1
-            
+                for r_type, scheduled_at in stages:
+                    # Only create if scheduled time is strictly in the future
+                    if scheduled_at > now:
+                        existing = db.query(Reminder).filter(
+                            Reminder.circular_id == circular_id,
+                            Reminder.user_id == student.id,
+                            Reminder.reminder_type == r_type
+                        ).first()
+
+                        if not existing:
+                            reminder = Reminder(
+                                circular_id=circular_id,
+                                user_id=student.id,
+                                reminder_type=r_type,
+                                status=ReminderStatus.PENDING,
+                                scheduled_at=scheduled_at
+                            )
+                            db.add(reminder)
+                            reminders_created += 1
+
             db.commit()
-            logger.info(f"Created {reminders_created} 7-day reminders for circular {circular_id} ({len(students)} students)")
-            
+            logger.info(f"Created {reminders_created} future reminder records for circular {circular_id} ({len(students)} students)")
+
             # ============================================
-            # SCHEDULE ALL 5 CELERY TASKS
+            # SCHEDULE ALL VALID FUTURE CELERY TASKS
             # ============================================
             ReminderScheduler._schedule_celery_tasks(circular_id, due_date)
             return True
-            
+
         except Exception as e:
             logger.error(f"Failed to schedule reminders for circular {circular_id}: {e}")
             db.rollback()

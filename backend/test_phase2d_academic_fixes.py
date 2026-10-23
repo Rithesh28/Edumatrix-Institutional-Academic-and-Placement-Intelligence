@@ -110,9 +110,14 @@ class TestCircularReminderScheduling(BaseAcademicFixTestCase):
                 reminders = self.db.query(Reminder).filter(Reminder.circular_id == test_circular.id).all()
                 self.assertGreaterEqual(len(reminders), 1, "Reminder rows should be created in DB")
                 
-                # Check stages present (14 days ahead has 7-day, 3-day, 1-day, deadline-day)
+                # Check stages present (14 days ahead has 7-day, 3-day, 1-day, deadline-day, missed-deadline)
                 stages = [r.reminder_type for r in reminders]
                 self.assertIn(ReminderType.SEVEN_DAY, stages)
+                self.assertIn(ReminderType.THREE_DAY, stages)
+                self.assertIn(ReminderType.ONE_DAY, stages)
+                self.assertIn(ReminderType.DEADLINE_DAY, stages)
+                self.assertIn(ReminderType.MISSED_DEADLINE, stages)
+
 
         finally:
             # Clean up test-created records

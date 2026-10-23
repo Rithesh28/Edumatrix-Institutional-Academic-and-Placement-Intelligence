@@ -51,6 +51,11 @@ celery_app.conf.beat_schedule = {
         "task": "placement_tasks.close_expired_jobs",
         "schedule": crontab(minute=0),
     },
+    # Cleanup expired academic reminders daily at 3:00 AM IST
+    "cleanup-expired-reminders-daily": {
+        "task": "app.tasks.reminder_tasks.cleanup_expired_reminders",
+        "schedule": crontab(hour=3, minute=0),
+    },
 }
 
 if __name__ == "__main__":
