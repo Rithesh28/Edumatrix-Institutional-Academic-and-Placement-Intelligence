@@ -10,6 +10,7 @@ import re
 import json
 import logging
 import threading
+import hashlib
 from datetime import datetime
 import torch
 from typing import List, Dict, Any, Optional
@@ -20,6 +21,9 @@ from ..core.config import settings
 from ..core.study_buddy_timing import record_perf_metric
 
 logger = logging.getLogger(__name__)
+
+# Module-level lock for cache operations (shared across instances if any)
+_synthesis_cache_lock = threading.Lock()
 
 
 def format_institutional_date(dt_val) -> str:
@@ -82,12 +86,47 @@ class QwenGenerator:
         self.model_path = settings.AI_MODEL_PATH
         self.device = "cpu"
         self._inference_lock = threading.Lock()
+        self._model_load_lock = threading.Lock()
+        # Simple LRU cache for deterministic synthesis results (query+intent -> answer)
+        self._synthesis_cache: Dict[str, str] = {}
+        self._cache_max_size = 128
 
     def _ensure_model(self) -> bool:
-        """Lazy load the model once."""
-        if not self._load_attempted:
+        """Lazy load the model once with thread-safe atomic guard."""
+        # Fast path: already loaded
+        if self.is_loaded:
+            return True
+        # Fast path: already attempted and failed
+        if self._load_attempted:
+            return False
+        # Slow path: attempt load under lock with double-checked locking
+        with self._model_load_lock:
+            if self.is_loaded:
+                return True
+            if self._load_attempted:
+                return False
             self._load_model()
         return self.is_loaded
+
+    def _get_cache_key(self, query: str, intent: Optional[str], sources: List[Dict[str, Any]]) -> str:
+        """Generate cache key from query, intent, and source titles/IDs."""
+        source_sig = "".join(str(s.get("source_id", "")) for s in sources[:3])
+        key_str = f"{query}|{intent}|{source_sig}"
+        return hashlib.md5(key_str.encode()).hexdigest()[:16]
+
+    def _cache_get(self, key: str) -> Optional[str]:
+        """Get from cache if exists (thread-safe)."""
+        with _synthesis_cache_lock:
+            return self._synthesis_cache.get(key)
+
+    def _cache_set(self, key: str, value: str) -> None:
+        """Set in cache with simple LRU eviction (thread-safe)."""
+        with _synthesis_cache_lock:
+            if len(self._synthesis_cache) >= self._cache_max_size:
+                # Remove oldest entry (first key)
+                oldest_key = next(iter(self._synthesis_cache))
+                del self._synthesis_cache[oldest_key]
+            self._synthesis_cache[key] = value
 
     def _load_model(self):
         """Attempt to load Qwen model locally or from Hugging Face cache."""
@@ -505,11 +544,31 @@ class QwenGenerator:
 
         # 5. Deterministic Grounded Synthesizer (Primary or Fallback when LLM is unavailable / fails guard)
         t0_synth = time.perf_counter()
+
+        # Check cache for deterministic synthesis
+        cache_key = self._get_cache_key(query, intent, sources)
+        cached_answer = self._cache_get(cache_key)
+        if cached_answer:
+            synth_ms = (time.perf_counter() - t0_synth) * 1000.0
+            total_ms = (time.perf_counter() - total_start) * 1000.0
+            record_perf_metric("model_generation", total_ms, model="deterministic_grounded_synthesizer_cached", has_evidence=True, intent=intent, synth_ms=round(synth_ms, 2), cache_hit=True)
+            return {
+                "answer": cached_answer,
+                "is_hallucinated": False,
+                "has_evidence": True,
+                "is_ambiguous": False,
+                "model_used": "deterministic_grounded_synthesizer"
+            }
+
         synthesized_answer = self._synthesize_grounded_answer(query, sources, intent)
         sanitized_answer = self._sanitize_and_verify_entities(synthesized_answer, context_str, sources)
+
+        # Cache the synthesized answer
+        self._cache_set(cache_key, sanitized_answer)
+
         synth_ms = (time.perf_counter() - t0_synth) * 1000.0
         total_ms = (time.perf_counter() - total_start) * 1000.0
-        record_perf_metric("model_generation", total_ms, model="deterministic_grounded_synthesizer", has_evidence=True, intent=intent, synth_ms=round(synth_ms, 2))
+        record_perf_metric("model_generation", total_ms, model="deterministic_grounded_synthesizer", has_evidence=True, intent=intent, synth_ms=round(synth_ms, 2), cache_hit=False)
         return {
             "answer": sanitized_answer,
             "is_hallucinated": False,
@@ -526,7 +585,7 @@ class QwenGenerator:
     ) -> str:
         """
         Synthesizes a 100% grounded, zero-hallucination response from structured records
-        or verified text passages.
+        or verified text passages. Uses ALL relevant sources, not just the first one.
         """
         valid_sources = [
             s for s in sources
@@ -539,51 +598,76 @@ class QwenGenerator:
                 "Please check the official circulars on the dashboard or contact your department lecturer."
             )
 
-        top_source = valid_sources[0]
-        title = top_source.get("title", "Official Record")
-        due_date = top_source.get("due_date") or top_source.get("deadline") or top_source.get("date")
-        days = top_source.get("days_remaining")
-        content = top_source.get("text") or top_source.get("text_passage") or top_source.get("content", "")
+        # Use top 3 valid sources to provide comprehensive answer
+        top_sources = valid_sources[:3]
 
-        # Deadline questions
-        if intent == "check_deadline" or due_date:
-            ans = f"Based on the official institutional record \"{title}\", the deadline is {due_date}."
-            if days is not None:
-                if days > 0:
-                    ans += f" ({days} days remaining)."
-                elif days == 0:
-                    ans += " (Due today!)."
-                else:
-                    ans += " (This deadline has passed)."
-            if content and len(content) < 200 and not top_source.get("metadata_only"):
-                ans += f" Note: {content.strip()}"
-            return ans
+        # Deadline questions - collect all matching deadlines
+        if intent == "check_deadline":
+            deadline_items = []
+            for src in top_sources:
+                due_date = src.get("due_date") or src.get("deadline") or src.get("date")
+                if due_date:
+                    title = src.get("title", "Official Record")
+                    days = src.get("days_remaining")
+                    item = f"\"{title}\" — {due_date}"
+                    if days is not None:
+                        if days > 0:
+                            item += f" ({days} days remaining)"
+                        elif days == 0:
+                            item += " (Due today!)"
+                        else:
+                            item += " (This deadline has passed)"
+                    deadline_items.append(item)
+            if deadline_items:
+                return "Deadlines found:\n" + "\n".join(f"- {item}" for item in deadline_items)
 
-        # Exam information
-        if intent == "ask_exam_info" or top_source.get("category") == "exam":
-            ans = f"According to the official circular \"{title}\":"
-            if due_date:
-                ans += f" Scheduled for {due_date}."
-            if content and not top_source.get("metadata_only"):
-                ans += f" {content.strip()}"
-            return ans
+        # Exam information - collect all matching exams
+        exam_sources = [s for s in top_sources if s.get("category") == "exam" or intent == "ask_exam_info"]
+        if exam_sources:
+            exam_items = []
+            for src in exam_sources:
+                title = src.get("title", "Official Circular")
+                due_date = src.get("due_date") or src.get("deadline") or src.get("date")
+                content = src.get("text") or src.get("text_passage") or src.get("content", "")
+                item = f"\"{title}\""
+                if due_date:
+                    item += f" — Scheduled for {due_date}"
+                if content and not src.get("metadata_only"):
+                    item += f": {content.strip()[:200]}"
+                exam_items.append(item)
+            return "Exam information:\n" + "\n".join(f"- {item}" for item in exam_items)
 
         # Placement information
-        if top_source.get("category") == "placement":
-            company = top_source.get("company", "Company")
-            ans = f"Placement record found: \"{title}\"."
-            if due_date:
-                ans += f" Application deadline: {due_date}."
-            if content:
-                ans += f" Details: {content.strip()}"
-            return ans
+        placement_sources = [s for s in top_sources if s.get("category") == "placement"]
+        if placement_sources:
+            placement_items = []
+            for src in placement_sources:
+                title = src.get("title", "Placement Record")
+                due_date = src.get("due_date") or src.get("deadline") or src.get("date")
+                content = src.get("text") or src.get("text_passage") or src.get("content", "")
+                company = src.get("company", "Company")
+                item = f"\"{title}\" ({company})"
+                if due_date:
+                    item += f" — Application deadline: {due_date}"
+                if content:
+                    item += f" — {content.strip()[:200]}"
+                placement_items.append(item)
+            return "Placement records:\n" + "\n".join(f"- {item}" for item in placement_items)
 
-        # Academic document snippet with verified text passage
-        if top_source.get("has_verified_text") and (top_source.get("text") or top_source.get("text_passage")):
-            passage = top_source.get("text") or top_source.get("text_passage")
-            return f"Relevant passage found in official document \"{title}\": \"{passage.strip()}\""
+        # Academic document snippets with verified text passage - use all sources with verified text
+        verified_sources = [s for s in top_sources if s.get("has_verified_text") and (s.get("text") or s.get("text_passage"))]
+        if verified_sources:
+            passages = []
+            for src in verified_sources:
+                title = src.get("title", "Official Document")
+                passage = src.get("text") or src.get("text_passage")
+                passages.append(f"From \"{title}\": \"{passage.strip()[:300]}\"")
+            return "Relevant passages found:\n" + "\n".join(passages)
 
-        # Generic factual fallback from verified record
+        # Generic factual fallback - use top source
+        top_source = top_sources[0]
+        title = top_source.get("title", "Official Record")
+        content = top_source.get("text") or top_source.get("text_passage") or top_source.get("content", "")
         return f"According to institutional record \"{title}\": {content[:250].strip()}"
 
     def generate_study_buddy_answer(

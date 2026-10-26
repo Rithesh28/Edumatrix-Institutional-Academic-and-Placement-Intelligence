@@ -29,26 +29,18 @@ class QueryRouter:
     def determine_strategy(self, intent: str, query_text: str) -> str:
         """
         Determine retrieval strategy based on intent and query tokens.
+        Intent classification takes priority over keyword heuristics to avoid
+        misrouting (e.g., "test" in "DSP test cases" should not trigger exam strategy).
         """
         clean_query = query_text.lower().strip()
 
-        # Direct conversational intents
+        # Direct conversational intents - highest priority
         if intent == "greet":
             return self.STRATEGY_GREET
         if intent == "feedback":
             return self.STRATEGY_FEEDBACK
 
-        # Keyword checks for high-priority routing
-        if any(w in clean_query for w in ["deadline", "last date", "submission date", "due date", "when to submit"]):
-            return self.STRATEGY_DEADLINE
-
-        if any(w in clean_query for w in ["exam", "test", "midterm", "finals", "seating", "hall ticket", "invigilation"]):
-            return self.STRATEGY_EXAM
-
-        if any(w in clean_query for w in ["job", "placement", "internship", "package", "recruitment", "interview", "company"]):
-            return self.STRATEGY_CAREER
-
-        # Map by intent class
+        # Intent-based routing takes priority over keyword heuristics
         if intent == "check_deadline":
             return self.STRATEGY_DEADLINE
         elif intent == "ask_exam_info":
@@ -57,8 +49,32 @@ class QueryRouter:
             return self.STRATEGY_CAREER
         elif intent in ["request_notes", "ask_doubt"]:
             return self.STRATEGY_NOTES
-        else:
-            return self.STRATEGY_GENERAL
+
+        # Keyword checks for high-priority routing (fallback when intent is "other")
+
+        # Placement/career keywords first - before deadline to handle "last date to apply for [company]"
+        if any(w in clean_query for w in ["job", "placement", "internship", "package", "recruitment", "interview", "company"]):
+            return self.STRATEGY_CAREER
+
+        # Deadline keywords
+        if any(w in clean_query for w in ["deadline", "last date", "submission date", "due date", "when to submit"]):
+            return self.STRATEGY_DEADLINE
+
+        # Avoid false positives on "test" - only trigger exam strategy if query
+        # contains exam-specific terms, not generic "test" which appears in academic content
+        if any(w in clean_query for w in ["exam", "midterm", "finals", "seating", "hall ticket", "invigilation"]):
+            return self.STRATEGY_EXAM
+
+        # Notes/academic material keywords - fallback for when intent classifier returns "other"
+        # Only true institutional document queries (lecture notes, syllabus, reference materials)
+        # Academic concept queries ("explain", "understand", "confused") are NOT routed here -
+        # the analyzer is for institutional info ONLY (deadlines, exams, placements, events, circulars)
+        # NOTE: "explain", "understand", "confused", "doubt" have been REMOVED per corrected requirements -
+        # the analyzer is NOT a study tutor, only handles institutional info
+        if any(w in clean_query for w in ["notes", "lecture", "slide", "slides", "material", "syllabus", "study material", "reference", "pdf", "document"]):
+            return self.STRATEGY_NOTES
+
+        return self.STRATEGY_GENERAL
 
     def execute_routing(
         self,

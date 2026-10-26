@@ -460,6 +460,76 @@ class TestAIChatAnalyzerFoundation(unittest.TestCase):
         self.assertEqual(len(result["retrieval_sources"]), 0)
         self.assertFalse(result["ai_metadata"]["has_grounded_evidence"])
 
+    # =========================================================================
+    # K. CORRECTED REQUIREMENTS: FOCUSED ROUTING TESTS (8 test cases)
+    # =========================================================================
+    def test_routing_01_deadline_intent(self):
+        """1. 'When is the last date to submit the DSP assignment?' -> deadline (intent check_deadline)"""
+        query = "When is the last date to submit the DSP assignment?"
+        # Check intent classifier produces correct intent
+        intent_result = intent_classifier.predict(query)
+        # Even if intent classifier returns "other", keyword should route to deadline
+        strategy = query_router.determine_strategy(intent_result.get("intent", "other"), query)
+        self.assertEqual(strategy, query_router.STRATEGY_DEADLINE)
+
+    def test_routing_02_exam_intent(self):
+        """2. 'When is the DSP midterm exam?' -> exam (intent ask_exam_info)"""
+        query = "When is the DSP midterm exam?"
+        intent_result = intent_classifier.predict(query)
+        strategy = query_router.determine_strategy(intent_result.get("intent", "other"), query)
+        self.assertEqual(strategy, query_router.STRATEGY_EXAM)
+
+    def test_routing_03_placement_intent(self):
+        """3. 'Are there any placements for CSE students?' -> placement (intent career_advice)"""
+        query = "Are there any placements for CSE students?"
+        intent_result = intent_classifier.predict(query)
+        strategy = query_router.determine_strategy(intent_result.get("intent", "other"), query)
+        self.assertEqual(strategy, query_router.STRATEGY_CAREER)
+
+    def test_routing_04_general_keyword_fallback(self):
+        """4. 'Show me the circular about exam fees' -> general (keyword fallback)"""
+        query = "Show me the circular about exam fees"
+        intent_result = intent_classifier.predict(query)
+        strategy = query_router.determine_strategy(intent_result.get("intent", "other"), query)
+        self.assertEqual(strategy, query_router.STRATEGY_GENERAL)
+
+    def test_routing_05_greet_intent(self):
+        """5. 'Hello' -> greet (intent greet)"""
+        query = "Hello"
+        intent_result = intent_classifier.predict(query)
+        strategy = query_router.determine_strategy(intent_result.get("intent", "other"), query)
+        self.assertEqual(strategy, query_router.STRATEGY_GREET)
+
+    def test_routing_06_dsp_test_cases_not_exam(self):
+        """6. 'DSP test cases' -> general (NOT exam - 'test' alone is academic content, not exam keyword)"""
+        query = "DSP test cases"
+        intent_result = intent_classifier.predict(query)
+        strategy = query_router.determine_strategy(intent_result.get("intent", "other"), query)
+        # Should NOT route to STRATEGY_EXAM because "test" is not in exam keywords
+        self.assertNotEqual(strategy, query_router.STRATEGY_EXAM)
+        # Should fall through to general since it's not a recognized institutional query
+        self.assertEqual(strategy, query_router.STRATEGY_GENERAL)
+
+    def test_routing_07_explain_dsp_concepts_not_notes(self):
+        """7. 'Explain DSP concepts' -> general (NOT notes - 'explain' is academic tutoring, removed from keyword)"""
+        query = "Explain DSP concepts"
+        intent_result = intent_classifier.predict(query)
+        strategy = query_router.determine_strategy(intent_result.get("intent", "other"), query)
+        # Should NOT route to STRATEGY_NOTES because "explain" is no longer in notes keywords
+        self.assertNotEqual(strategy, query_router.STRATEGY_NOTES)
+        # Should fall through to general - analyzer is for institutional info only
+        self.assertEqual(strategy, query_router.STRATEGY_GENERAL)
+
+    def test_routing_08_confused_ml_topics_not_notes(self):
+        """8. 'I'm confused about ML topics' -> general (NOT notes - 'confused' is academic tutoring, removed from keyword)"""
+        query = "I'm confused about ML topics"
+        intent_result = intent_classifier.predict(query)
+        strategy = query_router.determine_strategy(intent_result.get("intent", "other"), query)
+        # Should NOT route to STRATEGY_NOTES because "confused" is no longer in notes keywords
+        self.assertNotEqual(strategy, query_router.STRATEGY_NOTES)
+        # Should fall through to general - analyzer is for institutional info only
+        self.assertEqual(strategy, query_router.STRATEGY_GENERAL)
+
 
 if __name__ == "__main__":
     unittest.main()

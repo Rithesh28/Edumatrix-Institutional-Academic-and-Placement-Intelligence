@@ -1,6 +1,7 @@
 import os
 import pickle
 import logging
+import threading
 from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
@@ -11,13 +12,27 @@ class IntentClassifier:
         self.classifier = None
         self.intent_names = None
         self.is_loaded = False
-    
+        self._load_attempted = False
+        self._load_lock = threading.Lock()
+
     def _ensure_model(self):
-        if not self.is_loaded:
+        # Fast path: already loaded
+        if self.is_loaded:
+            return True
+        # Fast path: already attempted and failed
+        if self._load_attempted:
+            return False
+        # Slow path: attempt load under lock with double-checked locking
+        with self._load_lock:
+            if self.is_loaded:
+                return True
+            if self._load_attempted:
+                return False
             self._load_model()
         return self.is_loaded
-    
+
     def _load_model(self):
+        self._load_attempted = True
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             candidate_paths = [
@@ -26,7 +41,7 @@ class IntentClassifier:
                 "/app/ml/intent_model_sbert"
             ]
             model_path = next((p for p in candidate_paths if os.path.exists(p)), candidate_paths[0])
-            
+
             if os.path.exists(model_path):
                 logger.info(f"Found intent model at: {model_path}")
                 embedding_model_dir = os.path.join(model_path, "embedding_model")
@@ -45,7 +60,7 @@ class IntentClassifier:
         except Exception as e:
             logger.warning(f"Intent model load failed: {e}")
             self.is_loaded = False
-    
+
     def predict(self, text: str) -> dict:
         if not self._ensure_model():
             return {"intent": "other", "confidence": 0.5}
@@ -60,7 +75,7 @@ class IntentClassifier:
                 "label_id": int(prediction)
             }
         except Exception as e:
-            print(f"Prediction error: {e}")
+            logger.error(f"Prediction error: {e}")
             return {"intent": "other", "confidence": 0.5}
 
 intent_classifier = IntentClassifier()

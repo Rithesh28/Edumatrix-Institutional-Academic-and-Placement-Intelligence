@@ -2,6 +2,7 @@ import torch
 from transformers import DistilBertTokenizer, DistilBertForSequenceClassification
 import os
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -10,14 +11,28 @@ class SentimentAnalyser:
         self.model = None
         self.tokenizer = None
         self.is_loaded = False
+        self._load_attempted = False
+        self._load_lock = threading.Lock()
         self.label_map = {0: "negative", 1: "neutral", 2: "positive"}
-    
+
     def _ensure_model(self):
-        if not self.is_loaded:
+        # Fast path: already loaded
+        if self.is_loaded:
+            return True
+        # Fast path: already attempted and failed
+        if self._load_attempted:
+            return False
+        # Slow path: attempt load under lock with double-checked locking
+        with self._load_lock:
+            if self.is_loaded:
+                return True
+            if self._load_attempted:
+                return False
             self._load_model()
         return self.is_loaded
-    
+
     def _load_model(self):
+        self._load_attempted = True
         try:
             current_dir = os.path.dirname(os.path.abspath(__file__))
             candidate_paths = [
@@ -26,7 +41,7 @@ class SentimentAnalyser:
                 "/app/ml/sentiment_model"
             ]
             model_path = next((p for p in candidate_paths if os.path.exists(p)), candidate_paths[0])
-            
+
             if os.path.exists(model_path):
                 logger.info(f"Found sentiment model at: {model_path}")
                 self.tokenizer = DistilBertTokenizer.from_pretrained(model_path)
@@ -42,10 +57,10 @@ class SentimentAnalyser:
         except Exception as e:
             logger.warning(f"Sentiment model load failed: {e}")
             self.is_loaded = False
-    
+
     def analyse(self, text: str) -> dict:
         if not self._ensure_model():
-            return {"sentiment": "neutral", "confidence": 0.5, "error": "Model not loaded"}
+            return {"sentiment": "neutral", "confidence": 0.5, "probabilities": {}, "error": "Model not loaded"}
         try:
             inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=128)
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
@@ -62,6 +77,7 @@ class SentimentAnalyser:
             }
             return {"sentiment": sentiment, "confidence": round(confidence, 3), "probabilities": all_probs, "error": ""}
         except Exception as e:
+            logger.error(f"Sentiment analysis error: {e}")
             return {"sentiment": "neutral", "confidence": 0.5, "probabilities": {}, "error": str(e)}
 
 sentiment_analyser = SentimentAnalyser()
