@@ -92,6 +92,7 @@ class QwenGenerator:
     def _load_model(self):
         """Attempt to load Qwen model locally or from Hugging Face cache."""
         self._load_attempted = True
+        t0 = time.perf_counter()
         candidate_paths = []
         if self.model_path and os.path.exists(self.model_path):
             candidate_paths.append(self.model_path)
@@ -130,9 +131,13 @@ class QwenGenerator:
                 )
                 self.model.eval()
                 self.is_loaded = True
-                logger.info(f"✅ Qwen model loaded from local HuggingFace cache ({self.model_name})")
+                load_ms = (time.perf_counter() - t0) * 1000.0
+                record_perf_metric("model_load", load_ms, model=self.model_name, source="hf_cache", success=True)
+                logger.info(f"✅ Qwen model loaded from local HuggingFace cache ({self.model_name}) | {load_ms:.1f}ms")
                 return
             except Exception:
+                load_ms = (time.perf_counter() - t0) * 1000.0
+                record_perf_metric("model_load", load_ms, model=self.model_name, source="hf_cache", success=False)
                 logger.info(
                     f"ℹ️ Local Qwen model weights not found in {[self.model_path, local_qwen]} "
                     f"or HF local cache. Running in deterministic grounded synthesis mode."
@@ -155,8 +160,12 @@ class QwenGenerator:
             )
             self.model.eval()
             self.is_loaded = True
-            logger.info("✅ Qwen generation model loaded successfully")
+            load_ms = (time.perf_counter() - t0) * 1000.0
+            record_perf_metric("model_load", load_ms, model=self.model_name, source="local_path", success=True)
+            logger.info(f"✅ Qwen generation model loaded successfully | {load_ms:.1f}ms")
         except Exception as e:
+            load_ms = (time.perf_counter() - t0) * 1000.0
+            record_perf_metric("model_load", load_ms, model=self.model_name, source="local_path", success=False, error=str(e)[:200])
             logger.warning(
                 f"⚠️ Qwen model could not be loaded ({e}). "
                 "Deterministic grounded answer synthesizer will be active."
@@ -351,6 +360,7 @@ class QwenGenerator:
         Generates a grounded response using Qwen when available, or a strict
         rule-grounded synthesizer that guarantees zero hallucination.
         """
+        total_start = time.perf_counter()
         context_str = self.build_grounded_context_str(sources)
         has_evidence = bool(
             sources and any(
@@ -362,6 +372,8 @@ class QwenGenerator:
 
         # 1. Conversational intents (greet, feedback) without institutional questions
         if intent == "greet":
+            total_ms = (time.perf_counter() - total_start) * 1000.0
+            record_perf_metric("model_generation", total_ms, model="conversational_rule", has_evidence=False, intent=intent)
             return {
                 "answer": "Hello! I am EduMatrix AI Assistant. How can I help you with your academic schedules, assignment deadlines, exam notices, or placement opportunities today?",
                 "is_hallucinated": False,
@@ -371,6 +383,8 @@ class QwenGenerator:
             }
 
         if intent == "feedback":
+            total_ms = (time.perf_counter() - total_start) * 1000.0
+            record_perf_metric("model_generation", total_ms, model="conversational_rule", has_evidence=False, intent=intent)
             return {
                 "answer": "Thank you for sharing your feedback! We continuously work to improve EduMatrix. If you need any institutional help, feel free to ask.",
                 "is_hallucinated": False,
@@ -386,6 +400,8 @@ class QwenGenerator:
                 candidates=ambiguous_candidates,
                 category=ambiguity_category
             )
+            total_ms = (time.perf_counter() - total_start) * 1000.0
+            record_perf_metric("model_generation", total_ms, model="ambiguity_clarification_rule", has_evidence=True, intent=intent, ambiguous=True)
             return {
                 "answer": clarification_text,
                 "is_hallucinated": False,
@@ -400,6 +416,8 @@ class QwenGenerator:
                 "I couldn't find that information in current EduMatrix institutional records. "
                 "Please check the official circulars on the dashboard or contact your department lecturer."
             )
+            total_ms = (time.perf_counter() - total_start) * 1000.0
+            record_perf_metric("model_generation", total_ms, model="strict_fallback_guardrail", has_evidence=False, intent=intent)
             return {
                 "answer": fallback_answer,
                 "is_hallucinated": False,
@@ -411,6 +429,7 @@ class QwenGenerator:
         # 4. If Qwen model is loaded: run local neural inference
         if self._ensure_model():
             try:
+                t0_prompt = time.perf_counter()
                 prompt_messages = [
                     {"role": "system", "content": f"{SYSTEM_GROUNDING_PROMPT}\n\nINSTITUTIONAL CONTEXT:\n{context_str}"},
                     {"role": "user", "content": query}
@@ -428,7 +447,9 @@ class QwenGenerator:
 
                 inputs = self.tokenizer(prompt_text, return_tensors="pt")
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
+                prompt_ms = (time.perf_counter() - t0_prompt) * 1000.0
 
+                t0_inf = time.perf_counter()
                 with self._inference_lock:
                     with torch.no_grad():
                         output_ids = self.model.generate(
@@ -438,10 +459,13 @@ class QwenGenerator:
                             do_sample=settings.AI_TEMPERATURE > 0,
                             pad_token_id=self.tokenizer.eos_token_id
                         )
+                inf_ms = (time.perf_counter() - t0_inf) * 1000.0
 
                 # Decode only new generated tokens
+                t0_decode = time.perf_counter()
                 generated_ids = output_ids[0][inputs["input_ids"].shape[1]:]
                 generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
+                decode_ms = (time.perf_counter() - t0_decode) * 1000.0
 
                 if generated_text:
                     # Apply anti-hallucination sanitization & entity preservation
@@ -449,6 +473,21 @@ class QwenGenerator:
 
                     # Grounding guard: verify date claims against source evidence
                     if self._validate_grounding(sanitized_text, sources, query, intent):
+                        total_ms = (time.perf_counter() - total_start) * 1000.0
+                        tokens_count = len(generated_ids)
+                        tps = round(tokens_count / (inf_ms / 1000.0), 2) if inf_ms > 0 else 0.0
+                        record_perf_metric(
+                            "model_generation", total_ms,
+                            model=self.model_name,
+                            has_evidence=True,
+                            intent=intent,
+                            prompt_ms=round(prompt_ms, 2),
+                            inference_ms=round(inf_ms, 2),
+                            decode_ms=round(decode_ms, 2),
+                            tokens_generated=tokens_count,
+                            tokens_per_sec=tps,
+                            is_cold_load=False
+                        )
                         return {
                             "answer": sanitized_text,
                             "is_hallucinated": False,
@@ -461,10 +500,16 @@ class QwenGenerator:
 
             except Exception as gen_err:
                 logger.error(f"❌ Qwen inference error: {gen_err}", exc_info=True)
+                total_ms = (time.perf_counter() - total_start) * 1000.0
+                record_perf_metric("model_generation", total_ms, model=self.model_name, has_evidence=True, intent=intent, error=str(gen_err)[:200])
 
         # 5. Deterministic Grounded Synthesizer (Primary or Fallback when LLM is unavailable / fails guard)
+        t0_synth = time.perf_counter()
         synthesized_answer = self._synthesize_grounded_answer(query, sources, intent)
         sanitized_answer = self._sanitize_and_verify_entities(synthesized_answer, context_str, sources)
+        synth_ms = (time.perf_counter() - t0_synth) * 1000.0
+        total_ms = (time.perf_counter() - total_start) * 1000.0
+        record_perf_metric("model_generation", total_ms, model="deterministic_grounded_synthesizer", has_evidence=True, intent=intent, synth_ms=round(synth_ms, 2))
         return {
             "answer": sanitized_answer,
             "is_hallucinated": False,

@@ -36,6 +36,17 @@ os.environ["REDIS_URL"] = "redis://127.0.0.1:9999/9"
 os.environ["USE_GLINER"] = "false"
 os.environ["EMAIL_ENABLED"] = "false"
 
+# =========================================================================
+# 1b. TASK MODULE ISOLATION — Block unrelated task imports at the source
+# =========================================================================
+# app/tasks/__init__.py eagerly imports duty_tasks, file_tasks, placement_tasks
+# which cascade into pdfplumber, python-docx, torch, transformers, etc.
+# Mock ONLY these three modules to prevent the import cascade.
+# The reminder code under test does NOT depend on them.
+from unittest.mock import MagicMock
+for _mod in ("app.tasks.duty_tasks", "app.tasks.file_tasks", "app.tasks.placement_tasks"):
+    sys.modules[_mod] = MagicMock()
+
 # Ensure backend directory is in sys.path
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if backend_dir not in sys.path:

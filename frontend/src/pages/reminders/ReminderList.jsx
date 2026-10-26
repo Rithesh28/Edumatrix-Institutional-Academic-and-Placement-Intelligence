@@ -181,7 +181,7 @@ const ReminderList = () => {
                       </p>
                     )}
                     <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                      Read on: {new Date(reminder.sent_at || reminder.updated_at).toLocaleString()}
+                      Read on: {reminder.sent_at ? new Date(reminder.sent_at).toLocaleString() : 'Read date unavailable'}
                     </p>
                   </div>
                   <button

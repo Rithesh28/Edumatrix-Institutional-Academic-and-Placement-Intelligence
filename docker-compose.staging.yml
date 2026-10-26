@@ -1,0 +1,36 @@
+name: edumatrix_staging
+
+services:
+  postgres_staging:
+    image: postgres:15
+    container_name: edumatrix_postgres_staging
+    environment:
+      POSTGRES_DB: edumatrix_staging
+      POSTGRES_USER: edumatrix_staging_user
+      POSTGRES_PASSWORD: ${STAGING_POSTGRES_PASSWORD}
+      TZ: Asia/Kolkata
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    networks:
+      - edumatrix_staging_net
+    restart: "no"
+
+  redis_staging:
+    image: redis:7-alpine
+    container_name: edumatrix_redis_staging
+    ports:
+      - "127.0.0.1:6380:6379"
+    networks:
+      - edumatrix_staging_net
+    restart: "no"
+
+volumes:
+  postgres_staging_data:
+    name: edumatrix_postgres_staging_data
+
+networks:
+  edumatrix_staging_net:
+    name: edumatrix_staging_net
+    driver: bridge

@@ -24,6 +24,7 @@ Return Response
 """
 
 import logging
+import time
 from datetime import datetime
 from typing import Dict, Any, Optional, List
 from sqlalchemy.orm import Session
@@ -35,6 +36,7 @@ from .sentiment_analyser import sentiment_analyser
 from .query_router import query_router
 from .ai_generator_service import ai_generator
 from ..core.config import settings
+from ..core.study_buddy_timing import record_perf_metric
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,7 @@ class AIChatService:
         """
         Executes the full AI chat pipeline for an incoming user message.
         """
-        # 1. Validate Input
+        total_start = time.perf_counter()
         clean_text = (message or "").strip()
         if not clean_text:
             raise ValueError("Message content cannot be empty")
@@ -61,18 +63,25 @@ class AIChatService:
         logger.info(f"🤖 [AI-CHAT] Processing message from User ID {user.id} ({user.email}): '{clean_text[:50]}...'")
 
         # 2. Detect Intent
+        t0 = time.perf_counter()
         intent_result = intent_classifier.predict(clean_text)
         detected_intent = intent_result.get("intent", "other")
         intent_conf = float(intent_result.get("confidence", 0.5))
-        logger.info(f"🎯 [AI-CHAT] Intent: {detected_intent} (conf: {intent_conf:.2f})")
+        intent_ms = (time.perf_counter() - t0) * 1000.0
+        record_perf_metric("intent_classification", intent_ms, intent=detected_intent, confidence=round(intent_conf, 3))
+        logger.info(f"🎯 [AI-CHAT] Intent: {detected_intent} (conf: {intent_conf:.2f}) | {intent_ms:.1f}ms")
 
         # 3. Detect Sentiment
+        t0 = time.perf_counter()
         sentiment_result = sentiment_analyser.analyse(clean_text)
         detected_sentiment = sentiment_result.get("sentiment", "neutral")
         sentiment_conf = float(sentiment_result.get("confidence", 0.5))
-        logger.info(f"🎭 [AI-CHAT] Sentiment: {detected_sentiment} (conf: {sentiment_conf:.2f})")
+        sentiment_ms = (time.perf_counter() - t0) * 1000.0
+        record_perf_metric("sentiment_analysis", sentiment_ms, sentiment=detected_sentiment, confidence=round(sentiment_conf, 3))
+        logger.info(f"🎭 [AI-CHAT] Sentiment: {detected_sentiment} (conf: {sentiment_conf:.2f}) | {sentiment_ms:.1f}ms")
 
         # 4. Route Query & Retrieve Institutional Evidence
+        t0 = time.perf_counter()
         department = getattr(user, "department", None)
         routing_result = query_router.execute_routing(
             db=db,
@@ -80,14 +89,17 @@ class AIChatService:
             query_text=clean_text,
             department=department
         )
+        routing_ms = (time.perf_counter() - t0) * 1000.0
         strategy = routing_result.get("strategy", "general_institutional")
         sources = routing_result.get("sources", [])
         is_ambiguous = routing_result.get("is_ambiguous", False)
         ambiguous_candidates = routing_result.get("ambiguous_candidates", [])
         ambiguity_category = routing_result.get("ambiguity_category", "assignment")
-        logger.info(f"📚 [AI-CHAT] Strategy: {strategy} | Sources Found: {len(sources)} | Ambiguous: {is_ambiguous}")
+        record_perf_metric("query_routing_and_retrieval", routing_ms, strategy=strategy, sources=len(sources), ambiguous=is_ambiguous)
+        logger.info(f"📚 [AI-CHAT] Strategy: {strategy} | Sources: {len(sources)} | Ambiguous: {is_ambiguous} | {routing_ms:.1f}ms")
 
         # 5. Generate Grounded Answer (with strict anti-hallucination guardrail)
+        t0 = time.perf_counter()
         generation_result = ai_generator.generate_grounded_answer(
             query=clean_text,
             sources=sources,
@@ -96,9 +108,16 @@ class AIChatService:
             ambiguous_candidates=ambiguous_candidates,
             ambiguity_category=ambiguity_category
         )
+        generation_ms = (time.perf_counter() - t0) * 1000.0
         answer_text = generation_result.get("answer", "")
         model_used = generation_result.get("model_used", settings.AI_MODEL_NAME)
         has_grounded_evidence = bool(generation_result.get("has_evidence", False))
+        record_perf_metric("model_generation", generation_ms, model=model_used, has_evidence=has_grounded_evidence, ambiguous=is_ambiguous)
+        logger.info(f"🧠 [AI-CHAT] Generation: model={model_used} evidence={has_grounded_evidence} | {generation_ms:.1f}ms")
+
+        total_ms = (time.perf_counter() - total_start) * 1000.0
+        record_perf_metric("ai_chat_total", total_ms, intent=detected_intent, strategy=strategy, model=model_used, has_evidence=has_grounded_evidence)
+        logger.info(f"✅ [AI-CHAT] Total pipeline: {total_ms:.1f}ms")
 
         # 6. Assemble AI Metadata & Strictly Filter Sources Supporting the Answer
         clean_sources_meta = []

@@ -379,22 +379,27 @@ def get_file_type_display(file_type: str) -> str:
 
 def get_department_display(department: str) -> str:
     """
-    Get display name for department.
-    
+    Get display name for department from branch code.
+
     Args:
-        department: Department code
-        
+        department: Department code (branch code)
+
     Returns:
-        Display name
+        Display name (full department name)
     """
     departments = {
+        'AIML': 'Artificial Intelligence and Machine Learning',
+        'CD': 'Data Science',
+        'CV': 'Civil',
+        'CSE': 'Computer Science',
+        'EC': 'Electronics and Communication',
+        'ME': 'Mechanical',
+        'MBA': 'MBA',
+        'MCA': 'MCA',
+        # Legacy mappings preserved for backward compatibility
         'CS': 'Computer Science',
         'IT': 'Information Technology',
-        'EC': 'Electronics & Communication',
         'EE': 'Electrical Engineering',
-        'ME': 'Mechanical Engineering',
         'CE': 'Civil Engineering',
-        'MBA': 'MBA',
-        'MCA': 'MCA'
     }
-    return departments.get(department.upper(), department)
+    return departments.get(department.strip().upper(), department.strip())

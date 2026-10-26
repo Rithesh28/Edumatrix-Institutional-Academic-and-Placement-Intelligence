@@ -286,6 +286,42 @@ def check_file_permission(db: Session, file: File, current_user: User) -> bool:
                 if str(s_branch).strip().lower() in target_branches:
                     return True
 
+        # Check if file is an institutional circular attached to a published circular
+        from ..models.file import FileType as FT
+        from ..models.circular import Circular
+        from ..utils.file_utils import get_department_display
+        if file.file_type == FT.CIRCULAR:
+            # Grant access if file is attached to a circular
+            circs = db.query(Circular).filter(
+                Circular.file_id == file.id
+            ).all()
+            for circ in circs:
+                # Require a lecturer profile to evaluate department eligibility
+                # Circular.lecturer → User.lecturer_profile is the correct access path
+                # (Circular has lecturer FK→User; User has lecturer_profile relationship)
+                if not circ.lecturer or not circ.lecturer.lecturer_profile:
+                    continue
+                lecturer_dept = circ.lecturer.lecturer_profile.department or ""
+                # Skip if lecturer department is null, empty, or whitespace
+                if not lecturer_dept.strip():
+                    continue
+                # Resolve student's branch or department
+                s_branch = None
+                if current_user.student_profile and current_user.student_profile.branch:
+                    s_branch = current_user.student_profile.branch
+                elif current_user.department:
+                    s_branch = current_user.department
+                # Deny if student has no usable branch or department
+                if not s_branch:
+                    continue
+                # Normalize both to display names (branch code -> full department name)
+                # This handles mappings like CSE -> Computer Science, AIML -> Artificial Intelligence and Machine Learning
+                student_dept_normalized = get_department_display(s_branch).strip().lower()
+                lecturer_dept_normalized = get_department_display(lecturer_dept).strip().lower()
+                # Allow only when student's department matches lecturer's department
+                if student_dept_normalized == lecturer_dept_normalized:
+                    return True
+
         # Check if file is attached to an OPEN JobPosting for which student is branch-eligible
         from ..models.job_posting import JobPosting, JobPostingAttachment, JobStatus
         attached_open_jobs = db.query(JobPosting).filter(
@@ -327,12 +363,13 @@ async def get_file(
         raise HTTPException(status_code=404, detail="File not found")
     
     # Check permissions
-    if not check_file_permission(db, file, current_user):
+    perm_result = check_file_permission(db, file, current_user)
+    if not perm_result:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. File belongs to another department."
         )
-    
+
     # Get versions
     file_data = file_service.get_file_with_versions(db, file_id)
     
@@ -358,13 +395,14 @@ async def download_file(
     db: Session = Depends(get_db)
 ):
     """Download a file."""
-    
+
     file = file_service.get_file(db, file_id)
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
-    
+
     # Check permissions
-    if not check_file_permission(db, file, current_user):
+    perm_result = check_file_permission(db, file, current_user)
+    if not perm_result:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. File belongs to another department."
@@ -409,12 +447,13 @@ async def preview_file(
         raise HTTPException(status_code=404, detail="File not found")
     
     # Check permissions
-    if not check_file_permission(db, file, current_user):
+    perm_result = check_file_permission(db, file, current_user)
+    if not perm_result:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied. File belongs to another department."
         )
-    
+
     # Get file content
     try:
         result = file_service.download_file(db, file_id)

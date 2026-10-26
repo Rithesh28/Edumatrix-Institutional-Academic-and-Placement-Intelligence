@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from ..core.database import get_db
 from ..api.auth import get_current_user
 from ..models.user import User
-from ..models.reminder import Reminder, ReminderStatus
+from ..models.reminder import Reminder, ReminderStatus, ReminderChannel
 from ..schemas.reminder import (
     ReminderResponse,
     ReminderUpdate,
@@ -28,16 +28,25 @@ async def get_reminders(
 ):
     """
     Get reminders for current user - ONLY shows:
-    1. Reminders that have been SENT (read)
+    1. Reminders that have been SENT AND were scheduled for now or earlier (actually delivered)
     2. Reminders that are PENDING but SCHEDULED for now or earlier (overdue/unread)
+
+    Future-scheduled reminders (SENT or PENDING) are hidden until their scheduled time.
     """
-    
+
     now = datetime.now(timezone.utc)
-    
-    # Show sent reminders OR pending reminders that are due now or earlier
+
+    # Show:
+    # - SENT reminders that were actually due (scheduled_at <= now)
+    # - PENDING reminders that are due now or earlier (overdue/unread)
+    # Exclude: SENT reminders scheduled for the future (prematurely marked read)
     reminders = db.query(Reminder).filter(
         Reminder.user_id == current_user.id,
-        (Reminder.status == ReminderStatus.SENT) | (Reminder.scheduled_at <= now)
+        (
+            (Reminder.status == ReminderStatus.SENT) & (Reminder.scheduled_at <= now)
+        ) | (
+            (Reminder.status == ReminderStatus.PENDING) & (Reminder.scheduled_at <= now)
+        )
     ).order_by(Reminder.scheduled_at.asc()).all()
     
     result = []
@@ -111,16 +120,25 @@ async def mark_all_reminders_as_read(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Mark all reminders as read"""
-    
+    """Mark all currently due pending reminders as read"""
+
+    now = datetime.now(timezone.utc)
+
+    # Mark only pending reminders that are due now or earlier as sent with a timestamp
+    # Do NOT mark future-scheduled reminders as read
     db.query(Reminder).filter(
         Reminder.user_id == current_user.id,
-        Reminder.status == ReminderStatus.PENDING
-    ).update({Reminder.status: ReminderStatus.SENT})
-    
+        Reminder.status == ReminderStatus.PENDING,
+        Reminder.scheduled_at <= now
+    ).update({
+        Reminder.status: ReminderStatus.SENT,
+        Reminder.sent_at: now,
+        Reminder.channel: ReminderChannel.IN_APP
+    })
+
     db.commit()
-    
-    return {"message": "All reminders marked as read"}
+
+    return {"message": "All due reminders marked as read"}
 
 
 @router.delete("/{reminder_id}")
