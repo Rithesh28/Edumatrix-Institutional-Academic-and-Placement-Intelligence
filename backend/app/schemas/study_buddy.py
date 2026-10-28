@@ -216,6 +216,8 @@ class StudyBuddyAnswerResponse(BaseModel):
     subject_id: Optional[int] = None
     model_used: str
     latency_ms: Optional[float] = None
+    is_fallback: Optional[bool] = False
+    fallback_reason: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -244,6 +246,8 @@ class StudyBuddySummaryResponse(BaseModel):
     topic_id: Optional[int] = None
     model_used: str
     latency_ms: Optional[float] = None
+    is_fallback: Optional[bool] = False
+    fallback_reason: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -282,6 +286,8 @@ class StudyBuddyQuizPublicResponse(BaseModel):
     created_at: datetime
     model_used: str
     shortfall_note: Optional[str] = None
+    is_fallback: Optional[bool] = False
+    fallback_reason: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

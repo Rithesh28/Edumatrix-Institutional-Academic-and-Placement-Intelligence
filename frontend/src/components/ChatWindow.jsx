@@ -25,6 +25,12 @@ const SparkleIcon = () => (
   </svg>
 )
 
+const TrashIcon = () => (
+  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+  </svg>
+)
+
 // ─── AI "Thinking" bubble ────────────────────────────────────────────────────
 
 const ThinkingBubble = () => (
@@ -168,11 +174,35 @@ const ChatWindow = ({ userId, userName, userRole, isAI = false }) => {
   const [sending, setSending] = useState(false)
   const [aiThinking, setAiThinking] = useState(false)
   const [error, setError] = useState(null)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [clearing, setClearing] = useState(false)
+  const [clearSuccess, setClearSuccess] = useState(false)
   const messagesEndRef = useRef(null)
   const textareaRef = useRef(null)
   const { isConnected, sendMessage, messages: wsMessages, error: wsError } = useWebSocket()
 
   const isAIConversation = isAI || userId === AI_USER_ID || Number(userId) === AI_USER_ID || userRole === 'assistant'
+
+  const handleClearChat = async () => {
+    if (clearing) return
+    setClearing(true)
+    setError(null)
+    try {
+      // For AI conversations: userId=0 clears AI messages only
+      // For human conversations: pass the specific userId to clear that conversation
+      await chatAPI.clearChat(isAIConversation ? 0 : userId)
+      setClearSuccess(true)
+      setMessages([])
+      setShowClearConfirm(false)
+      // Show success briefly
+      setTimeout(() => setClearSuccess(false), 2000)
+    } catch (err) {
+      console.error('Failed to clear chat:', err)
+      setError(err.response?.data?.detail || 'Failed to clear chat. Please try again.')
+    } finally {
+      setClearing(false)
+    }
+  }
 
   useEffect(() => {
     if (wsError) {
@@ -401,6 +431,22 @@ const ChatWindow = ({ userId, userName, userRole, isAI = false }) => {
             </div>
           </div>
         </div>
+
+        {/* Clear Chat Button */}
+        {(messages.length > 0 || isAIConversation) && (
+          <button
+            onClick={() => setShowClearConfirm(true)}
+            disabled={clearing}
+            className={`ml-4 p-2 rounded-lg text-sm font-medium transition-colors ${
+              isAIConversation
+                ? 'text-indigo-200 hover:bg-white/10 hover:text-white'
+                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-red-600 dark:hover:text-red-400'
+            }`}
+            title="Clear chat"
+          >
+            <TrashIcon />
+          </button>
+        )}
       </div>
 
       {/* ── Messages Area ── */}
@@ -440,6 +486,59 @@ const ChatWindow = ({ userId, userName, userRole, isAI = false }) => {
 
         <div ref={messagesEndRef} />
       </div>
+
+      {/* Clear Chat Confirmation Dialog */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center bg-red-100 dark:bg-red-900/30">
+                <TrashIcon className="w-5 h-5 text-red-600 dark:text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Clear Chat</h3>
+            </div>
+            <p className="text-gray-600 dark:text-gray-300 mb-6">
+              {isAIConversation
+                ? 'This will clear your entire AI conversation history. All messages with EduMatrix AI Assistant will be permanently deleted and cannot be recovered.'
+                : 'This will clear your conversation with ' + (userName || 'this user') + '. All messages will be permanently deleted and cannot be recovered.'
+              }
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                disabled={clearing}
+                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearChat}
+                disabled={clearing}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {clearing ? (
+                  <>
+                    <SpinnerIcon className="w-4 h-4" />
+                    Clearing...
+                  </>
+                ) : (
+                  'Clear Chat'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Success toast */}
+      {clearSuccess && (
+        <div className="fixed bottom-4 right-4 z-50 px-4 py-2 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 text-green-800 dark:text-green-300 text-sm rounded-lg shadow-lg flex items-center gap-2">
+          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+          </svg>
+          <span>Chat cleared successfully</span>
+        </div>
+      )}
 
       {/* ── Message Input ── */}
       <div className="p-4 border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex-shrink-0">

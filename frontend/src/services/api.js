@@ -52,6 +52,20 @@ export const chatAPI = {
   getAllUsers: () => api.get('/chat/users'),
   // AI Assistant — dedicated endpoint with full grounding metadata
   chatAI: (content) => api.post('/chat/ai', { content }),
+  // Clear chat conversations
+  // userId > 0: clear specific human conversation
+  // userId === 0: clear AI conversation only
+  // userId === null + clearAll === true: clear all conversations (explicit)
+  clearChat: (userId = null, clearAll = false) => {
+    const params = {};
+    if (userId !== null) {
+      params.user_id = userId;
+    }
+    if (clearAll) {
+      params.clear_all = true;
+    }
+    return api.delete('/chat/clear', { params });
+  },
 }
 
 // ============================================

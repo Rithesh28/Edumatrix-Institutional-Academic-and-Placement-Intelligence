@@ -32,6 +32,21 @@ class Settings:
     AI_MAX_NEW_TOKENS: int = int(os.getenv("AI_MAX_NEW_TOKENS", "256"))
     AI_TEMPERATURE: float = float(os.getenv("AI_TEMPERATURE", "0.2"))
     AI_ASSISTANT_NAME: str = os.getenv("AI_ASSISTANT_NAME", "EduMatrix AI Assistant")
+    # CPU threads for Qwen inference (default: min(4, cpu_count), env override for benchmarking)
+    AI_CPU_THREADS: int = int(os.getenv("AI_CPU_THREADS", str(min(4, os.cpu_count() or 4))))
+
+    # ============================================
+    # NEW: Ollama Configuration for Study Buddy
+    # ============================================
+    OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "localhost")
+    OLLAMA_PORT: int = int(os.getenv("OLLAMA_PORT", "11434"))
+    STUDY_BUDDY_MODEL: str = os.getenv("STUDY_BUDDY_MODEL", "phi4-mini")
+    AI_CHAT_ANALYZER_MODEL: str = os.getenv("AI_CHAT_ANALYZER_MODEL", "Qwen/Qwen2.5-0.5B-Instruct")
+
+    @property
+    def OLLAMA_BASE_URL(self) -> str:
+        """Get Ollama API base URL"""
+        return f"http://{self.OLLAMA_HOST}:{self.OLLAMA_PORT}"
 
     # Study Buddy Configuration
     STUDY_BUDDY_MIN_RELEVANCE_SCORE: float = float(os.getenv("STUDY_BUDDY_MIN_RELEVANCE_SCORE", "0.35"))

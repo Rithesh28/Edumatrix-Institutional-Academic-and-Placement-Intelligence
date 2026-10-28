@@ -723,78 +723,58 @@ class StudyBuddyChatService:
             f"Raw: {len(raw_chunks)} | Qualifying (>= {self.min_relevance_score}): {len(qualifying_chunks)}"
         )
 
-        # 5. Insufficient Evidence Handling
-        if not qualifying_chunks:
-            elapsed_ms = (time.time() - start_time) * 1000
-            if attached_doc:
-                source_desc = f"attached document '{attached_doc.original_filename}' and selected academic sources"
-            elif mode == "my_documents":
-                source_desc = "selected uploaded personal study documents"
-            elif mode == "lecture_notes":
-                source_desc = "approved lecture notes"
-            elif mode in ("all", "all_my_sources"):
-                source_desc = "approved academic materials"
-            else:
-                source_desc = "approved syllabus material"
-
-            return {
-                "answer": (
-                    f"The {source_desc} do not provide sufficient information to answer this question. "
-                    "Please check your question or consult your course lecturer for clarification."
-                ),
-                "has_sufficient_evidence": False,
-                "citations": [],
-                "subject_id": subject_id,
-                "model_used": "evidence_guard",
-                "latency_ms": round(elapsed_ms, 2)
-            }
-
-        # 6. Build Bounded Academic Context Window
+        # 5. Build Bounded Academic Context Window (even if no qualifying chunks - general knowledge mode)
         context_passages = []
         supplied_chunks = []
         total_chars = 0
-        for i, chunk in enumerate(qualifying_chunks, 1):
-            passage_text = chunk.get("text") or chunk.get("source_evidence") or ""
-            source_type = chunk.get("source_type", "syllabus")
-            if source_type == "student_upload":
-                if chunk.get("is_attached_file"):
-                    source_label = "Attached Student Document"
+
+        if qualifying_chunks:
+            # Document-grounded mode: use retrieved chunks
+            for i, chunk in enumerate(qualifying_chunks, 1):
+                passage_text = chunk.get("text") or chunk.get("source_evidence") or ""
+                source_type = chunk.get("source_type", "syllabus")
+                if source_type == "student_upload":
+                    if chunk.get("is_attached_file"):
+                        source_label = "Attached Student Document"
+                    else:
+                        source_label = "Student Document"
+                elif source_type == "lecture_note":
+                    source_label = "Lecture Note"
                 else:
-                    source_label = "Student Document"
-            elif source_type == "lecture_note":
-                source_label = "Lecture Note"
-            else:
-                source_label = "Syllabus"
+                    source_label = "Syllabus"
 
-            title_label = chunk.get("source_title") or chunk.get("original_filename") or ""
-            subj_desc = f"{chunk.get('subject_code', '')} {chunk.get('subject_name', '')}".strip()
+                title_label = chunk.get("source_title") or chunk.get("original_filename") or ""
+                subj_desc = f"{chunk.get('subject_code', '')} {chunk.get('subject_name', '')}".strip()
 
-            header = f"[Passage {i} - {source_label}]"
-            if subj_desc:
-                header += f" {subj_desc}"
-            if title_label and title_label != chunk.get('subject_name'):
-                header += f" | {title_label}"
-            if chunk.get("unit_number"):
-                header += f" | Unit {chunk['unit_number']}: {chunk.get('unit_title', 'Unit')}"
-            elif chunk.get("unit_title"):
-                header += f" | Unit: {chunk['unit_title']}"
-            if chunk.get("topic_title"):
-                header += f" | Topic: {chunk['topic_title']}"
-            if chunk.get("source_page"):
-                header += f" (Page {chunk['source_page']})"
+                header = f"[Passage {i} - {source_label}]"
+                if subj_desc:
+                    header += f" {subj_desc}"
+                if title_label and title_label != chunk.get('subject_name'):
+                    header += f" | {title_label}"
+                if chunk.get("unit_number"):
+                    header += f" | Unit {chunk['unit_number']}: {chunk.get('unit_title', 'Unit')}"
+                elif chunk.get("unit_title"):
+                    header += f" | Unit: {chunk['unit_title']}"
+                if chunk.get("topic_title"):
+                    header += f" | Topic: {chunk['topic_title']}"
+                if chunk.get("source_page"):
+                    header += f" (Page {chunk['source_page']})"
 
-            passage_block = f"{header}\nContent: {passage_text.strip()}"
-            if total_chars + len(passage_block) > self.max_context_chars:
-                remaining = self.max_context_chars - total_chars
-                if remaining > 100:
-                    passage_block = passage_block[:remaining].strip() + "..."
-                    context_passages.append(passage_block)
-                    supplied_chunks.append(chunk)
-                break
+                passage_block = f"{header}\nContent: {passage_text.strip()}"
+                if total_chars + len(passage_block) > self.max_context_chars:
+                    remaining = self.max_context_chars - total_chars
+                    if remaining > 100:
+                        passage_block = passage_block[:remaining].strip() + "..."
+                        context_passages.append(passage_block)
+                        supplied_chunks.append(chunk)
+                    break
 
-            context_passages.append(passage_block)
-            supplied_chunks.append(chunk)
-            total_chars += len(passage_block)
+                context_passages.append(passage_block)
+                supplied_chunks.append(chunk)
+                total_chars += len(passage_block)
+        else:
+            # General knowledge mode: no document context
+            supplied_chunks = []
 
         context_str = "\n\n".join(context_passages)
 
@@ -809,10 +789,10 @@ class StudyBuddyChatService:
         has_evidence = gen_result.get("has_sufficient_evidence", True)
         model_used = gen_result.get("model_used", settings.AI_MODEL_NAME)
 
-        # 8. Build Verified Source Citations
+        # 8. Build Verified Source Citations (only when document evidence exists)
         t0_cite = time.perf_counter()
         citations = []
-        if has_evidence:
+        if has_evidence and supplied_chunks:
             for c in supplied_chunks:
                 citations.append({
                     "source_type": c.get("source_type", "syllabus"),
@@ -863,7 +843,9 @@ class StudyBuddyChatService:
             "citations": citations,
             "subject_id": subject_id,
             "model_used": model_used,
-            "latency_ms": round(elapsed_ms, 2)
+            "latency_ms": round(elapsed_ms, 2),
+            "is_fallback": bool(gen_result.get("is_fallback", False)),
+            "fallback_reason": gen_result.get("fallback_reason")
         }
 
 

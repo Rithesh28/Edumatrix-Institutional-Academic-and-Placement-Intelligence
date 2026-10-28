@@ -376,10 +376,7 @@ class StudyBuddyContentService:
             elapsed_ms = (time.time() - start_time) * 1000
             return StudyBuddySummaryResponse(
                 title=summary_title,
-                summary=(
-                    "The approved syllabus material does not provide sufficient information to generate a study summary. "
-                    "Please consult your subject lecturer or course coordinator for clarification."
-                ),
+                summary="This is not covered in the provided notes.",
                 format_type=format_type,
                 has_sufficient_evidence=False,
                 citations=[],
@@ -389,7 +386,9 @@ class StudyBuddyContentService:
                 unit_id=unit_id,
                 topic_id=topic_id,
                 model_used="syllabus_evidence_guard",
-                latency_ms=round(elapsed_ms, 2)
+                latency_ms=round(elapsed_ms, 2),
+                is_fallback=True,
+                fallback_reason="no_retrieved_context"
             )
 
         gen_res = ai_generator.generate_study_buddy_summary(
@@ -402,6 +401,8 @@ class StudyBuddyContentService:
         summary_text = gen_res.get("summary", "")
         has_evidence = gen_res.get("has_sufficient_evidence", True)
         model_used = gen_res.get("model_used", settings.AI_MODEL_NAME)
+        is_fallback = bool(gen_res.get("is_fallback", False))
+        fallback_reason = gen_res.get("fallback_reason")
 
         citations = []
         if has_evidence:
@@ -442,7 +443,9 @@ class StudyBuddyContentService:
             unit_id=unit_id,
             topic_id=topic_id,
             model_used=model_used,
-            latency_ms=round(elapsed_ms, 2)
+            latency_ms=round(elapsed_ms, 2),
+            is_fallback=is_fallback,
+            fallback_reason=fallback_reason
         )
 
     def generate_quiz(
@@ -646,6 +649,13 @@ class StudyBuddyContentService:
             for vq in valid_questions
         ]
 
+        # Determine fallback status from generator response
+        is_fallback = False
+        fallback_reason = None
+        if 'gen_res' in locals():
+            is_fallback = gen_res.get("is_fallback", False)
+            fallback_reason = gen_res.get("fallback_reason")
+
         return StudyBuddyQuizPublicResponse(
             id=attempt.id,
             subject_id=subject.id,
@@ -661,7 +671,9 @@ class StudyBuddyContentService:
             status=attempt.status.value,
             created_at=attempt.created_at,
             model_used=model_used,
-            shortfall_note=shortfall_note
+            shortfall_note=shortfall_note,
+            is_fallback=is_fallback,
+            fallback_reason=fallback_reason
         )
 
     def submit_quiz(

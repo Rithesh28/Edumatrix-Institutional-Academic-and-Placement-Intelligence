@@ -167,9 +167,54 @@ class InstitutionalRetrievalService:
 
             # 1. Query circulars with due dates
             circular_query = db.query(Circular).filter(Circular.due_date.isnot(None))
-            all_circulars = circular_query.order_by(Circular.due_date.asc()).all()
 
-            for circ in all_circulars:
+            # Build SQL pre-filters for specific entity queries to avoid loading all circulars
+            if specific_entities:
+                # Escape SQL wildcard characters and build OR conditions for each entity
+                # We search both title and content. Use ILIKE for case-insensitive matching.
+                entity_conditions = []
+                for e in specific_entities:
+                    # Escape SQL wildcards in the entity
+                    escaped = e.replace('%', r'\%').replace('_', r'\_')
+                    # Match entity as word boundary using ILIKE with spaces/punctuation
+                    # Note: word boundaries in ILIKE are not perfect, but this provides
+                    # a safe pre-filter; exact boundaries are verified in Python below.
+                    entity_conditions.append(Circular.title.ilike(f"% {escaped} %"))
+                    entity_conditions.append(Circular.title.ilike(f"{escaped} %"))
+                    entity_conditions.append(Circular.title.ilike(f"% {escaped}"))
+                    entity_conditions.append(Circular.content.ilike(f"% {escaped} %"))
+                    entity_conditions.append(Circular.content.ilike(f"{escaped} %"))
+                    entity_conditions.append(Circular.content.ilike(f"% {escaped}"))
+
+                if entity_conditions:
+                    circular_query = circular_query.filter(or_(*entity_conditions))
+
+                # Fetch a bounded set of candidates, sorted by due date (most relevant first)
+                # Use a generous limit (100) to avoid excluding the correct assignment
+                # while still bounding data transfer.
+                candidate_circulars = circular_query.order_by(Circular.due_date.asc()).limit(100).all()
+            else:
+                # Generic query: fetch only assignment/exam type circulars
+                # to reduce Python-side filtering workload
+                if is_assignment_query:
+                    circular_query = circular_query.filter(
+                        or_(
+                            Circular.type == CircularType.ASSIGNMENT,
+                            Circular.title.ilike("%assignment%"),
+                            Circular.content.ilike("%assignment%")
+                        )
+                    )
+                elif is_exam_query:
+                    circular_query = circular_query.filter(
+                        or_(
+                            Circular.type == CircularType.EXAM,
+                            Circular.title.ilike("%exam%"),
+                            Circular.content.ilike("%exam%")
+                        )
+                    )
+                candidate_circulars = circular_query.order_by(Circular.due_date.asc()).limit(100).all()
+
+            for circ in candidate_circulars:
                 title_lower = (circ.title or "").lower()
                 content_lower = (circ.content or "").lower()
                 circ_type = circ.type.value if hasattr(circ.type, 'value') else str(circ.type).lower()

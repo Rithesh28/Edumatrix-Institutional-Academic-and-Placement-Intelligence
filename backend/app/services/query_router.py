@@ -52,8 +52,36 @@ class QueryRouter:
 
         # Keyword checks for high-priority routing (fallback when intent is "other")
 
+        # Academic tutoring queries - explicitly route to GENERAL before other keyword checks
+        # The analyzer is for institutional info ONLY (deadlines, exams, placements, events, circulars)
+        # NOT a study tutor. These patterns indicate academic help requests.
+        # Use more specific patterns to avoid catching generic institutional queries like "what is the deadline"
+        tutoring_patterns = [
+            "explain", "understand", "confused", "doubt", "clarify",
+            "how to", "define", "meaning of", "concept"
+        ]
+        # "what is" only triggers tutoring if followed by a concept-like word
+        # Not when followed by institutional keywords like "deadline", "date", "last", "apply", etc.
+        if any(w in clean_query for w in tutoring_patterns):
+            # Additional check: don't flag as tutoring if query contains institutional keywords
+            institutional_keywords = ["deadline", "last date", "submission date", "due date", "when to submit",
+                                     "job", "placement", "internship", "package", "recruitment", "interview",
+                                     "company", "apply", "application", "exam", "midterm", "finals",
+                                     "seating", "hall ticket", "invigilation", "event", "circular", "notice"]
+            if not any(kw in clean_query for kw in institutional_keywords):
+                return self.STRATEGY_GENERAL
+
+        # "what is" specific check - only tutoring if asking about a concept, not institutional info
+        if "what is" in clean_query or "what are" in clean_query:
+            concept_indicators = ["concept", "topic", "subject", "chapter", "module", "theory", "principle"]
+            institutional_indicators = ["deadline", "date", "last", "apply", "exam", "placement", "job",
+                                        "event", "circular", "notice", "schedule", "drive", "company"]
+            if any(ci in clean_query for ci in concept_indicators) and not any(ii in clean_query for ii in institutional_indicators):
+                return self.STRATEGY_GENERAL
+
         # Placement/career keywords first - before deadline to handle "last date to apply for [company]"
-        if any(w in clean_query for w in ["job", "placement", "internship", "package", "recruitment", "interview", "company"]):
+        # "apply" is a strong signal for placement applications
+        if any(w in clean_query for w in ["job", "placement", "internship", "package", "recruitment", "interview", "company", "apply", "application"]):
             return self.STRATEGY_CAREER
 
         # Deadline keywords
@@ -67,10 +95,8 @@ class QueryRouter:
 
         # Notes/academic material keywords - fallback for when intent classifier returns "other"
         # Only true institutional document queries (lecture notes, syllabus, reference materials)
-        # Academic concept queries ("explain", "understand", "confused") are NOT routed here -
-        # the analyzer is for institutional info ONLY (deadlines, exams, placements, events, circulars)
-        # NOTE: "explain", "understand", "confused", "doubt" have been REMOVED per corrected requirements -
-        # the analyzer is NOT a study tutor, only handles institutional info
+        # "lecture", "slide", "slides" moved after academic tutoring check so
+        # "explain from lecture slides" routes to general, not notes
         if any(w in clean_query for w in ["notes", "lecture", "slide", "slides", "material", "syllabus", "study material", "reference", "pdf", "document"]):
             return self.STRATEGY_NOTES
 

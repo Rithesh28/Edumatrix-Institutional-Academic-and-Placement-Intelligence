@@ -1,4 +1,27 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: edumatrix_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - edumatrix_network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   postgres:
     image: postgres:15
     container_name: edumatrix_postgres
@@ -14,6 +37,12 @@ services:
     networks:
       - edumatrix_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edumatrix -d edumatrix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   redis:
     image: redis:7
@@ -27,6 +56,12 @@ services:
     networks:
       - edumatrix_network
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   minio:
     image: minio/minio:latest
@@ -94,13 +129,24 @@ services:
       QDRANT_PORT: 6333
       QDRANT_COLLECTION: files
       QDRANT_VECTOR_SIZE: 384
+      # Ollama Configuration for Study Buddy
+      OLLAMA_HOST: ollama
+      OLLAMA_PORT: 11434
+      STUDY_BUDDY_MODEL: phi4-mini
+      AI_CHAT_ANALYZER_MODEL: Qwen/Qwen2.5-0.5B-Instruct
     volumes:
       - ./backend:/app
     depends_on:
-      - postgres
-      - redis
-      - minio
-      - qdrant
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     networks:
       - edumatrix_network
     restart: unless-stopped
@@ -124,14 +170,26 @@ services:
       QDRANT_PORT: 6333
       QDRANT_COLLECTION: files
       QDRANT_VECTOR_SIZE: 384
+      # Ollama Configuration for Study Buddy
+      OLLAMA_HOST: ollama
+      OLLAMA_PORT: 11434
+      STUDY_BUDDY_MODEL: phi4-mini
+      AI_CHAT_ANALYZER_MODEL: Qwen/Qwen2.5-0.5B-Instruct
     volumes:
       - ./backend:/app
     depends_on:
-      - backend
-      - postgres
-      - redis
-      - minio
-      - qdrant
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     networks:
       - edumatrix_network
     restart: unless-stopped
@@ -155,14 +213,26 @@ services:
       QDRANT_PORT: 6333
       QDRANT_COLLECTION: files
       QDRANT_VECTOR_SIZE: 384
+      # Ollama Configuration for Study Buddy
+      OLLAMA_HOST: ollama
+      OLLAMA_PORT: 11434
+      STUDY_BUDDY_MODEL: phi4-mini
+      AI_CHAT_ANALYZER_MODEL: Qwen/Qwen2.5-0.5B-Instruct
     volumes:
       - ./backend:/app
     depends_on:
-      - backend
-      - postgres
-      - redis
-      - minio
-      - qdrant
+      backend:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
     networks:
       - edumatrix_network
     restart: unless-stopped
@@ -189,6 +259,7 @@ volumes:
   redis_data:
   minio_data:
   qdrant_data:
+  ollama_data:
   # REMOVED: backend_site_packages
 
 networks:

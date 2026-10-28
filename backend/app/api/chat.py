@@ -314,6 +314,122 @@ async def chat_with_ai(
     )
 
 
+@router.delete("/clear")
+async def clear_chat(
+    user_id: int = None,  # Optional: clear specific conversation (human or AI)
+    clear_all: bool = False,  # Explicit flag to clear all conversations
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Clear chat conversations for the current user.
+
+    API Contract:
+    - user_id > 0: Clear specific human conversation with that user
+    - user_id == 0: Clear ONLY AI conversations (students only)
+    - user_id == None + clear_all == true: Clear ALL conversations (AI + human) for current user
+    - user_id == None + clear_all == false: 400 Bad Request (ambiguous)
+    """
+    # Case 1: Clear specific human conversation
+    if user_id is not None and user_id > 0:
+        # Verify the conversation exists and user owns it
+        conversation_exists = db.query(ChatMessage).filter(
+            ChatMessage.is_ai == False,
+            (
+                ((ChatMessage.sender_id == current_user.id) & (ChatMessage.receiver_id == user_id)) |
+                ((ChatMessage.sender_id == user_id) & (ChatMessage.receiver_id == current_user.id))
+            )
+        ).first()
+
+        if not conversation_exists:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found"
+            )
+
+        # Delete messages in this conversation
+        deleted_count = db.query(ChatMessage).filter(
+            ChatMessage.is_ai == False,
+            (
+                ((ChatMessage.sender_id == current_user.id) & (ChatMessage.receiver_id == user_id)) |
+                ((ChatMessage.sender_id == user_id) & (ChatMessage.receiver_id == current_user.id))
+            )
+        ).delete(synchronize_session=False)
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"Conversation cleared ({deleted_count} messages deleted)",
+            "cleared_conversation_user_id": user_id
+        }
+
+    # Case 2: Clear ONLY AI conversations (user_id == 0)
+    elif user_id == 0:
+        if not is_ai_allowed(current_user):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="AI Assistant is only available to students."
+            )
+
+        ai_deleted = db.query(ChatMessage).filter(
+            ChatMessage.is_ai == True,
+            (
+                (ChatMessage.sender_id == current_user.id) |
+                (ChatMessage.receiver_id == current_user.id)
+            )
+        ).delete(synchronize_session=False)
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"AI conversation cleared ({ai_deleted} messages deleted)",
+            "cleared_ai_only": True
+        }
+
+    # Case 3: Clear ALL conversations (explicit flag required)
+    elif user_id is None and clear_all:
+        total_deleted = 0
+
+        # 1. Clear AI conversations (students only)
+        if is_ai_allowed(current_user):
+            ai_deleted = db.query(ChatMessage).filter(
+                ChatMessage.is_ai == True,
+                (
+                    (ChatMessage.sender_id == current_user.id) |
+                    (ChatMessage.receiver_id == current_user.id)
+                )
+            ).delete(synchronize_session=False)
+            total_deleted += ai_deleted
+
+        # 2. Clear all human conversations
+        human_deleted = db.query(ChatMessage).filter(
+            ChatMessage.is_ai == False,
+            (
+                (ChatMessage.sender_id == current_user.id) |
+                (ChatMessage.receiver_id == current_user.id)
+            )
+        ).delete(synchronize_session=False)
+        total_deleted += human_deleted
+
+        db.commit()
+
+        return {
+            "success": True,
+            "message": f"All conversations cleared ({total_deleted} messages deleted)",
+            "cleared_all": True
+        }
+
+    # Case 4: Ambiguous request
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ambiguous clear request. Specify user_id > 0 for human conversation, "
+                   "user_id=0 for AI conversation, or clear_all=true to delete everything."
+        )
+
+
 @router.websocket("/ws/{token}")
 async def websocket_chat(websocket: WebSocket, token: str):
     """WebSocket connection for real-time chat with human users and AI assistant"""
