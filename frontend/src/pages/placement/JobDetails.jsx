@@ -27,7 +27,8 @@ import {
   BookOpen,
   X,
   FileCheck,
-  ExternalLink
+  ExternalLink,
+  Code
 } from 'lucide-react';
 import usePlacementStore from '../../store/placementStore';
 import toast from 'react-hot-toast';
@@ -60,6 +61,7 @@ const JobDetails = () => {
   // Active tab state
   const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'rounds' | 'offers' | 'applications'
   const [progressionModalStudent, setProgressionModalStudent] = useState(null);
+  const [showCandidates, setShowCandidates] = useState(false); // URL candidates visibility toggle
 
   const handlePreviewJobFile = async (jobId, fid, filename) => {
     const toastId = toast.loading(`Opening preview for ${filename || 'document'}...`);
@@ -562,18 +564,56 @@ const JobDetails = () => {
               <ExternalLink className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
               <span className="truncate">
                 <strong>Official Application URL:</strong>{' '}
-                <span className="font-mono text-blue-700 dark:text-blue-300">{selectedJob.application_url}</span>
+                <span className="font-mono text-blue-700 dark:text-blue-300 truncate">{selectedJob.application_url}</span>
               </span>
             </div>
-            <a
-              href={selectedJob.application_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 px-3 py-1 bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 hover:text-blue-800 border border-blue-200 dark:border-blue-800 rounded-lg font-semibold shrink-0"
-            >
-              <span>Open Link</span>
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            <div className="flex items-center gap-1.5">
+              <a
+                href={selectedJob.application_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-2 py-1 bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 hover:text-blue-800 border border-blue-200 dark:border-blue-800 rounded-lg font-semibold shrink-0"
+                title="Open external application URL"
+              >
+                <span>Open Link</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+              <span className="text-[10px] text-gray-500 dark:text-gray-400">
+                ({selectedJob.application_url.length} chars)
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Application URL Candidates Traceability (Phase 3.2.1) */}
+        {selectedJob.application_url_candidates?.length > 0 && (
+          <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl border border-gray-200 dark:border-gray-700 text-xs">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs text-gray-500 dark:text-gray-400">URL Candidates Found:</span>
+              <a
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  // Toggle visibility of candidates
+                  setShowCandidates(!showCandidates);
+                }}
+                className="text-[10px] text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+              >
+                {selectedJob.application_url_candidates.length} found
+              </a>
+            </div>
+            {showCandidates && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto text-[10px]">
+                {selectedJob.application_url_candidates.map((u, i) => (
+                  <div
+                    key={i}
+                    className="p-1 bg-white dark:bg-gray-800 rounded border border-gray-600 dark:border-gray-300">
+                    <Code className="w-3 h-3 text-indigo-500 shrink-0" />
+                    <span title={u} className="truncate whitespace-normal break-all">{u}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

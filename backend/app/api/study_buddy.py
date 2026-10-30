@@ -903,14 +903,15 @@ async def get_indexing_status(
 async def search_syllabus_content(
     query: str = Query(..., min_length=2, max_length=500, description="Search query string"),
     subject_id: Optional[int] = Query(None, description="Optional subject ID filter"),
-    source_mode: Optional[StudyBuddySourceMode] = Query(StudyBuddySourceMode.SYLLABUS, description="Source mode: 'syllabus', 'lecture_notes', 'all', 'my_documents', or 'all_my_sources'"),
+    source_mode: Optional[StudyBuddySourceMode] = Query(StudyBuddySourceMode.SYLLABUS, description="Source mode: 'syllabus', 'lecture_notes', 'all', 'my_documents', 'all_my_sources', or 'general_knowledge'"),
     limit: int = Query(5, ge=1, le=20, description="Max results to return"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
     Semantic search across approved and published academic chunks in dedicated Qdrant collection.
-    - Scoped by source_mode: 'syllabus', 'lecture_notes', 'all', 'my_documents', or 'all_my_sources'.
+    - Scoped by source_mode: 'syllabus', 'lecture_notes', 'all', 'my_documents', 'all_my_sources', or 'general_knowledge'.
+    - 'general_knowledge' mode returns empty results (no retrieval performed).
     - Role & department authorization enforced against PostgreSQL before and after Qdrant search.
     - Placement Officer forbidden.
     """
@@ -935,10 +936,11 @@ async def ask_study_buddy(
     """
     RAG-powered academic Study Buddy QA endpoint.
     - Scoped strictly to student's authorized department and approved materials (or personal uploads).
-    - Supports source modes: 'syllabus', 'lecture_notes', 'all', 'my_documents', or 'all_my_sources'.
-    - Retrieves relevant chunks from dedicated Qdrant collection.
+    - Supports source modes: 'syllabus', 'lecture_notes', 'all', 'my_documents', 'all_my_sources', or 'general_knowledge'.
+    - 'general_knowledge' mode answers from Phi-4-mini's general academic knowledge without document retrieval.
+    - Retrieves relevant chunks from dedicated Qdrant collection (except general_knowledge mode).
     - Passes bounded context to shared Qwen Instruct singleton.
-    - Provides verified source citations with document, unit, topic, and page provenance.
+    - Provides verified source citations with document, unit, topic, and page provenance (when sources exist).
     - Placement Officers forbidden.
     """
     verify_study_buddy_access(current_user)

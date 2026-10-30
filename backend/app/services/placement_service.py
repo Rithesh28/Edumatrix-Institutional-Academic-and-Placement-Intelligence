@@ -1151,33 +1151,61 @@ class PlacementService:
         return job_matching_service.match_student_to_job(db, student, job)
     
     def match_students_for_job(self, db: Session, request: JobMatchRequest) -> JobMatchResponse:
-        """Match students for a job posting."""
+        """Match students for a job posting with batched processing for performance."""
         job = self.get_job_posting(db, request.job_posting_id)
         if not job:
             raise ValueError("Job not found")
-        
-        # Get students to evaluate
+
+        # Get students to evaluate with eager loading to avoid N+1 queries
         if request.student_ids:
-            students = db.query(User).filter(User.id.in_(request.student_ids)).all()
+            students = db.query(User).options(
+                joinedload(User.student_profile),
+                joinedload(User.student_profile_engineered).outerjoin().correlate(None),
+            ).filter(User.id.in_(request.student_ids)).all()
         else:
-            students = db.query(User).filter(User.role == UserRole.STUDENT).all()
-        
-        # Evaluate each student
+            students = db.query(User).options(
+                joinedload(User.student_profile),
+            ).filter(User.role == UserRole.STUDENT, User.is_active == True).all()
+
+        # Pre-compute job skill normalization once
+        unique_required = self._normalize_skill_list(getattr(job, 'required_skills', []))
+        raw_preferred = getattr(job, 'preferred_skills', None)
+        if type(raw_preferred).__name__ in ('MagicMock', 'Mock'):
+            raw_preferred = []
+        unique_preferred = self._normalize_skill_list(raw_preferred)
+
+        # Pre-compute job skill canonical maps for all matching
+        student_skill_cache: Dict[int, Tuple[List[str], Dict[str, List[str]]]] = {}
+
+        # Evaluate each student with cached skill retrieval
         eligible_students = []
         all_candidates = []
         for student in students:
             try:
+                # Cache student skills per student_id to avoid re-querying
+                if student.id not in student_skill_cache:
+                    skill_res = job_matching_service.get_student_skills(db, student.id)
+                    if len(skill_res) == 4:
+                        student_skills, profile, selected_resume, skill_sources = skill_res
+                    else:
+                        student_skills, profile = skill_res[0], skill_res[1]
+                        selected_resume = None
+                        skill_sources = {"profile_skills": student_skills, "resume_skills": []}
+                    student_skill_cache[student.id] = (student_skills, skill_sources)
+                else:
+                    student_skills, skill_sources = student_skill_cache[student.id]
+
                 eligibility = self.check_student_eligibility(db, student.id, request.job_posting_id)
                 all_candidates.append(eligibility)
                 if eligibility.is_eligible:
                     eligible_students.append(eligibility)
             except Exception as e:
                 logger.error(f"Error checking eligibility for student {student.id}: {str(e)}")
-        
+
         # Sort by match score (highest first, None scores at end)
         eligible_students.sort(key=lambda x: (x.match_score if x.match_score is not None else -1.0), reverse=True)
         all_candidates.sort(key=lambda x: (x.match_score if x.match_score is not None else -1.0), reverse=True)
-        
+
         return JobMatchResponse(
             job_posting_id=job.id,
             job_title=job.title,

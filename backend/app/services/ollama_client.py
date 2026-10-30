@@ -168,6 +168,7 @@ class OllamaClient:
         num_predict: int = 256,
         stop: Optional[List[str]] = None,
         stream: bool = False,
+        keep_alive: Optional[str] = "10m",
         **kwargs
     ) -> OllamaGenerateResponse:
         """
@@ -205,6 +206,8 @@ class OllamaClient:
             payload["system"] = system
         if stop:
             payload["options"]["stop"] = stop
+        if keep_alive:
+            payload["keep_alive"] = keep_alive
 
         # Add any extra options
         payload["options"].update(kwargs)
@@ -346,18 +349,33 @@ class OllamaClient:
             )
 
         # Generate with strict parameters for factual QA
+        # Reduced token limit for GK mode and keep_alive to avoid model reload latency
+        effective_max_tokens = 64 if not has_context else max_tokens
         result = await self.generate(
             prompt=full_prompt,
             model=self.default_model,
             temperature=temperature,
             top_p=0.9,
             top_k=40,
-            num_predict=max_tokens,
+            num_predict=effective_max_tokens,
             stop=["\n\nStudent Question:", "\n\n--- BEGIN APPROVED", "\n\n--- NO DOCUMENT"],
+            keep_alive="10m",
         )
 
         if result.error:
             logger.error(f"Ollama generation error: {result.error}")
+            # Return error with fallback marker.
+            # In general knowledge mode (no context), return a GK-appropriate message,
+            # not the document-grounded fallback.
+            if not has_context:
+                return {
+                    "answer": "This query could not be answered due to an inference error. Please try again.",
+                    "has_sufficient_evidence": False,
+                    "model_used": self.default_model,
+                    "latency_ms": 0,
+                    "is_fallback": True,
+                    "fallback_reason": result.error
+                }
             # Return error with fallback marker
             return {
                 "answer": "This is not covered in the provided notes.",

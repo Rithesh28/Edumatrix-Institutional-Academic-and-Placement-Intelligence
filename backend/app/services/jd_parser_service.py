@@ -1540,7 +1540,8 @@ class JdParserService:
         pref_skills = [self._format_skill_name(s) for s in pref_raw]
 
         # Additive GLiNER entity enrichment (captures unlisted frameworks, modern libraries, soft skills)
-        if gliner_service.is_available():
+        # Only enrich if we already have some baseline skills; otherwise skip to avoid noise
+        if gliner_service.is_available() and (req_skills or pref_skills):
             self._enrich_skills_with_gliner(
                 required_text=required_text,
                 preferred_text=preferred_text,
@@ -1581,15 +1582,52 @@ class JdParserService:
         return req_skills, pref_skills, certifications
 
     def _find_skills_in_segment(self, segment: str) -> List[str]:
-        """Scan segment for known technical skills."""
+        """
+        Scan segment for known technical skills with noise reduction.
+        Only extracts skills that appear in skill-relevant contexts,
+        avoiding false positives from academic criteria, dates, percentages, etc.
+        """
         if not segment:
             return []
         found: List[str] = []
         seg_lower = segment.lower()
+
+        # Noise phrases that should not trigger skill extraction
+        noise_phrases = [
+            r'\b(?:minimum|min)\s+(?:cgpa|gpa|percentage|%)\b',
+            r'\b(?:10th|12th|sslc|puc|hsc|diploma|degree|graduation)\b',
+            r'\b(?:batch|passout|graduating|class\s*of)\b',
+            r'\b(?:arrears?|backlogs?|with\s+out)?\b',
+        ]
+
+        # Filter out segments that are purely academic criteria
+        noise_score = 0
+        for nf in noise_phrases:
+            if re.search(nf, seg_lower):
+                noise_score += 1
+        # If too much noise, return early
+        if noise_score >= 2:
+            return []
+
         for skill in self.KNOWN_SKILL_KEYWORDS:
+            # Word-boundary regex for exact skill match
             pattern = r'\b' + re.escape(skill) + r'\b'
-            if re.search(pattern, seg_lower):
-                found.append(skill)
+            # Only match if the skill appears in a skill-relevant context
+            # (near terms like "knowledge", "proficient", "experience", "skills", "required")
+            # but NOT near academic criteria terms
+            context_pattern = rf'(?:(?:knowledge|proficient|familiar|experience|skills?|required|optional|bonus|desired|must|nice|good)\s+)?{pattern}'
+            if re.search(context_pattern, seg_lower):
+                # Additional check: ensure the skill isn't part of an academic percentage pattern
+                # e.g., "60% python" should not extract "python" as a skill
+                surrounding = re.findall(rf'.{{0,30}}{re.escape(skill)}{{0,30}}', segment, re.IGNORECASE)
+                is_noise = any(
+                    re.search(r'[0-9]{1,3}%?', ' '.join(surrounding[i-surrounding.index(skill)-3:surrounding.index(skill)+4]))
+                    for i, s in enumerate(surrounding)
+                    if s.lower() == skill.lower()
+                )
+                if not is_noise:
+                    found.append(skill)
+
         return list(dict.fromkeys(found))
 
     def _format_skill_name(self, skill: str) -> str:
@@ -1897,7 +1935,12 @@ class JdParserService:
         t = re.sub(r'(\bhttps?://[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(?::\d+)?/[^\s<>"\'`]*)\s*[\r\n]+\s*([/?&=#%][a-zA-Z0-9_/?&=#%~+.-]*)', r'\1\2', t)
 
         # 4. OCR spacing repairs inside paths:
-        t = re.sub(r'(\b(?:https?://)?forms\.gle/)\s+([a-zA-Z0-9_-]+)', r'\1\2', t)
+        # Handle multiple space-separated tokens in forms.gle/... (e.g., "forms.gle/ yP4tpWtmk9 VdFFBU8")
+        def _join_forms_gle_tokens(match):
+            prefix = match.group(1)
+            tokens = match.group(2).replace(' ', '')
+            return prefix + tokens
+        t = re.sub(r'(\b(?:https?://)?forms\.gle/)\s+([a-zA-Z0-9_-]+(?:\s+[a-zA-Z0-9_-]+)*)', _join_forms_gle_tokens, t)
         t = re.sub(r'(\bhttps?://docs\.google\.com/forms/[^\s]+/)\s+([a-zA-Z0-9_-]+)', r'\1\2', t)
         t = re.sub(r'(\bhttps?://forms\.office\.com/r/)\s+([a-zA-Z0-9_-]+)', r'\1\2', t)
 

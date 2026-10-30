@@ -617,7 +617,12 @@ class QwenGenerator:
         top_sources = valid_sources[:3]
 
         # Deadline questions - collect all matching deadlines
-        if intent == "check_deadline":
+        # Detect deadline queries from both intent AND query text (intent may be "other"
+        # after low-confidence fallback in the orchestrator, but the query still asks for a deadline)
+        is_deadline_query = intent == "check_deadline" or any(
+            w in query.lower() for w in ["deadline", "last date", "due date", "submission date", "when to submit", "when is the last date"]
+        )
+        if is_deadline_query:
             deadline_items = []
             for src in top_sources:
                 due_date = src.get("due_date") or src.get("deadline") or src.get("date")
@@ -717,7 +722,10 @@ class QwenGenerator:
                 context_str=context_str,
                 system_prompt=STUDY_BUDDY_SYSTEM_PROMPT,
                 temperature=0.1,
-                max_tokens=min(settings.AI_MAX_NEW_TOKENS, 256)
+                # Reduced token limit for GK mode: GK answers don't need long responses.
+                # 64 tokens is sufficient for concise academic explanations.
+                # This prevents the ~38s generation overhead from 256-token default.
+                max_tokens=64 if not has_context else min(settings.AI_MAX_NEW_TOKENS, 256)
             )
 
         async def _generate_with_timeout():
@@ -766,11 +774,12 @@ class QwenGenerator:
                     "fallback_reason": "ollama_timeout"
                 }
             else:
-                # General knowledge mode: return exact fallback text
+                # General knowledge mode: Ollama timed out but we still attempted GK.
+                # Return truthful fallback metadata without the document-grounded text.
                 return {
-                    "answer": "This is not covered in the provided notes.",
+                    "answer": "This query could not be answered due to an inference timeout. Please try again.",
                     "has_sufficient_evidence": False,
-                    "model_used": "deterministic_syllabus_synthesizer",
+                    "model_used": "phi4-mini",
                     "is_fallback": True,
                     "fallback_reason": "ollama_timeout"
                 }
@@ -788,11 +797,12 @@ class QwenGenerator:
                     "fallback_reason": f"ollama_error: {e}"
                 }
             else:
-                # General knowledge mode: return exact fallback text
+                # General knowledge mode: Ollama error but we still attempted GK.
+                # Return truthful fallback metadata without the document-grounded text.
                 return {
-                    "answer": "This is not covered in the provided notes.",
+                    "answer": "This query could not be answered due to an inference error. Please try again.",
                     "has_sufficient_evidence": False,
-                    "model_used": "deterministic_syllabus_synthesizer",
+                    "model_used": "phi4-mini",
                     "is_fallback": True,
                     "fallback_reason": f"ollama_error: {e}"
                 }

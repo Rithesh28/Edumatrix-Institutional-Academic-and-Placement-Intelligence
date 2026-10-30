@@ -26,12 +26,20 @@ class QueryRouter:
     STRATEGY_FEEDBACK = "feedback"
     STRATEGY_GENERAL = "general_institutional"
 
-    def determine_strategy(self, intent: str, query_text: str) -> str:
+    def determine_strategy(self, intent: str, query_text: str, intent_confidence: float = 1.0) -> str:
         """
         Determine retrieval strategy based on intent and query tokens.
         Intent classification takes priority over keyword heuristics to avoid
         misrouting (e.g., "test" in "DSP test cases" should not trigger exam strategy).
+
+        If intent_confidence is below 0.5, intent is treated as "other" to allow
+        keyword-based routing instead of trusting low-confidence classifier output.
         """
+        # Low confidence intent fallback: treat as "other" for keyword-based routing
+        INTENT_CONFIDENCE_THRESHOLD = 0.5
+        if intent_confidence < INTENT_CONFIDENCE_THRESHOLD:
+            intent = "other"
+
         clean_query = query_text.lower().strip()
 
         # Direct conversational intents - highest priority
@@ -44,10 +52,38 @@ class QueryRouter:
         if intent == "check_deadline":
             return self.STRATEGY_DEADLINE
         elif intent == "ask_exam_info":
+            # Keyword-based override: "circular/notice", "explain/confused", "test" queries
+            # should route to GENERAL even if misclassified as ask_exam_info
+            if any(w in clean_query for w in ["circular", "notice", "notification", "document", "pdf", "file"]):
+                return self.STRATEGY_GENERAL
+            # "explain", "confused", "test" are tutoring/academic content patterns, not exam queries
+            # "test" alone (without exam/midterm/finals) appears in academic content like "DSP test cases"
+            if any(w in clean_query for w in ["explain", "confused", "test cases", "test case"]):
+                return self.STRATEGY_GENERAL
             return self.STRATEGY_EXAM
         elif intent == "career_advice":
+            # Keyword-based override: "confused" and tutoring patterns
+            if any(w in clean_query for w in ["explain", "understand", "confused", "doubt", "clarify", "how to", "define", "meaning of", "concept"]):
+                institutional_keywords = ["deadline", "last date", "submission date", "due date", "when to submit",
+                                         "job", "placement", "internship", "package", "recruitment", "interview",
+                                         "company", "apply", "application", "exam", "midterm", "finals",
+                                         "seating", "hall ticket", "invigilation", "event", "circular", "notice"]
+                if not any(kw in clean_query for kw in institutional_keywords):
+                    return self.STRATEGY_GENERAL
             return self.STRATEGY_CAREER
         elif intent in ["request_notes", "ask_doubt"]:
+            # Keyword-based override: tutoring patterns should route to GENERAL
+            tutoring_patterns = [
+                "explain", "understand", "confused", "doubt", "clarify",
+                "how to", "define", "meaning of", "concept"
+            ]
+            if any(w in clean_query for w in tutoring_patterns):
+                institutional_keywords = ["deadline", "last date", "submission date", "due date", "when to submit",
+                                         "job", "placement", "internship", "package", "recruitment", "interview",
+                                         "company", "apply", "application", "exam", "midterm", "finals",
+                                         "seating", "hall ticket", "invigilation", "event", "circular", "notice"]
+                if not any(kw in clean_query for kw in institutional_keywords):
+                    return self.STRATEGY_GENERAL
             return self.STRATEGY_NOTES
 
         # Keyword checks for high-priority routing (fallback when intent is "other")
@@ -70,6 +106,11 @@ class QueryRouter:
                                      "seating", "hall ticket", "invigilation", "event", "circular", "notice"]
             if not any(kw in clean_query for kw in institutional_keywords):
                 return self.STRATEGY_GENERAL
+
+        # Document/circular request keywords - these should route to GENERAL (not notes/exam)
+        # The analyzer provides institutional info; document requests are handled elsewhere
+        if any(w in clean_query for w in ["circular", "notice", "notification", "document", "pdf", "file"]):
+            return self.STRATEGY_GENERAL
 
         # "what is" specific check - only tutoring if asking about a concept, not institutional info
         if "what is" in clean_query or "what are" in clean_query:
@@ -107,12 +148,13 @@ class QueryRouter:
         db: Session,
         intent: str,
         query_text: str,
-        department: Optional[str] = None
+        department: Optional[str] = None,
+        intent_confidence: float = 1.0
     ) -> Dict[str, Any]:
         """
         Determines strategy, runs targeted retrieval, and returns sources.
         """
-        strategy = self.determine_strategy(intent, query_text)
+        strategy = self.determine_strategy(intent, query_text, intent_confidence=intent_confidence)
         logger.info(f"🧭 Routed query '{query_text[:40]}...' [Intent: {intent}] -> Strategy: {strategy}")
 
         sources: List[Dict[str, Any]] = []

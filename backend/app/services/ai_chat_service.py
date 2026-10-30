@@ -80,6 +80,13 @@ class AIChatService:
         record_perf_metric("sentiment_analysis", sentiment_ms, sentiment=detected_sentiment, confidence=round(sentiment_conf, 3))
         logger.info(f"🎭 [AI-CHAT] Sentiment: {detected_sentiment} (conf: {sentiment_conf:.2f}) | {sentiment_ms:.1f}ms")
 
+        # Low-confidence intent fallback: if classifier confidence < 0.5, treat as "other"
+        # to allow keyword-based routing in query_router (which is more reliable for specific queries)
+        INTENT_CONFIDENCE_THRESHOLD = 0.5
+        if intent_conf < INTENT_CONFIDENCE_THRESHOLD:
+            logger.info(f"🎯 [AI-CHAT] Low intent confidence ({intent_conf:.2f} < {INTENT_CONFIDENCE_THRESHOLD}), treating as 'other' for keyword-based routing")
+            detected_intent = "other"
+
         # 4. Route Query & Retrieve Institutional Evidence
         t0 = time.perf_counter()
         department = getattr(user, "department", None)
@@ -87,7 +94,8 @@ class AIChatService:
             db=db,
             intent=detected_intent,
             query_text=clean_text,
-            department=department
+            department=department,
+            intent_confidence=intent_conf
         )
         routing_ms = (time.perf_counter() - t0) * 1000.0
         strategy = routing_result.get("strategy", "general_institutional")
@@ -180,7 +188,8 @@ class AIChatService:
             intent=detected_intent,
             intent_confidence=intent_conf,
             sentiment=detected_sentiment,
-            sentiment_confidence=sentiment_conf
+            sentiment_confidence=sentiment_conf,
+            chat_type="ai_chat_analyzer"
         )
         db.add(student_msg)
         db.flush()
@@ -197,7 +206,8 @@ class AIChatService:
             intent_confidence=intent_conf,
             sentiment=detected_sentiment,
             sentiment_confidence=sentiment_conf,
-            ai_metadata=ai_metadata
+            ai_metadata=ai_metadata,
+            chat_type="ai_chat_analyzer"
         )
         db.add(ai_msg)
         db.commit()

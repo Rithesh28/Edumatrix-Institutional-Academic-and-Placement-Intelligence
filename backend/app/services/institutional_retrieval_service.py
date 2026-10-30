@@ -48,15 +48,20 @@ class InstitutionalRetrievalService:
         "it", "they", "this", "that", "these", "those", "of", "there", "their",
         "want", "need", "check", "find", "get", "uploaded", "upload", "doc", "document",
         "today", "tomorrow", "yesterday",
-        # Generic academic & workflow terms (must NOT be treated as subject entities)
-        "date", "dates", "deadline", "deadlines", "last", "day", "days", "time", "times",
-        "submission", "submissions", "submit", "submitting", "submitted", "due",
-        "due_date", "duedate",
-        "assignment", "assignments", "homework", "task", "tasks", "project", "projects",
-        "exam", "exams", "examination", "examinations", "test", "tests", "midterm", "finals",
-        "schedule", "schedules", "circular", "circulars", "notice", "notices",
-        "info", "information", "detail", "details", "update", "updates", "status"
-    }
+            # Emotional/sentiment words that should NOT be treated as entities
+            "am", "is", "was", "were", "feel", "feeling", "felt", "overwhelmed", "terrified",
+            "anxious", "worried", "stressed", "scared", "afraid", "nervous", "panic",
+            "upset", "concerned", "frustrated", "angry", "sad", "unhappy", "depressed",
+            "happy", "excited", "relieved", "confident", "calm", "okay", "fine",
+            # Generic academic & workflow terms (must NOT be treated as subject entities)
+            "date", "dates", "deadline", "deadlines", "last", "day", "days", "time", "times",
+            "submission", "submissions", "submit", "submitting", "submitted", "due",
+            "due_date", "duedate",
+            "assignment", "assignments", "homework", "task", "tasks", "project", "projects",
+            "exam", "exams", "examination", "examinations", "test", "tests", "midterm", "finals",
+            "schedule", "schedules", "circular", "circulars", "notice", "notices",
+            "info", "information", "detail", "details", "update", "updates", "status"
+        }
 
     def extract_specific_entities(self, query_text: str) -> List[str]:
         """

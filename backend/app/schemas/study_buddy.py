@@ -169,6 +169,7 @@ class StudyBuddySourceMode(str, enum.Enum):
     ALL = "all"
     MY_DOCUMENTS = "my_documents"
     ALL_MY_SOURCES = "all_my_sources"
+    GENERAL_KNOWLEDGE = "general_knowledge"
 
 
 class StudyBuddyQuestionRequest(BaseModel):

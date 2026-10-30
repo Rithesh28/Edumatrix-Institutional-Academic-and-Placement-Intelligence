@@ -501,14 +501,19 @@ class StudyBuddyChatService:
     ) -> List[Dict[str, Any]]:
         """
         Unified search router dispatching to syllabus, lecture_notes, my_documents, or combinations.
+        Returns empty list for general_knowledge mode (no retrieval needed).
         """
         mode = str(source_mode.value if hasattr(source_mode, "value") else source_mode).lower().strip()
-        valid_modes = ("syllabus", "lecture_notes", "all", "my_documents", "all_my_sources")
+        valid_modes = ("syllabus", "lecture_notes", "all", "my_documents", "all_my_sources", "general_knowledge")
         if mode not in valid_modes:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Invalid source_mode '{source_mode}'. Must be one of: {', '.join(valid_modes)}."
             )
+
+        # General knowledge mode: no retrieval needed - return empty list
+        if mode == "general_knowledge":
+            return []
 
         if mode == "syllabus":
             return self.search_syllabus_chunks(db, query, current_user, subject_id, limit)
@@ -579,7 +584,7 @@ class StudyBuddyChatService:
 
         # Validate source_mode
         mode = str(source_mode.value if hasattr(source_mode, "value") else source_mode).lower().strip()
-        valid_modes = ("syllabus", "lecture_notes", "all", "my_documents", "all_my_sources")
+        valid_modes = ("syllabus", "lecture_notes", "all", "my_documents", "all_my_sources", "general_knowledge")
         if mode not in valid_modes:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -595,7 +600,8 @@ class StudyBuddyChatService:
             )
 
         user_dept = _get_user_department(current_user)
-        if mode in ("syllabus", "lecture_notes", "all", "all_my_sources") or subject_id is not None:
+        # Skip department check for general_knowledge mode (no institutional documents accessed)
+        if mode != "general_knowledge" and (mode in ("syllabus", "lecture_notes", "all", "all_my_sources") or subject_id is not None):
             if current_user.role != UserRole.ADMIN and not user_dept:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -668,49 +674,57 @@ class StudyBuddyChatService:
         auth_ms = (time.perf_counter() - t0_auth) * 1000.0
 
         # 3. Retrieve relevant chunks according to source_mode
-        # Precompute query embedding once to share across both retrieval passes
-        with PerfTimer("query_embedding") as t_qembed:
-            query_vector = embedding_service.embed_text(clean_query)
-        record_perf_metric("query_embedding", t_qembed.elapsed_ms, query_len=len(clean_query))
+        # Skip embedding and retrieval for general_knowledge mode (no document grounding needed)
+        raw_chunks = []
+        query_vector = None
 
-        raw_chunks = self.search_unified_chunks(
-            db=db,
-            query=clean_query,
-            current_user=current_user,
-            subject_id=subject_id,
-            source_mode=mode,
-            limit=self.top_k,
-            precomputed_vector=query_vector
-        )
+        if mode != "general_knowledge":
+            # Precompute query embedding once to share across both retrieval passes
+            with PerfTimer("query_embedding") as t_qembed:
+                query_vector = embedding_service.embed_text(clean_query)
+            record_perf_metric("query_embedding", t_qembed.elapsed_ms, query_len=len(clean_query))
 
-        # 3b. Retrieve chunks specifically from the attached document if provided
-        if attached_document_id is not None:
-            attached_chunks = self.search_student_document_chunks(
+            raw_chunks = self.search_unified_chunks(
                 db=db,
                 query=clean_query,
                 current_user=current_user,
-                subject_id=None,
+                subject_id=subject_id,
+                source_mode=mode,
                 limit=self.top_k,
-                student_study_document_id=attached_document_id,
                 precomputed_vector=query_vector
             )
-            for ac in attached_chunks:
-                ac["is_attached_file"] = True
 
-            # Merge attached chunks with raw_chunks, deduplicating by snippet prefix
-            seen_snippets = set()
-            merged = []
-            all_candidates = attached_chunks + raw_chunks
-            all_candidates.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
-            for c in all_candidates:
-                snippet = (c.get("text") or "").strip()[:80].lower()
-                if snippet and snippet in seen_snippets:
-                    continue
-                seen_snippets.add(snippet)
-                merged.append(c)
-                if len(merged) >= self.top_k * 2:
-                    break
-            raw_chunks = merged
+            # 3b. Retrieve chunks specifically from the attached document if provided
+            if attached_document_id is not None:
+                attached_chunks = self.search_student_document_chunks(
+                    db=db,
+                    query=clean_query,
+                    current_user=current_user,
+                    subject_id=None,
+                    limit=self.top_k,
+                    student_study_document_id=attached_document_id,
+                    precomputed_vector=query_vector
+                )
+                for ac in attached_chunks:
+                    ac["is_attached_file"] = True
+
+                # Merge attached chunks with raw_chunks, deduplicating by snippet prefix
+                seen_snippets = set()
+                merged = []
+                all_candidates = attached_chunks + raw_chunks
+                all_candidates.sort(key=lambda x: float(x.get("score", 0.0)), reverse=True)
+                for c in all_candidates:
+                    snippet = (c.get("text") or "").strip()[:80].lower()
+                    if snippet and snippet in seen_snippets:
+                        continue
+                    seen_snippets.add(snippet)
+                    merged.append(c)
+                    if len(merged) >= self.top_k * 2:
+                        break
+                raw_chunks = merged
+        else:
+            # General knowledge mode: no retrieval, no embedding computation
+            logger.info(f"🔍 [STUDY-BUDDY] Mode: 'general_knowledge' | Skipping retrieval and embedding")
 
         # 4. Filter by Minimum Relevance Score Threshold
         qualifying_chunks = [
@@ -718,10 +732,11 @@ class StudyBuddyChatService:
             if float(c.get("score", 0.0)) >= self.min_relevance_score
         ]
 
-        logger.info(
-            f"🔍 [STUDY-BUDDY] Mode: '{mode}' | Query: '{clean_query[:50]}...' | Attached: {attached_document_id} | "
-            f"Raw: {len(raw_chunks)} | Qualifying (>= {self.min_relevance_score}): {len(qualifying_chunks)}"
-        )
+        if mode != "general_knowledge":
+            logger.info(
+                f"🔍 [STUDY-BUDDY] Mode: '{mode}' | Query: '{clean_query[:50]}...' | Attached: {attached_document_id} | "
+                f"Raw: {len(raw_chunks)} | Qualifying (>= {self.min_relevance_score}): {len(qualifying_chunks)}"
+            )
 
         # 5. Build Bounded Academic Context Window (even if no qualifying chunks - general knowledge mode)
         context_passages = []
@@ -837,6 +852,54 @@ class StudyBuddyChatService:
             model_used=model_used
         )
 
+        # 8. Persist Study Buddy conversation in database
+        if current_user.is_active:
+            from ..models.chat import ChatMessage
+            from sqlalchemy import select
+
+            # Find or create a persistent conversation for this student
+            # Study Buddy messages: sender=student, receiver=AI (0), chat_type=study_buddy
+            # We store student messages and assistant answers separately
+            try:
+                # Persist student question
+                student_msg = ChatMessage(
+                    sender_id=current_user.id,
+                    receiver_id=None,
+                    content=clean_query,
+                    is_read=False,
+                    is_ai=False,
+                    chat_type="study_buddy"
+                )
+                db.add(student_msg)
+                db.flush()
+
+                # Persist assistant answer
+                ai_msg = ChatMessage(
+                    sender_id=None,
+                    receiver_id=current_user.id,
+                    content=answer_text,
+                    is_read=False,
+                    is_ai=True,
+                    chat_type="study_buddy",
+                    ai_metadata={
+                        "source_mode": mode,
+                        "subject_id": str(subject_id) if subject_id else None,
+                        "has_sufficient_evidence": has_evidence,
+                        "model_used": model_used,
+                        "latency_ms": round(elapsed_ms, 2),
+                        "fallback_reason": gen_result.get("fallback_reason")
+                    }
+                )
+                db.add(ai_msg)
+                db.commit()
+                db.refresh(student_msg)
+                db.refresh(ai_msg)
+
+                logger.info(f"✅ [STUDY-BUDDY] Conversation persisted. QMsg ID: {student_msg.id}, AMsg ID: {ai_msg.id}")
+            except Exception as persist_err:
+                logger.warning(f"⚠️ [STUDY-BUDDY] Failed to persist conversation: {persist_err}")
+                db.rollback()
+
         return {
             "answer": answer_text,
             "has_sufficient_evidence": has_evidence,
@@ -844,6 +907,7 @@ class StudyBuddyChatService:
             "subject_id": subject_id,
             "model_used": model_used,
             "latency_ms": round(elapsed_ms, 2),
+            "source_mode": mode,
             "is_fallback": bool(gen_result.get("is_fallback", False)),
             "fallback_reason": gen_result.get("fallback_reason")
         }

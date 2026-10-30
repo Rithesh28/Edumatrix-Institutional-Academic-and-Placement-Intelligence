@@ -133,13 +133,21 @@ const StudyBuddy = () => {
   // ----------------------------------------------------
   // CHAT STATE & SOURCE MODE
   // ----------------------------------------------------
-  // Source Mode: 'lecture_notes' (only student-facing option)
+  // Source Mode: 'lecture_notes' | 'my_documents' | 'all_my_sources' | 'general_knowledge'
   const [sourceMode, setSourceMode] = useState('lecture_notes')
   const [messages, setMessages] = useState([])
   const [inputQuestion, setInputQuestion] = useState('')
   const [isChatLoading, setIsChatLoading] = useState(false)
   const [expandedChatCitations, setExpandedChatCitations] = useState({})
   const messagesEndRef = useRef(null)
+
+  // Source mode options for the selector
+  const sourceModeOptions = useMemo(() => [
+    { value: 'lecture_notes', label: 'Lecturer Notes', icon: '📝', description: 'Published lecturer notes for your course' },
+    { value: 'my_documents', label: 'My Documents', icon: '📁', description: 'Your personal uploaded study documents' },
+    { value: 'all_my_sources', label: 'All Sources', icon: '🚀', description: 'Lecturer notes + your documents combined' },
+    { value: 'general_knowledge', label: 'General Knowledge', icon: '🌐', description: 'Answer from general academic knowledge (no document retrieval)' }
+  ], [])
 
   // ----------------------------------------------------
   // ASK BUDDY ATTACHMENT STATE (Part A)
@@ -1486,22 +1494,43 @@ const StudyBuddy = () => {
                 <span>🎯</span>
                 <span>Grounding Source:</span>
               </span>
-              {/* Single visible option: Lecturer Notes */}
+              {/* Source Mode Selector */}
               <div className="inline-flex p-0.5 rounded-lg bg-gray-200/80 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-xs">
-                <span
-                  id="source-mode-lecture-notes"
-                  className="px-3 py-1.5 rounded-md text-xs font-semibold bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm flex items-center gap-1.5 cursor-default"
-                >
-                  <span>📝</span>
-                  <span>Lecturer Notes</span>
-                </span>
+                {sourceModeOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setSourceMode(opt.value)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all whitespace-nowrap ${
+                      sourceMode === opt.value
+                        ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                        : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'
+                    }`}
+                    title={opt.description}
+                  >
+                    <span>{opt.icon}</span>
+                    <span>{opt.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
             {/* Explanatory subtext explaining what is searched */}
             <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1">
               <span>
-                Answers are grounded in published lecturer notes for your course{chatAttachment ? ' and your attached document' : ''}.
+                {(() => {
+                  const opt = sourceModeOptions.find(o => o.value === sourceMode);
+                  if (!opt) return '';
+                  if (sourceMode === 'general_knowledge') {
+                    return 'Answers from general academic knowledge. No document retrieval performed.';
+                  }
+                  if (sourceMode === 'my_documents') {
+                    return 'Answers grounded in your personal uploaded documents only.';
+                  }
+                  if (sourceMode === 'all_my_sources') {
+                    return 'Answers grounded in lecturer notes and your documents combined.';
+                  }
+                  return 'Answers grounded in published lecturer notes for your course' + (chatAttachment ? ' and your attached document' : '') + '.';
+                })()}
               </span>
             </div>
           </div>
@@ -1566,6 +1595,8 @@ const StudyBuddy = () => {
                               ? '📁 My Docs'
                               : msg.sourceMode === 'all_my_sources'
                               ? '🚀 All Sources'
+                              : msg.sourceMode === 'general_knowledge'
+                              ? '🌐 General Knowledge'
                               : '🏛️ Syllabus'}
                           </span>
                         </div>
@@ -1577,7 +1608,7 @@ const StudyBuddy = () => {
                       </div>
                     )}
 
-                    {msg.sender === 'assistant' && !msg.hasSufficientEvidence && !msg.isError && (
+                    {msg.sender === 'assistant' && !msg.hasSufficientEvidence && !msg.isError && msg.sourceMode !== 'general_knowledge' && (
                       <div className="mb-3 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2">
                         <span className="text-base">⚠️</span>
                         <span>
@@ -1750,7 +1781,20 @@ const StudyBuddy = () => {
                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse delay-75" />
                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse delay-150" />
                     <span className="ml-1 text-xs font-medium">
-                      Retrieving published lecturer notes & synthesizing answer...
+                      {(() => {
+                        const opt = sourceModeOptions.find(o => o.value === sourceMode);
+                        if (!opt) return 'Preparing your answer...';
+                        if (sourceMode === 'general_knowledge') {
+                          return 'Thinking through your question...';
+                        }
+                        if (sourceMode === 'my_documents') {
+                          return 'Searching your documents and preparing your answer...';
+                        }
+                        if (sourceMode === 'all_my_sources') {
+                          return 'Searching available sources and preparing your answer...';
+                        }
+                        return 'Searching published lecturer notes and preparing your answer...';
+                      })()}
                     </span>
                   </div>
                 </div>
