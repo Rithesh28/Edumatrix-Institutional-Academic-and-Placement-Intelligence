@@ -88,6 +88,25 @@ class QueryRouter:
 
         # Keyword checks for high-priority routing (fallback when intent is "other")
 
+        # 1. GENERAL KNOWLEDGE DETECTION - explicit check before other routing
+        # Questions about world facts, general knowledge, or non-institutional topics
+        general_knowledge_patterns = [
+            "who is the president", "who is the prime minister", "who is the",
+            "what is the capital", "capital of", "population of",
+            "when was", "where is", "how many", "what does", "meaning of life",
+            "who won", "which country", "tell me about"
+        ]
+        # Check if query is asking for general knowledge (not institutional info)
+        if any(pattern in clean_query for pattern in general_knowledge_patterns):
+            # Ensure it's not also an institutional query
+            institutional_keywords = ["deadline", "last date", "submission date", "due date", "when to submit",
+                                         "job", "placement", "internship", "package", "recruitment", "interview",
+                                         "company", "apply", "application", "exam", "midterm", "finals",
+                                         "seating", "hall ticket", "invigilation", "event", "circular", "notice",
+                                         "assignment", "circular", "timetable", "schedule", "cie", "exam"]
+            if not any(kw in clean_query for kw in institutional_keywords):
+                return self.STRATEGY_GENERAL
+
         # Academic tutoring queries - explicitly route to GENERAL before other keyword checks
         # The analyzer is for institutional info ONLY (deadlines, exams, placements, events, circulars)
         # NOT a study tutor. These patterns indicate academic help requests.
@@ -125,8 +144,16 @@ class QueryRouter:
         if any(w in clean_query for w in ["job", "placement", "internship", "package", "recruitment", "interview", "company", "apply", "application"]):
             return self.STRATEGY_CAREER
 
+        # CIE/Exam schedule keywords - must come before general deadline to catch specific CIE queries
+        # These are exam schedule queries that should route to exam_information, not deadline
+        if any(w in clean_query for w in ["cie", "continuous internal evaluation", "internal exam", "internal assessment"]):
+            return self.STRATEGY_EXAM
+
         # Deadline keywords
-        if any(w in clean_query for w in ["deadline", "last date", "submission date", "due date", "when to submit"]):
+        if any(w in clean_query for w in ["deadline", "last date", "submission date", "due date", "when to submit", "when does", "when is the"]):
+            # If the query mentions specific exam/CIE terms, route to exam instead
+            if any(w in clean_query for w in ["cie", "exam", "test", "midterm", "finals", "continuous internal", "internal evaluation"]):
+                return self.STRATEGY_EXAM
             return self.STRATEGY_DEADLINE
 
         # Avoid false positives on "test" - only trigger exam strategy if query

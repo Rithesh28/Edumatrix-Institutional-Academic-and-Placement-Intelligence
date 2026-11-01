@@ -60,7 +60,16 @@ class InstitutionalRetrievalService:
             "assignment", "assignments", "homework", "task", "tasks", "project", "projects",
             "exam", "exams", "examination", "examinations", "test", "tests", "midterm", "finals",
             "schedule", "schedules", "circular", "circulars", "notice", "notices",
-            "info", "information", "detail", "details", "update", "updates", "status"
+            "info", "information", "detail", "details", "update", "updates", "status",
+            # Overly generic academic field terms that appear in many course names
+            # NOTE: "computing", "cloud", "quantum" are kept in single-word filtering but ONLY
+            # the multi-word phrase "quantum cloud computing" etc. should be treated as specific entity
+            "science", "engineering", "technology",
+            "data", "artificial", "intelligence", "machine", "learning", "deep",
+            "network", "networks", "security", "software", "hardware", "system", "systems",
+            "digital", "signal", "processing", "parallel", "distributed", "web", "mobile",
+            "database", "databases", "algorithm", "algorithms", "structure", "structures",
+            "operating", "computer", "architecture", "organization", "compiler", "compilers"
         }
 
     def extract_specific_entities(self, query_text: str) -> List[str]:
@@ -68,9 +77,67 @@ class InstitutionalRetrievalService:
         Extracts subject, course, acronym, or unique entity tokens from the query,
         strictly filtering out all generic academic workflow words and stopwords.
         Preserves 2+ character acronyms/identifiers (e.g., 'dsp', 'ml', 'os', 'cn', 'dbms').
+        Also extracts multi-word subject phrases (capitalized or known course patterns).
+
+        IMPORTANT: Single-word generic academic terms like "computing", "cloud", "quantum"
+        are NOT treated as specific entities on their own. Only multi-word phrases
+        like "Quantum Cloud Computing" are treated as specific course/subject entities.
         """
-        tokens = re.findall(r'\b[a-zA-Z0-9_-]{2,}\b', (query_text or "").lower())
-        return [t for t in tokens if t not in self.GENERIC_QUERY_TERMS]
+        if not query_text:
+            return []
+
+        text_lower = query_text.lower()
+
+        # 1. Extract single-word tokens (existing logic)
+        tokens = re.findall(r'\b[a-zA-Z0-9_-]{2,}\b', text_lower)
+        single_entities = [t for t in tokens if t not in self.GENERIC_QUERY_TERMS]
+
+        # Filter out overly generic single-word academic terms that could match
+        # unrelated documents (e.g., "computing" matches "Parallel Computing" in exam schedule)
+        # These should only count as entities when part of a multi-word phrase
+        OVERLY_GENERIC_SINGLE_WORDS = {
+            "computing", "cloud", "quantum", "science", "engineering", "technology",
+            "data", "artificial", "intelligence", "machine", "learning", "deep",
+            "network", "networks", "security", "software", "hardware", "system", "systems",
+            "digital", "signal", "processing", "parallel", "distributed", "web", "mobile",
+            "database", "databases", "algorithm", "algorithms", "structure", "structures",
+            "operating", "computer", "architecture", "organization", "compiler", "compilers"
+        }
+        single_entities = [t for t in single_entities if t not in OVERLY_GENERIC_SINGLE_WORDS]
+
+        # 2. Extract multi-word capitalized phrases (likely course/subject names)
+        # Pattern: "When is the [Capitalized Phrase] assignment deadline?"
+        multi_word_entities = []
+        # Look for capitalized phrases before "assignment", "deadline", "exam", "test", "project"
+        # Use non-greedy matching to capture only the entity, not the keyword
+        patterns = [
+            # Capitalized phrase followed by assignment/deadline/exam/test (non-greedy)
+            r'(?:for|the|of|in|on|about)\s+([A-Z][a-z][a-zA-Z0-9\s_-]*?)\s+(?:assignment|homework|task|project|exam|test|midterm|finals|deadline)',
+            # Capitalized phrase preceded by "for" before deadline (non-greedy)
+            r'for\s+([A-Z][a-z][a-zA-Z0-9\s_-]*?)\s+(?:deadline|assignment)',
+        ]
+        for pattern in patterns:
+            matches = re.findall(pattern, query_text)
+            for match in matches:
+                phrase = match.strip().lower()
+                # Split into words and filter out generic ones
+                words = [w for w in phrase.split() if w not in self.GENERIC_QUERY_TERMS]
+                if words:
+                    multi_word_entities.append(" ".join(words))
+
+        # 3. Only use multi-word entities for specific entity matching
+        # Single-word entities are kept for abbreviation matching (DSP, ML, OS)
+        # but multi-word phrases take precedence for course name matching
+        all_entities = single_entities + multi_word_entities
+        # Deduplicate while preserving order
+        seen = set()
+        unique_entities = []
+        for e in all_entities:
+            if e not in seen:
+                seen.add(e)
+                unique_entities.append(e)
+
+        return unique_entities
 
     def detect_ambiguity(
         self,
@@ -84,7 +151,7 @@ class InstitutionalRetrievalService:
         arbitrarily selecting one.
         """
         clean_query = (query_text or "").lower()
-        specific_entities = self.extract_specific_entities(clean_query)
+        specific_entities = self.extract_specific_entities(query_text)
         is_assignment_query = any(w in clean_query for w in ["assignment", "homework", "task", "project", "submission", "submit"])
         is_exam_query = any(w in clean_query for w in ["exam", "examination", "test", "midterm", "finals"])
 
@@ -166,7 +233,8 @@ class InstitutionalRetrievalService:
         clean_query = query_text.lower()
 
         try:
-            specific_entities = self.extract_specific_entities(clean_query)
+            # Pass original query_text to preserve capitalization for multi-word entity extraction
+            specific_entities = self.extract_specific_entities(query_text)
             is_assignment_query = any(w in clean_query for w in ["assignment", "homework", "task", "project", "submission", "submit"])
             is_exam_query = any(w in clean_query for w in ["exam", "test", "midterm", "finals"])
 

@@ -626,8 +626,41 @@ class QwenGenerator:
             deadline_items = []
             for src in top_sources:
                 due_date = src.get("due_date") or src.get("deadline") or src.get("date")
+                title = src.get("title", "Official Record")
+                content = src.get("text") or src.get("text_passage") or src.get("content", "")
+
+                # Check if query asks for a specific CIE (First, Second, etc.) or subject
+                query_lower = query.lower()
+                specific_cie = None
+                if "first cie" in query_lower or "1st cie" in query_lower or "cie 1" in query_lower:
+                    specific_cie = "first"
+                elif "second cie" in query_lower or "2nd cie" in query_lower or "cie 2" in query_lower:
+                    specific_cie = "second"
+                elif "third cie" in query_lower or "3rd cie" in query_lower or "cie 3" in query_lower:
+                    specific_cie = "third"
+
+                # If specific CIE asked and content has it, try to extract from content
+                if specific_cie and content:
+                    import re
+                    content_lower = content.lower()
+                    # Look for "First CIE :- ...", "Second CIE :- ...", etc.
+                    patterns = [
+                        rf'{specific_cie}\s*cie\s*[:-]\s*([^\n]+)',
+                        rf'{specific_cie}\s*cie\s*[:-]?\s*(\d{{1,2}}\s*\w+\s*\d{{4}})',
+                    ]
+                    found_date = None
+                    for pattern in patterns:
+                        match = re.search(pattern, content_lower)
+                        if match:
+                            found_date = match.group(1).strip()
+                            break
+                    if found_date:
+                        item = f"\"{title}\" — {specific_cie.capitalize()} CIE: {found_date}"
+                        deadline_items.append(item)
+                        continue
+
+                # Fallback to circular's due_date
                 if due_date:
-                    title = src.get("title", "Official Record")
                     days = src.get("days_remaining")
                     item = f"\"{title}\" — {due_date}"
                     if days is not None:
@@ -650,8 +683,98 @@ class QwenGenerator:
                 due_date = src.get("due_date") or src.get("deadline") or src.get("date")
                 content = src.get("text") or src.get("text_passage") or src.get("content", "")
                 item = f"\"{title}\""
-                if due_date:
+
+                query_lower = query.lower()
+                import re
+
+                # PRIORITY 1: Check for specific subject entities first (course codes, course names)
+                # This should take precedence over generic CIE patterns
+                specific_entities = []
+                subject_codes = re.findall(r'\b[B]?[A-Z]{2,3}\d{3}\b', query.upper())
+                if subject_codes:
+                    specific_entities.extend([c.lower() for c in subject_codes])
+                course_patterns = [
+                    "dlrl", "deep learning", "reinforcement learning",
+                    "machine learning", "parallel computing", "parallel programming"
+                ]
+                for pattern in course_patterns:
+                    if pattern in query_lower:
+                        specific_entities.append(pattern)
+
+                # Map common abbreviations to full names for better content matching
+                abbreviation_map = {
+                    "dlrl": "deep learning & reinforcement learning",
+                    "dl": "deep learning",
+                    "ml": "machine learning",
+                }
+                # Add mapped full names to specific_entities for content matching
+                for abbrev, full_name in abbreviation_map.items():
+                    if abbrev in query_lower:
+                        specific_entities.append(full_name)
+
+                # PRIORITY 2: Check for specific CIE (First, Second, etc.)
+                specific_cie = None
+                if "first cie" in query_lower or "1st cie" in query_lower or "cie 1" in query_lower:
+                    specific_cie = "first"
+                elif "second cie" in query_lower or "2nd cie" in query_lower or "cie 2" in query_lower:
+                    specific_cie = "second"
+                elif "third cie" in query_lower or "3rd cie" in query_lower or "cie 3" in query_lower:
+                    specific_cie = "third"
+
+                # If query has BOTH specific subject AND specific CIE, prioritize subject
+                # (e.g., "When is DLRL CIE 2?" -> look for DLRL, not just Second CIE)
+                if specific_entities:
+                    content_lower = content.lower()
+                    matched_entity = None
+                    for entity in specific_entities:
+                        if entity in content_lower:
+                            matched_entity = entity
+                            break
+
+                    if matched_entity:
+                        # Found the specific subject - now try to find its date in context
+                        if specific_cie and content:
+                            # Try to find the date for this subject in the specific CIE section
+                            patterns = [
+                                rf'{specific_cie}\s*cie\s*[:-]\s*([^\n]+)',
+                                rf'{specific_cie}\s*cie\s*[:-]?\s*(\d{{1,2}}\s*\w+\s*\d{{4}})',
+                            ]
+                            found_date = None
+                            for pattern in patterns:
+                                match = re.search(pattern, content_lower)
+                                if match:
+                                    found_date = match.group(1).strip()
+                                    break
+                            if found_date:
+                                item += f" — {specific_cie.capitalize()} CIE: {found_date} (Subject: {matched_entity})"
+                            elif due_date:
+                                item += f" — Scheduled for {due_date} (Subject: {matched_entity} found, but specific CIE date not located in document)"
+                        elif due_date:
+                            item += f" — Scheduled for {due_date} (Subject: {matched_entity} found)"
+                    else:
+                        # Subject NOT found in document
+                        if due_date:
+                            item += f" — (No specific date found for {'/'.join(specific_entities)} in this timetable)"
+                elif specific_cie and content:
+                    # No specific subject, just CIE pattern - extract CIE date
+                    content_lower = content.lower()
+                    patterns = [
+                        rf'{specific_cie}\s*cie\s*[:-]\s*([^\n]+)',
+                        rf'{specific_cie}\s*cie\s*[:-]?\s*(\d{{1,2}}\s*\w+\s*\d{{4}})',
+                    ]
+                    found_date = None
+                    for pattern in patterns:
+                        match = re.search(pattern, content_lower)
+                        if match:
+                            found_date = match.group(1).strip()
+                            break
+                    if found_date:
+                        item += f" — {specific_cie.capitalize()} CIE: {found_date}"
+                    elif due_date:
+                        item += f" — Scheduled for {due_date} (Note: {specific_cie.capitalize()} CIE date not explicitly found in document)"
+                elif due_date:
                     item += f" — Scheduled for {due_date}"
+
                 if content and not src.get("metadata_only"):
                     item += f": {content.strip()[:200]}"
                 exam_items.append(item)
