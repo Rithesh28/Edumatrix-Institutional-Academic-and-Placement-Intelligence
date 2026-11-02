@@ -62,6 +62,30 @@ export const useWebSocket = () => {
             if (exists) return prev
             return [...prev, data]
           })
+        } else if (data.type === 'classification_completed') {
+          // Update existing message with classification metadata
+          setMessages((prev) => {
+            const idx = prev.findIndex(m => m.id === data.message_id)
+            if (idx === -1) return prev
+            const updated = [...prev]
+            updated[idx] = {
+              ...updated[idx],
+              sentiment: data.sentiment,
+              sentiment_confidence: data.sentiment_confidence,
+              intent: data.intent,
+              intent_confidence: data.intent_confidence,
+              ai_metadata: {
+                classification: {
+                  sentiment: data.sentiment,
+                  sentiment_confidence: data.sentiment_confidence,
+                  intent: data.intent,
+                  intent_confidence: data.intent_confidence,
+                  classified_at: data.classified_at
+                }
+              }
+            }
+            return updated
+          })
         } else if (data.type === 'error') {
           console.error('WebSocket error message:', data.message)
           setError(data.message)

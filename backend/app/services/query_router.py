@@ -25,6 +25,7 @@ class QueryRouter:
     STRATEGY_GREET = "conversational_greet"
     STRATEGY_FEEDBACK = "feedback"
     STRATEGY_GENERAL = "general_institutional"
+    STRATEGY_GENERAL_KNOWLEDGE = "general_knowledge"
 
     def determine_strategy(self, intent: str, query_text: str, intent_confidence: float = 1.0) -> str:
         """
@@ -90,6 +91,7 @@ class QueryRouter:
 
         # 1. GENERAL KNOWLEDGE DETECTION - explicit check before other routing
         # Questions about world facts, general knowledge, or non-institutional topics
+        # These should NOT trigger any institutional retrieval
         general_knowledge_patterns = [
             "who is the president", "who is the prime minister", "who is the",
             "what is the capital", "capital of", "population of",
@@ -105,7 +107,7 @@ class QueryRouter:
                                          "seating", "hall ticket", "invigilation", "event", "circular", "notice",
                                          "assignment", "circular", "timetable", "schedule", "cie", "exam"]
             if not any(kw in clean_query for kw in institutional_keywords):
-                return self.STRATEGY_GENERAL
+                return self.STRATEGY_GENERAL_KNOWLEDGE
 
         # Academic tutoring queries - explicitly route to GENERAL before other keyword checks
         # The analyzer is for institutional info ONLY (deadlines, exams, placements, events, circulars)
@@ -192,6 +194,11 @@ class QueryRouter:
             sources = []
 
         elif strategy == self.STRATEGY_FEEDBACK:
+            requires_retrieval = False
+            sources = []
+
+        elif strategy == self.STRATEGY_GENERAL_KNOWLEDGE:
+            # General knowledge queries: NO institutional retrieval
             requires_retrieval = False
             sources = []
 

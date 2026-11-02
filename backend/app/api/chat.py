@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
@@ -20,6 +20,8 @@ from ..schemas.chat import (
 from ..websocket import manager
 from ..services.ai_chat_service import ai_chat_service
 from ..services.chat_policy import can_chat, is_ai_allowed
+from ..services.sentiment_analyser import sentiment_analyser
+from ..services.intent_classifier import intent_classifier
 
 logger = logging.getLogger(__name__)
 
@@ -262,6 +264,14 @@ async def send_message(
     db.add(new_message)
     db.commit()
     db.refresh(new_message)
+
+    # Schedule sentiment and intent classification in background
+    # (do not block message delivery on classification)
+    background_tasks.add_task(
+        classify_and_update_message,
+        message_id=new_message.id,
+        content=message.content
+    )
 
     # Send via WebSocket if receiver is online
     response = json.dumps({
@@ -543,6 +553,15 @@ async def websocket_chat(websocket: WebSocket, token: str):
                         db.commit()
                         db.refresh(new_message)
 
+                        # Schedule sentiment and intent classification in background
+                        # (do not block message delivery on classification)
+                        background_tasks = BackgroundTasks()
+                        background_tasks.add_task(
+                            classify_and_update_message,
+                            message_id=new_message.id,
+                            content=content
+                        )
+
                         response = json.dumps({
                             "type": "message",
                             "id": new_message.id,
@@ -550,6 +569,11 @@ async def websocket_chat(websocket: WebSocket, token: str):
                             "receiver_id": new_message.receiver_id,
                             "content": new_message.content,
                             "is_ai": False,
+                            "ai_metadata": new_message.ai_metadata,
+                            "intent": new_message.intent,
+                            "intent_confidence": new_message.intent_confidence,
+                            "sentiment": new_message.sentiment,
+                            "sentiment_confidence": new_message.sentiment_confidence,
                             "created_at": new_message.created_at.isoformat() if new_message.created_at else None
                         })
                         await manager.send_personal_message(response, receiver_id)
@@ -569,3 +593,86 @@ async def websocket_chat(websocket: WebSocket, token: str):
 
     except WebSocketDisconnect:
         manager.disconnect(user_id)
+
+
+def classify_and_update_message(message_id: int, content: str):
+    """
+    Background task to classify sentiment and intent of a human message
+    and update the message record with classification metadata.
+    Broadcasts a WebSocket event to both sender and receiver when complete.
+    """
+    from sqlalchemy.orm import Session
+    from ..core.database import SessionLocal
+    from ..models.chat import ChatMessage
+    from ..services.sentiment_analyser import sentiment_analyser
+    from ..services.intent_classifier import intent_classifier
+    import logging
+
+    logger = logging.getLogger(__name__)
+    db = SessionLocal()
+    try:
+        # Only classify human messages (not AI messages)
+        message = db.query(ChatMessage).filter(ChatMessage.id == message_id).first()
+        if not message or message.is_ai:
+            return
+
+        # Run sentiment analysis
+        sentiment_result = sentiment_analyser.analyse(content)
+        sentiment = sentiment_result.get("sentiment", "neutral")
+        sentiment_confidence = sentiment_result.get("confidence", 0.5)
+
+        # Run intent classification
+        intent_result = intent_classifier.predict(content)
+        intent = intent_result.get("intent", "other")
+        intent_confidence = intent_result.get("confidence", 0.5)
+
+        # Update message with classification metadata
+        message.sentiment = sentiment
+        message.sentiment_confidence = sentiment_confidence
+        message.intent = intent
+        message.intent_confidence = intent_confidence
+
+        # Store full classification metadata in ai_metadata field for extensibility
+        if message.ai_metadata is None:
+            message.ai_metadata = {}
+        message.ai_metadata["classification"] = {
+            "sentiment": sentiment,
+            "sentiment_confidence": sentiment_confidence,
+            "intent": intent,
+            "intent_confidence": intent_confidence,
+            "classified_at": datetime.utcnow().isoformat()
+        }
+
+        db.commit()
+        db.refresh(message)
+        logger.info(f"✅ Classified message {message_id}: sentiment={sentiment}, intent={intent}")
+
+        # Broadcast classification completion to both sender and receiver
+        classification_payload = json.dumps({
+            "type": "classification_completed",
+            "message_id": message.id,
+            "sender_id": message.sender_id,
+            "receiver_id": message.receiver_id,
+            "sentiment": sentiment,
+            "sentiment_confidence": round(sentiment_confidence, 2),
+            "intent": intent,
+            "intent_confidence": round(intent_confidence, 2),
+            "classified_at": message.ai_metadata["classification"]["classified_at"]
+        })
+
+        # Send to sender if different from receiver
+        if message.sender_id:
+            manager.send_personal_message(classification_payload, message.sender_id)
+        # Send to receiver if exists
+        if message.receiver_id:
+            manager.send_personal_message(classification_payload, message.receiver_id)
+
+    except Exception as e:
+        logger.warning(f"⚠️ Background classification failed for message {message_id}: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+# Import datetime for background task
+from datetime import datetime

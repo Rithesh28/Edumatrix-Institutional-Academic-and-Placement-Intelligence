@@ -398,13 +398,27 @@ class QwenGenerator:
         intent: Optional[str] = None,
         is_ambiguous: bool = False,
         ambiguous_candidates: Optional[List[Dict[str, Any]]] = None,
-        ambiguity_category: str = "assignment"
+        ambiguity_category: str = "assignment",
+        strategy: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generates a grounded response using Qwen when available, or a strict
         rule-grounded synthesizer that guarantees zero hallucination.
         """
         total_start = time.perf_counter()
+
+        # If strategy is general_knowledge, return restriction explanation
+        if strategy == "general_knowledge":
+            total_ms = (time.perf_counter() - total_start) * 1000.0
+            record_perf_metric("model_generation", total_ms, model="general_knowledge_restriction_rule", has_evidence=False, intent=intent)
+            return {
+                "answer": "EduMatrix AI Assistant is restricted to institutional knowledge (such as deadlines, exam schedules, circulars, and placements). I cannot answer general knowledge questions. Please ask about your academic schedules, assignments, exams, or placement opportunities.",
+                "is_hallucinated": False,
+                "has_evidence": False,
+                "is_ambiguous": False,
+                "model_used": "general_knowledge_restriction_rule"
+            }
+
         context_str = self.build_grounded_context_str(sources)
         has_evidence = bool(
             sources and any(
@@ -624,13 +638,24 @@ class QwenGenerator:
         )
         if is_deadline_query:
             deadline_items = []
+            # Extract assignment/subject context from query for precise matching
+            query_lower = query.lower()
+            # Extract specific entities from query using the same logic as conversation retrieval
+            from .institutional_retrieval_service import institutional_retrieval_service
+            query_specific_entities = institutional_retrieval_service.extract_specific_entities(query)
+            query_subjects = [e for e in query_specific_entities if e not in institutional_retrieval_service.GENERIC_QUERY_TERMS]
+            # Also check for assignment number pattern (e.g., "Assignment 2")
+            assignment_number_match = re.search(r'assignment\s+(\d+)', query_lower)
+            query_assignment_num = assignment_number_match.group(1) if assignment_number_match else None
+
             for src in top_sources:
                 due_date = src.get("due_date") or src.get("deadline") or src.get("date")
                 title = src.get("title", "Official Record")
                 content = src.get("text") or src.get("text_passage") or src.get("content", "")
+                source_role = src.get("sender_role", "")
+                source_type = src.get("source_type", "")
 
                 # Check if query asks for a specific CIE (First, Second, etc.) or subject
-                query_lower = query.lower()
                 specific_cie = None
                 if "first cie" in query_lower or "1st cie" in query_lower or "cie 1" in query_lower:
                     specific_cie = "first"
@@ -639,9 +664,24 @@ class QwenGenerator:
                 elif "third cie" in query_lower or "3rd cie" in query_lower or "cie 3" in query_lower:
                     specific_cie = "third"
 
+                # SKIPPING: Filter out student-to-student questions from deadline results
+                # unless they are the only source available. Prioritize announcements.
+                is_student_question = source_role == "student" and not any(e in content.lower() for e in query_subjects)
+                if is_student_question and due_date is None:
+                    # Student asking about their own confusion doesn't contain the answer
+                    continue
+
+                # For conversation messages, try to match subject from content
+                matched_subject = None
+                if source_type == "chat_message" and query_subjects:
+                    content_lower = content.lower()
+                    for subj in query_subjects:
+                        if subj in content_lower:
+                            matched_subject = subj
+                            break
+
                 # If specific CIE asked and content has it, try to extract from content
                 if specific_cie and content:
-                    import re
                     content_lower = content.lower()
                     # Look for "First CIE :- ...", "Second CIE :- ...", etc.
                     patterns = [
@@ -670,6 +710,9 @@ class QwenGenerator:
                             item += " (Due today!)"
                         else:
                             item += " (This deadline has passed)"
+                    # If we matched a subject, include it in the output
+                    if matched_subject:
+                        item += f" (Subject: {matched_subject})"
                     deadline_items.append(item)
             if deadline_items:
                 return "Deadlines found:\n" + "\n".join(f"- {item}" for item in deadline_items)
@@ -685,7 +728,6 @@ class QwenGenerator:
                 item = f"\"{title}\""
 
                 query_lower = query.lower()
-                import re
 
                 # PRIORITY 1: Check for specific subject entities first (course codes, course names)
                 # This should take precedence over generic CIE patterns

@@ -85,6 +85,33 @@ const renderMessageContent = (content) => {
   })
 }
 
+// ─── Classification badge for normal chat ──────────────────────────────────────
+
+const ClassificationBadge = ({ msg }) => {
+  const isAIConversation = false // This component only used for non-AI conversations
+  if (isAIConversation) return null
+
+  const classification = msg.ai_metadata?.classification
+  if (!classification) return null
+
+  const sentimentColor = {
+    positive: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400',
+    neutral: 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400',
+    negative: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+  }[classification.sentiment] || 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400'
+
+  return (
+    <div className="mt-1 px-1 flex items-center gap-2 flex-wrap">
+      <span className={`text-xs px-1.5 py-0.5 rounded ${sentimentColor}`}>
+        😊 {classification.sentiment?.charAt(0).toUpperCase() + classification.sentiment?.slice(1)}
+      </span>
+      <span className="text-xs text-gray-400 dark:text-gray-500">
+        🎯 {classification.intent?.replace(/_/g, ' ')}
+      </span>
+    </div>
+  )
+}
+
 // ─── Individual message bubble ───────────────────────────────────────────────
 
 const MessageBubble = ({ msg, isSentByMe, isAIConversation }) => {
@@ -126,6 +153,11 @@ const MessageBubble = ({ msg, isSentByMe, isAIConversation }) => {
                 ))}
               </div>
             </div>
+          )}
+
+          {/* Classification badges for normal human-to-human messages */}
+          {!isAIConversation && !isAIReply && (
+            <ClassificationBadge msg={msg} />
           )}
 
           {/* Timestamp */}

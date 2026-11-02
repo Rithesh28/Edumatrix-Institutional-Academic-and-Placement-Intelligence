@@ -37,6 +37,7 @@ from .query_router import query_router
 from .ai_generator_service import ai_generator
 from ..core.config import settings
 from ..core.study_buddy_timing import record_perf_metric
+from ..services.conversation_retrieval_service import conversation_retrieval_service
 
 logger = logging.getLogger(__name__)
 
@@ -103,18 +104,33 @@ class AIChatService:
         is_ambiguous = routing_result.get("is_ambiguous", False)
         ambiguous_candidates = routing_result.get("ambiguous_candidates", [])
         ambiguity_category = routing_result.get("ambiguity_category", "assignment")
-        record_perf_metric("query_routing_and_retrieval", routing_ms, strategy=strategy, sources=len(sources), ambiguous=is_ambiguous)
-        logger.info(f"📚 [AI-CHAT] Strategy: {strategy} | Sources: {len(sources)} | Ambiguous: {is_ambiguous} | {routing_ms:.1f}ms")
+
+        # NEW: Retrieve authorized conversation messages
+        # If the query asks about conversation context (exam announcements, deadlines, placements),
+        # retrieve relevant human-to-human messages the user is authorized to access
+        user_conversation_sources = []
+        if detected_intent in ["check_deadline", "ask_exam_info", "career_advice", "other"]:
+            user_conversation_sources = conversation_retrieval_service.retrieve_user_conversations(
+                db=db, user=user, query_text=clean_text, limit=5
+            )
+
+        # Merge institutional and conversation sources
+        # Conversational sources go first (they have priority for recent announcements)
+        all_sources = user_conversation_sources + sources
+
+        record_perf_metric("query_routing_and_retrieval", routing_ms, strategy=strategy, sources=len(all_sources), ambiguous=is_ambiguous)
+        logger.info(f"📚 [AI-CHAT] Strategy: {strategy} | ConvSources: {len(user_conversation_sources)} | InstitutionalSources: {len(sources)} | Total: {len(all_sources)} | Ambiguous: {is_ambiguous} | {routing_ms:.1f}ms")
 
         # 5. Generate Grounded Answer (with strict anti-hallucination guardrail)
         t0 = time.perf_counter()
         generation_result = ai_generator.generate_grounded_answer(
             query=clean_text,
-            sources=sources,
+            sources=all_sources,
             intent=detected_intent,
             is_ambiguous=is_ambiguous,
             ambiguous_candidates=ambiguous_candidates,
-            ambiguity_category=ambiguity_category
+            ambiguity_category=ambiguity_category,
+            strategy=strategy
         )
         generation_ms = (time.perf_counter() - t0) * 1000.0
         answer_text = generation_result.get("answer", "")
@@ -141,9 +157,9 @@ class AIChatService:
                     "score": s.get("score"),
                     "has_verified_text": s.get("has_verified_text", False)
                 })
-        elif has_grounded_evidence and sources:
+        elif has_grounded_evidence and all_sources:
             # Only expose sources that actually have verified text or due dates
-            for s in sources[:5]:
+            for s in all_sources[:5]:
                 if s.get("has_verified_text") or s.get("due_date"):
                     clean_sources_meta.append({
                         "type": s.get("source_type"),
@@ -152,7 +168,10 @@ class AIChatService:
                         "category": s.get("category"),
                         "due_date": s.get("due_date"),
                         "score": s.get("score"),
-                        "has_verified_text": s.get("has_verified_text", False)
+                        "has_verified_text": s.get("has_verified_text", False),
+                        "sender_name": s.get("sender_name"),
+                        "sender_role": s.get("sender_role"),
+                        "created_at": s.get("created_at")
                     })
 
         if is_ambiguous:
