@@ -1,0 +1,189 @@
+{
+  "model": "QueryRouter (Rule-based)",
+  "evaluation_date": "2026-11-03",
+  "total_cases": 20,
+  "correct_predictions": 18,
+  "accuracy": 0.9,
+  "results": [
+    {
+      "test_case_id": "TC_ROUTER_001",
+      "query": "When is the DSP assignment due?",
+      "intent": "check_deadline",
+      "expected_strategy": "institutional_rag",
+      "actual_strategy": "institutional_rag",
+      "is_correct": true,
+      "notes": "Deadline query routed to institutional RAG"
+    },
+    {
+      "test_case_id": "TC_ROUTER_002",
+      "query": "What is machine learning?",
+      "intent": "other",
+      "expected_strategy": "general_knowledge",
+      "actual_strategy": "study_buddy_rag",
+      "is_correct": false,
+      "notes": "General knowledge - restricted for AI Chat"
+    },
+    {
+      "test_case_id": "TC_ROUTER_003",
+      "query": "Who said that about the exam schedule?",
+      "intent": "ask_doubt",
+      "expected_strategy": "conversation_retrieval",
+      "actual_strategy": "conversation_retrieval",
+      "is_correct": true,
+      "notes": "P2P chat retrieval"
+    },
+    {
+      "test_case_id": "TC_ROUTER_004",
+      "query": "Tell me about Deep Learning course",
+      "intent": "ask_doubt",
+      "expected_strategy": "study_buddy_rag",
+      "actual_strategy": "study_buddy_rag",
+      "is_correct": true,
+      "notes": "Academic study buddy RAG"
+    },
+    {
+      "test_case_id": "TC_ROUTER_005",
+      "query": "Where is TCS placement drive?",
+      "intent": "ask_exam_info",
+      "expected_strategy": "institutional_rag",
+      "actual_strategy": "institutional_rag",
+      "is_correct": true,
+      "notes": "Placement inquiry routed to institutional"
+    },
+    {
+      "test_case_id": "TC_ROUTER_006",
+      "query": "Hi there!",
+      "intent": "greet",
+      "expected_strategy": "general_knowledge",
+      "actual_strategy": "general_knowledge",
+      "is_correct": true,
+      "notes": "Greeting - general knowledge mode"
+    },
+    {
+      "test_case_id": "TC_ROOM_007",
+      "query": "Thanks for your help!",
+      "intent": "feedback",
+      "expected_strategy": "general_knowledge",
+      "actual_strategy": "general_knowledge",
+      "is_correct": true,
+      "notes": "Feedback - general knowledge mode"
+    },
+    {
+      "test_case_id": "TC_ROUTER_008",
+      "query": "What are the exam dates?",
+      "intent": "ask_exam_info",
+      "expected_strategy": "institutional_rag",
+      "actual_strategy": "institutional_rag",
+      "is_correct": true,
+      "notes": "Exam info from institutional records"
+    },
+    {
+      "test_case_id": "TC_ROUTER_009",
+      "query": "How can I improve my resume?",
+      "intent": "career_advice",
+      "expected_strategy": "general_knowledge",
+      "actual_strategy": "general_knowledge",
+      "is_correct": true,
+      "notes": "Career advice from general knowledge"
+    },
+    {
+      "test_case_id": "TC_ROUTER_010",
+      "query": "Request notes for DLRL",
+      "intent": "request_notes",
+      "expected_strategy": "study_buddy_rag",
+      "actual_strategy": "study_buddy_rag",
+      "is_correct": true,
+      "notes": "Study buddy notes retrieval"
+    },
+    {
+      "test_case_id": "TC_ROUTER_011",
+      "query": "Is there any bond for Wipro?",
+      "intent": "ask_doubt",
+      "expected_strategy": "institutional_rag",
+      "actual_strategy": "study_buddy_rag",
+      "is_correct": false,
+      "notes": "Institutional query about bond"
+    },
+    {
+      "test_case_id": "TC_ROUTER_012",
+      "query": "What is the cutoff for Google?",
+      "intent": "ask_exam_info",
+      "expected_strategy": "institutional_rag",
+      "actual_strategy": "institutional_rag",
+      "is_correct": true,
+      "notes": "Placement cutoff from institutional records"
+    },
+    {
+      "test_case_id": "TC_ROUTER_013",
+      "query": "My friend said something about assignments",
+      "intent": "ask_doubt",
+      "expected_strategy": "conversation_retrieval",
+      "actual_strategy": "conversation_retrieval",
+      "is_correct": true,
+      "notes": "P2P chat context needed"
+    },
+    {
+      "test_case_id": "TC_ROUTER_014",
+      "query": "CIE 1 dates for CSE students",
+      "intent": "ask_exam_info",
+      "expected_strategy": "institutional_rag",
+      "actual_strategy": "institutional_rag",
+      "is_correct": true,
+      "notes": "Exam info with department filter"
+    },
+    {
+      "test_case_id": "TC_ROUTER_015",
+      "query": "Can you tell me about AWS?",
+      "intent": "ask_doubt",
+      "expected_strategy": "study_buddy_rag",
+      "actual_strategy": "study_buddy_rag",
+      "is_correct": true,
+      "notes": "Academic question about cloud computing"
+    },
+    {
+      "test_case_id": "TC_ROUTER_016",
+      "query": "Last date for TCS application?",
+      "intent": "check_deadline",
+      "expected_strategy": "institutional_rag",
+      "actual_strategy": "institutional_rag",
+      "is_correct": true,
+      "notes": "Deadline query for placement"
+    },
+    {
+      "test_case_id": "TC_ROUTER_017",
+      "query": "What is the difference between ML and DL?",
+      "intent": "ask_doubt",
+      "expected_strategy": "study_buddy_rag",
+      "actual_strategy": "study_buddy_rag",
+      "is_correct": true,
+      "notes": "Academic concept clarification"
+    },
+    {
+      "test_case_id": "TC_ROUTER_018",
+      "query": "Where is the CSE department?",
+      "intent": "other",
+      "expected_strategy": "general_knowledge",
+      "actual_strategy": "general_knowledge",
+      "is_correct": true,
+      "notes": "General knowledge location query"
+    },
+    {
+      "test_case_id": "TC_ROUTER_019",
+      "query": "Help me prepare for interviews",
+      "intent": "career_advice",
+      "expected_strategy": "general_knowledge",
+      "actual_strategy": "general_knowledge",
+      "is_correct": true,
+      "notes": "Career guidance from general knowledge"
+    },
+    {
+      "test_case_id": "TC_ROUTER_020",
+      "query": "Show me my friend's message about assignments",
+      "intent": "ask_doubt",
+      "expected_strategy": "conversation_retrieval",
+      "actual_strategy": "conversation_retrieval",
+      "is_correct": true,
+      "notes": "P2P chat retrieval"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "total_cases": 10,
+  "pass_count": 10,
+  "partial_count": 0,
+  "fail_count": 0,
+  "pass_rate": 1.0,
+  "avg_field_match_score": 0.867,
+  "avg_fields_matched": 13.0
+}
