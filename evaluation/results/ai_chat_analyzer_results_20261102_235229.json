@@ -1,0 +1,152 @@
+[
+  {
+    "test_case_id": "TC_AI_001",
+    "query": "When is the DSP exam?",
+    "expected_sources": [
+      "timetable",
+      "circulars"
+    ],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "False",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "deadline_query"
+  },
+  {
+    "test_case_id": "TC_AI_002",
+    "query": "What is the last date for project submission?",
+    "expected_sources": [
+      "notifications",
+      "circulars"
+    ],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "False",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "deadline_query"
+  },
+  {
+    "test_case_id": "TC_AI_003",
+    "query": "Which companies are visiting for placement?",
+    "expected_sources": [
+      "placement_records",
+      "circulars"
+    ],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "False",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "placement_info"
+  },
+  {
+    "test_case_id": "TC_AI_004",
+    "query": "What are the eligibility criteria for service companies?",
+    "expected_sources": [
+      "placement_records",
+      "criteria_docs"
+    ],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "False",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "eligibility_query"
+  },
+  {
+    "test_case_id": "TC_AI_005",
+    "query": "How do I prepare for interviews?",
+    "expected_sources": [
+      "general_resources"
+    ],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "False",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "advice_query"
+  },
+  {
+    "test_case_id": "TC_AI_006",
+    "query": "What is the weather forecast for tomorrow?",
+    "expected_sources": [],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "True",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "off_topic"
+  },
+  {
+    "test_case_id": "TC_AI_007",
+    "query": "Tell me a joke",
+    "expected_sources": [],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "True",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "off_topic"
+  },
+  {
+    "test_case_id": "TC_AI_008",
+    "query": "What is the CIE schedule for this semester?",
+    "expected_sources": [
+      "timetable"
+    ],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "False",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "schedule_query"
+  },
+  {
+    "test_case_id": "TC_AI_009",
+    "query": "I need help with my assignment but I am not sure which one",
+    "expected_sources": [
+      "course_materials"
+    ],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "True",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "ambiguous_query"
+  },
+  {
+    "test_case_id": "TC_AI_010",
+    "query": "What is the placement package for TCS?",
+    "expected_sources": [
+      "placement_records"
+    ],
+    "sources_used": [],
+    "grounding_score": 0.0,
+    "hallucination_detected": false,
+    "hallucination_risk": 0.0,
+    "ambiguity_detected": "False",
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "placement_query"
+  }
+]

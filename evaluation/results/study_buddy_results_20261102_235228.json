@@ -1,0 +1,122 @@
+[
+  {
+    "test_case_id": "TC_STUDY_001",
+    "query": "What is the deadline for DLRL assignment?",
+    "mode": "rag",
+    "expected": "The DLRL assignment deadline is typically communicated via LMS",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "Deadline Query"
+  },
+  {
+    "test_case_id": "TC_STUDY_002",
+    "query": "When is the next CIE exam?",
+    "mode": "rag",
+    "expected": "The next CIE exam is scheduled for 20th March 2024",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "Exam Schedule"
+  },
+  {
+    "test_case_id": "TC_STUDY_003",
+    "query": "Can you explain the difference between TCP and UDP?",
+    "mode": " reliable",
+    "expected": "TCP is connection-oriented with reliability guarantees while UDP is connectionless and faster",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": " ordered delivery\\nUDP: Connectionless"
+  },
+  {
+    "test_case_id": "TC_STUDY_004",
+    "query": "What placement companies are visiting this semester?",
+    "mode": " and Infosys are confirmed for this semester",
+    "expected": "TCS",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "TCS Drive: 15th March\\nWipro Walk-in: 20th March\\nInfosys Springboard: 25th March"
+  },
+  {
+    "test_case_id": "TC_STUDY_005",
+    "query": "How do I calculate CGPA from SGPA?",
+    "mode": "general_knowledge",
+    "expected": "CGPA is the cumulative average of all SGPA across semesters",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "Academic Query"
+  },
+  {
+    "test_case_id": "TC_STUDY_006",
+    "query": "What is the project submission format?",
+    "mode": "rag",
+    "expected": "Project reports must follow the university prescribed format",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "Project Guidelines"
+  },
+  {
+    "test_case_id": "TC_STUDY_007",
+    "query": "Explain machine learning in simple terms",
+    "mode": " Unsupervised",
+    "expected": "Machine learning is a field of AI where computers learn from data without explicit programming",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": " Reinforcement"
+  },
+  {
+    "test_case_id": "TC_STUDY_008",
+    "query": "Where can I find previous year question papers?",
+    "mode": "rag",
+    "expected": "Previous year papers are available on the LMS portal under course materials",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "Resource Query"
+  },
+  {
+    "test_case_id": "TC_STUDY_009",
+    "query": "What are the eligibility criteria for TCS NQT?",
+    "mode": "TCS NQT Criteria\\nBranch: Any Engineering\\nPercentage: 60% throughout\\nBacklogs: Nil",
+    "expected": "Eligibility: 60% throughout",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "rag"
+  },
+  {
+    "test_case_id": "TC_STUDY_010",
+    "query": "How many credits are required for graduation?",
+    "mode": "rag",
+    "expected": "160 credits are required for B.Tech graduation",
+    "faithfulness_score": 0.0,
+    "grounding_score": 0.0,
+    "citation_present": false,
+    "latency_ms": 0,
+    "status": "PENDING_MODEL_EVAL",
+    "category": "Academic Requirements"
+  }
+]

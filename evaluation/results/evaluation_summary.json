@@ -1,0 +1,80 @@
+{
+  "timestamp": "2026-11-02T23:52:30",
+  "framework_version": "1.0",
+  "total_models": 14,
+  "models_evaluated": 5,
+  "models_pending": 3,
+  "models_limited": 2,
+  "evaluations": {
+    "intent_classifier": {
+      "status": "SUCCESS",
+      "accuracy": 0.75,
+      "macro_f1": 0.7833,
+      "weighted_f1": 0.7504,
+      "test_cases": 40,
+      "graphs_generated": 3,
+      "notes": "Strong on clear inputs (92.86%), weak on ambiguous (16.67%)"
+    },
+    "sentiment_analyser": {
+      "status": "SUCCESS",
+      "accuracy": 0.80,
+      "macro_f1": 0.7824,
+      "weighted_f1": 0.7849,
+      "mean_confidence": 0.836,
+      "test_cases": 30,
+      "graphs_generated": 2,
+      "notes": "High confidence (0.84), neutral class weakest (60%)"
+    },
+    "gliner": {
+      "status": "FAILED",
+      "error": "Model not cached locally",
+      "test_cases": 20,
+      "notes": "Requires: gliner import urchade/gliner_base"
+    },
+    "resume_parser": {
+      "status": "SUCCESS",
+      "pass_rate": 1.0,
+      "avg_field_match": 1.0,
+      "test_cases": 5,
+      "notes": "Perfect on structured inputs; needs 50+ test cases"
+    },
+    "jd_parser": {
+      "status": "SUCCESS",
+      "pass_rate": 1.0,
+      "avg_field_match": 0.867,
+      "test_cases": 10,
+      "notes": "Consistent 87% across all test cases"
+    },
+    "study_buddy": {
+      "status": "STRUCTURAL",
+      "test_cases": 10,
+      "pending_model_eval": 10,
+      "notes": "Requires live Ollama Phi-4-mini"
+    },
+    "ai_chat_analyzer": {
+      "status": "STRUCTURAL",
+      "test_cases": 10,
+      "pending_model_eval": 10,
+      "notes": "Requires live Qwen Instruct"
+    },
+    "table_recognition": {
+      "status": "FAILED",
+      "error": "ModuleNotFoundError: No module named 'cv2'",
+      "test_cases": 0,
+      "notes": "Requires: pip install opencv-python"
+    }
+  },
+  "artifacts": {
+    "graphs_generated": 5,
+    "reports_generated": 8,
+    "metrics_json": 8,
+    "results_csv": 5
+  },
+  "recommendations": [
+    "Expand test sets to 100+ cases per model",
+    "Install GLiNER and OpenCV for complete evaluation",
+    "Run RAG evaluations with live models",
+    "Compute confidence intervals for statistical significance",
+    "Document failure cases with root cause analysis"
+  ]
+}
