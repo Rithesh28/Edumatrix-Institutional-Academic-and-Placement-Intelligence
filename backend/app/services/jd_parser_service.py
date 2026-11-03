@@ -573,7 +573,8 @@ class JdParserService:
             # "Role Systems Engineer" format (without colon, after keyword like "DRIVE")
             r'\bRole\s+([A-Z][A-Za-z\s]+?)(?:\s+(?:Campus|Requirements|Eligibility|Skills|Location|Package)|\s*$)',
             # "Software Engineer Frontend Company ..." pattern — title before Company (must come after HIRING patterns)
-            r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+Company\b',
+            # Limit to 2 words max to avoid capturing long phrases like "throughout No backlogs Selection Process"
+            r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s+Company\b',
             # "Position <Title>" format
             r'Position\s+([A-Z][a-zA-Z\s]+?)(?:\s+(?:Department|Location|Requirements|Eligibility|Skills)|\s*$)',
             # "Designation <Title>" format
@@ -1291,8 +1292,9 @@ class JdParserService:
             return salary_range, compensation_details
 
         # 3. Standard CTC / Salary Range (e.g. ₹8-12 LPA, 6.5 LPA)
+        # Only match if preceded by digit/currency, not arbitrary letters
         match_lpa_range = re.search(
-            r'([₹RsINR\.\s0-9]+(?:\.[0-9]+)?\s*[\-–—to\s]+\s*[₹RsINR\.\s0-9]+(?:\.[0-9]+)?\s*(?:lpa|lakhs?(?:\s*(?:per\s*annum|pa))?|lac))',
+            r'(?<!\w)([₹RsINR]?\s*[0-9]+(?:\.[0-9]+)?\s*[\-–—to]+\s*[₹RsINR]?\s*[0-9]+(?:\.[0-9]+)?\s*(?:lpa|lakhs?(?:\s*(?:per\s*annum|pa))?|lac))',
             comp_text,
             re.IGNORECASE
         )
