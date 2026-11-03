@@ -1,0 +1,832 @@
+{
+  "total_resumes": 5,
+  "successful_parses": 5,
+  "failed_parses": 0,
+  "parser_unavailable": 0,
+  "total_fields_evaluated": 55,
+  "correct_fields": 41,
+  "field_accuracy": 0.7454545454545455,
+  "per_field_accuracy": {
+    "name": {
+      "accuracy": 1.0,
+      "correct": 5,
+      "total": 5
+    },
+    "email": {
+      "accuracy": 1.0,
+      "correct": 5,
+      "total": 5
+    },
+    "phone": {
+      "accuracy": 1.0,
+      "correct": 5,
+      "total": 5
+    },
+    "cgpa": {
+      "accuracy": 1.0,
+      "correct": 5,
+      "total": 5
+    },
+    "skills": {
+      "accuracy": 0.8,
+      "correct": 4,
+      "total": 5
+    },
+    "education": {
+      "accuracy": 0.0,
+      "correct": 0,
+      "total": 5
+    },
+    "companies": {
+      "accuracy": 0.8,
+      "correct": 4,
+      "total": 5
+    },
+    "experience": {
+      "accuracy": 0.0,
+      "correct": 0,
+      "total": 5
+    },
+    "projects": {
+      "accuracy": 1.0,
+      "correct": 5,
+      "total": 5
+    },
+    "certifications": {
+      "accuracy": 0.8,
+      "correct": 4,
+      "total": 5
+    },
+    "location": {
+      "accuracy": 0.8,
+      "correct": 4,
+      "total": 5
+    }
+  },
+  "avg_overall_score": 0.6867676767676769,
+  "pass_count": 4,
+  "partial_count": 1,
+  "fail_count": 1,
+  "pass_rate": 0.8,
+  "results": [
+    {
+      "resume_file": "resume_001_john_smith.docx",
+      "status": "SUCCESS",
+      "success": true,
+      "error": null,
+      "fields_evaluated": 11,
+      "fields_correct": 9,
+      "field_scores": {
+        "name": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "JOHN SMITH",
+          "expected": "John Smith"
+        },
+        "email": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "john.smith@example.com",
+          "expected": "john.smith@example.com"
+        },
+        "phone": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "+91-9876543210",
+          "expected": "+91-9876543210"
+        },
+        "cgpa": {
+          "correct": true,
+          "score": 0.95,
+          "parsed": "8.5",
+          "expected": "8.5"
+        },
+        "skills": {
+          "correct": true,
+          "score": 0.6,
+          "parsed": "['Python', 'Java', 'SQL', 'Node', 'Machine Learning', 'Tensorflow', 'Scikit-Learn', 'Pandas', 'AWS',",
+          "expected": "['Python', 'Java', 'C++', 'SQL', 'TensorFlow', 'Pandas', 'Scikit-learn']"
+        },
+        "education": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "['B.Tech Computer Science']"
+        },
+        "companies": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Google']",
+          "expected": "['Google']"
+        },
+        "experience": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['Software Intern']",
+          "expected": "[{'title': 'Software Intern', 'company': 'Google', 'dates': 'Jun 2023 - Aug 2023'}]"
+        },
+        "projects": {
+          "correct": true,
+          "score": 0.5,
+          "parsed": "['Chat Application']",
+          "expected": "['Recommendation System', 'Chat Application']"
+        },
+        "certifications": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['AWS Cloud Practitioner']",
+          "expected": "['AWS Cloud Practitioner']"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Bangalore, India",
+          "expected": "Bangalore, India"
+        }
+      },
+      "parsed_entities": {
+        "name": "JOHN SMITH",
+        "email": "john.smith@example.com",
+        "phone": "+91-9876543210",
+        "skills": [
+          "Python",
+          "Java",
+          "SQL",
+          "Node",
+          "Machine Learning",
+          "Tensorflow",
+          "Scikit-Learn",
+          "Pandas",
+          "AWS",
+          "Algorithms"
+        ],
+        "education": [
+          "B.Tech Computer Science"
+        ],
+        "experience": [
+          {
+            "title": "Software Intern",
+            "company": "Google",
+            "dates": "Jun 2023 - Aug 2023"
+          }
+        ],
+        "projects": [
+          "Chat Application"
+        ],
+        "certifications": [
+          "AWS Cloud Practitioner"
+        ],
+        "companies": [
+          "Google"
+        ],
+        "links": [],
+        "cgpa": 8.5,
+        "location": "Bangalore, India"
+      },
+      "expected_entities": {
+        "name": "John Smith",
+        "email": "john.smith@example.com",
+        "phone": "+91-9876543210",
+        "cgpa": 8.5,
+        "education": [
+          "B.Tech Computer Science"
+        ],
+        "companies": [
+          "Google"
+        ],
+        "skills": [
+          "Python",
+          "Java",
+          "C++",
+          "SQL",
+          "TensorFlow",
+          "Pandas",
+          "Scikit-learn"
+        ],
+        "experience": [
+          {
+            "title": "Software Intern",
+            "company": "Google",
+            "dates": "Jun 2023 - Aug 2023"
+          }
+        ],
+        "projects": [
+          "Recommendation System",
+          "Chat Application"
+        ],
+        "certifications": [
+          "AWS Cloud Practitioner"
+        ],
+        "location": "Bangalore, India"
+      },
+      "overall_score": 0.7318181818181819,
+      "pass_rate": 0.8181818181818182
+    },
+    {
+      "resume_file": "resume_002_priya_sharma.docx",
+      "status": "SUCCESS",
+      "success": true,
+      "error": null,
+      "fields_evaluated": 11,
+      "fields_correct": 8,
+      "field_scores": {
+        "name": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "PRIYA SHARMA",
+          "expected": "Priya Sharma"
+        },
+        "email": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "priya.sharma@gmail.com",
+          "expected": "priya.sharma@gmail.com"
+        },
+        "phone": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "9876543210",
+          "expected": "9876543210"
+        },
+        "cgpa": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": null,
+          "expected": null
+        },
+        "skills": {
+          "correct": false,
+          "score": 0.45454545454545453,
+          "parsed": "['React', 'Node', 'Express', 'GIT', 'Docker', 'AWS', 'Mongodb']",
+          "expected": "['React.js', 'Node.js', 'Express', 'MongoDB', 'Redux', 'HTML5', 'CSS3', 'Git', 'Docker', 'AWS', 'Fir"
+        },
+        "education": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "['B.Tech Information Technology']"
+        },
+        "companies": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Flipkart']",
+          "expected": "['Flipkart']"
+        },
+        "experience": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['Frontend Developer']",
+          "expected": "[{'title': 'Frontend Developer', 'company': 'Flipkart', 'dates': 'Jan 2023 - Present'}]"
+        },
+        "projects": {
+          "correct": true,
+          "score": 0.5,
+          "parsed": "['Portfolio Website']",
+          "expected": "['E-commerce Platform', 'Portfolio Website']"
+        },
+        "certifications": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Meta Frontend Developer Certificate']",
+          "expected": "['Meta Frontend Developer Certificate']"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Pune, Maharashtra",
+          "expected": "Pune, Maharashtra"
+        }
+      },
+      "parsed_entities": {
+        "name": "PRIYA SHARMA",
+        "email": "priya.sharma@gmail.com",
+        "phone": "9876543210",
+        "skills": [
+          "React",
+          "Node",
+          "Express",
+          "GIT",
+          "Docker",
+          "AWS",
+          "Mongodb"
+        ],
+        "education": [
+          "B.Tech Information Technology"
+        ],
+        "experience": [
+          {
+            "title": "Frontend Developer",
+            "company": "Flipkart",
+            "dates": "Jan 2023 - Present"
+          }
+        ],
+        "projects": [
+          "Portfolio Website"
+        ],
+        "certifications": [
+          "Meta Frontend Developer Certificate"
+        ],
+        "companies": [
+          "Flipkart"
+        ],
+        "links": [],
+        "cgpa": null,
+        "location": "Pune, Maharashtra"
+      },
+      "expected_entities": {
+        "name": "Priya Sharma",
+        "email": "priya.sharma@gmail.com",
+        "phone": "9876543210",
+        "cgpa": null,
+        "education": [
+          "B.Tech Information Technology"
+        ],
+        "companies": [
+          "Flipkart"
+        ],
+        "skills": [
+          "React.js",
+          "Node.js",
+          "Express",
+          "MongoDB",
+          "Redux",
+          "HTML5",
+          "CSS3",
+          "Git",
+          "Docker",
+          "AWS",
+          "Firebase"
+        ],
+        "experience": [
+          {
+            "title": "Frontend Developer",
+            "company": "Flipkart",
+            "dates": "Jan 2023 - Present"
+          }
+        ],
+        "projects": [
+          "E-commerce Platform",
+          "Portfolio Website"
+        ],
+        "certifications": [
+          "Meta Frontend Developer Certificate"
+        ],
+        "location": "Pune, Maharashtra"
+      },
+      "overall_score": 0.7231404958677685,
+      "pass_rate": 0.7272727272727273
+    },
+    {
+      "resume_file": "resume_003_rahul_verma.docx",
+      "status": "SUCCESS",
+      "success": true,
+      "error": null,
+      "fields_evaluated": 11,
+      "fields_correct": 7,
+      "field_scores": {
+        "name": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "RAHUL VERMA",
+          "expected": "Rahul Verma"
+        },
+        "email": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "rahul.v@college.edu.in",
+          "expected": "rahul.v@college.edu.in"
+        },
+        "phone": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "+91-8765432109",
+          "expected": "+91-8765432109"
+        },
+        "cgpa": {
+          "correct": true,
+          "score": 0.95,
+          "parsed": "9.1",
+          "expected": "9.1"
+        },
+        "skills": {
+          "correct": true,
+          "score": 0.5555555555555556,
+          "parsed": "['Python', 'Java', 'Javascript', 'AI', 'GIT', 'Github', 'Linux', 'Data Structures', 'Algorithms']",
+          "expected": "['C', 'C++', 'Python', 'Java', 'JavaScript', 'Data Structures', 'Algorithms']"
+        },
+        "education": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "['B.Tech Computer Science and Engineering']"
+        },
+        "companies": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "['Amazon']"
+        },
+        "experience": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "[{'title': 'SDE-1', 'company': 'Amazon', 'dates': 'June 2023'}]"
+        },
+        "projects": {
+          "correct": true,
+          "score": 0.5,
+          "parsed": "['Pathfinding Visualizer']",
+          "expected": "['Online Judge Platform', 'Pathfinding Visualizer']"
+        },
+        "certifications": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": null,
+          "expected": null
+        },
+        "location": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "Karnataka"
+        }
+      },
+      "parsed_entities": {
+        "name": "RAHUL VERMA",
+        "email": "rahul.v@college.edu.in",
+        "phone": "+91-8765432109",
+        "skills": [
+          "Python",
+          "Java",
+          "Javascript",
+          "AI",
+          "GIT",
+          "Github",
+          "Linux",
+          "Data Structures",
+          "Algorithms"
+        ],
+        "education": [
+          "B.Tech Computer Science and Engineering"
+        ],
+        "experience": [],
+        "projects": [
+          "Pathfinding Visualizer"
+        ],
+        "certifications": [],
+        "companies": [],
+        "links": [],
+        "cgpa": 9.1,
+        "location": ""
+      },
+      "expected_entities": {
+        "name": "Rahul Verma",
+        "email": "rahul.v@college.edu.in",
+        "phone": "+91-8765432109",
+        "cgpa": 9.1,
+        "education": [
+          "B.Tech Computer Science and Engineering"
+        ],
+        "companies": [
+          "Amazon"
+        ],
+        "skills": [
+          "C",
+          "C++",
+          "Python",
+          "Java",
+          "JavaScript",
+          "Data Structures",
+          "Algorithms"
+        ],
+        "experience": [
+          {
+            "title": "SDE-1",
+            "company": "Amazon",
+            "dates": "June 2023"
+          }
+        ],
+        "projects": [
+          "Online Judge Platform",
+          "Pathfinding Visualizer"
+        ],
+        "certifications": [],
+        "location": "Karnataka"
+      },
+      "overall_score": 0.545959595959596,
+      "pass_rate": 0.6363636363636364
+    },
+    {
+      "resume_file": "resume_004_ananya_patel.docx",
+      "status": "SUCCESS",
+      "success": true,
+      "error": null,
+      "fields_evaluated": 11,
+      "fields_correct": 9,
+      "field_scores": {
+        "name": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "ANANYA PATEL",
+          "expected": "Ananya Patel"
+        },
+        "email": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "ananya.p@email.com",
+          "expected": "ananya.p@email.com"
+        },
+        "phone": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "9876543210",
+          "expected": "9876543210"
+        },
+        "cgpa": {
+          "correct": true,
+          "score": 0.95,
+          "parsed": "8.8",
+          "expected": "8.8"
+        },
+        "skills": {
+          "correct": true,
+          "score": 0.5454545454545454,
+          "parsed": "['Python', 'Docker', 'Kubernetes', 'AWS', 'Bash', 'GO', 'Ci/Cd']",
+          "expected": "['AWS', 'Docker', 'Kubernetes', 'Jenkins', 'Terraform', 'Python', 'Bash', 'Go', 'Prometheus', 'Grafa"
+        },
+        "education": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "['B.Tech Computer Science']"
+        },
+        "companies": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Microsoft']",
+          "expected": "['Microsoft']"
+        },
+        "experience": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['DevOps Intern']",
+          "expected": "[{'title': 'DevOps Intern', 'company': 'Microsoft', 'dates': 'Jul 2024 - Present'}]"
+        },
+        "projects": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Serverless URL Shortener', 'K8s Dashboard']",
+          "expected": "['Serverless URL Shortener', 'K8s Dashboard']"
+        },
+        "certifications": {
+          "correct": true,
+          "score": 0.6666666666666666,
+          "parsed": "['AWS Certified Cloud Practitioner', 'Docker Certified Associate', 'Kubernetes clusters']",
+          "expected": "['AWS Certified Cloud Practitioner', 'Docker Certified Associate']"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Vellore, Tamil Nadu",
+          "expected": "Vellore, Tamil Nadu"
+        }
+      },
+      "parsed_entities": {
+        "name": "ANANYA PATEL",
+        "email": "ananya.p@email.com",
+        "phone": "9876543210",
+        "skills": [
+          "Python",
+          "Docker",
+          "Kubernetes",
+          "AWS",
+          "Bash",
+          "GO",
+          "Ci/Cd"
+        ],
+        "education": [
+          "B.Tech Computer Science"
+        ],
+        "experience": [
+          {
+            "title": "DevOps Intern",
+            "company": "Microsoft",
+            "dates": "Jul 2024 - Present"
+          }
+        ],
+        "projects": [
+          "Serverless URL Shortener",
+          "K8s Dashboard"
+        ],
+        "certifications": [
+          "AWS Certified Cloud Practitioner",
+          "Docker Certified Associate",
+          "Kubernetes clusters"
+        ],
+        "companies": [
+          "Microsoft"
+        ],
+        "links": [],
+        "cgpa": 8.8,
+        "location": "Vellore, Tamil Nadu"
+      },
+      "expected_entities": {
+        "name": "Ananya Patel",
+        "email": "ananya.p@email.com",
+        "phone": "9876543210",
+        "cgpa": 8.8,
+        "education": [
+          "B.Tech Computer Science"
+        ],
+        "companies": [
+          "Microsoft"
+        ],
+        "skills": [
+          "AWS",
+          "Docker",
+          "Kubernetes",
+          "Jenkins",
+          "Terraform",
+          "Python",
+          "Bash",
+          "Go",
+          "Prometheus",
+          "Grafana",
+          "ELK Stack"
+        ],
+        "experience": [
+          {
+            "title": "DevOps Intern",
+            "company": "Microsoft",
+            "dates": "Jul 2024 - Present"
+          }
+        ],
+        "projects": [
+          "Serverless URL Shortener",
+          "K8s Dashboard"
+        ],
+        "certifications": [
+          "AWS Certified Cloud Practitioner",
+          "Docker Certified Associate"
+        ],
+        "location": "Vellore, Tamil Nadu"
+      },
+      "overall_score": 0.7420110192837467,
+      "pass_rate": 0.8181818181818182
+    },
+    {
+      "resume_file": "resume_005_arjun_reddy.docx",
+      "status": "SUCCESS",
+      "success": true,
+      "error": null,
+      "fields_evaluated": 11,
+      "fields_correct": 8,
+      "field_scores": {
+        "name": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "ARJUN REDDY",
+          "expected": "Arjun Reddy"
+        },
+        "email": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "arjun.r@institution.ac.in",
+          "expected": "arjun.r@institution.ac.in"
+        },
+        "phone": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": null,
+          "expected": null
+        },
+        "cgpa": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": null,
+          "expected": null
+        },
+        "skills": {
+          "correct": true,
+          "score": 0.6,
+          "parsed": "['Python', 'GIT', 'Docker', 'AWS', 'Mongodb', 'Postgresql', 'Redis', 'Ruby', 'Graphql']",
+          "expected": "['Ruby on Rails', 'PostgreSQL', 'Redis', 'GraphQL', 'REST APIs', 'Microservices', 'Git', 'Docker', '"
+        },
+        "education": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "['B.Tech Computer Science']"
+        },
+        "companies": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Zomato']",
+          "expected": "['Zomato']"
+        },
+        "experience": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['Backend Engineer']",
+          "expected": "[{'title': 'Backend Engineer', 'company': 'Zomato', 'dates': 'Aug 2022 - Dec 2023'}]"
+        },
+        "projects": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Restaurant Management System']",
+          "expected": "['Restaurant Management System']"
+        },
+        "certifications": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['MongoDB for Python']",
+          "expected": "['MongoDB for Python Developers']"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Hyderabad, Telangana",
+          "expected": "Hyderabad, Telangana"
+        }
+      },
+      "parsed_entities": {
+        "name": "ARJUN REDDY",
+        "email": "arjun.r@institution.ac.in",
+        "phone": null,
+        "skills": [
+          "Python",
+          "GIT",
+          "Docker",
+          "AWS",
+          "Mongodb",
+          "Postgresql",
+          "Redis",
+          "Ruby",
+          "Graphql"
+        ],
+        "education": [
+          "B.Tech Computer Science"
+        ],
+        "experience": [
+          {
+            "title": "Backend Engineer",
+            "company": "Zomato",
+            "dates": "Aug 2022 - Dec 2023"
+          }
+        ],
+        "projects": [
+          "Restaurant Management System"
+        ],
+        "certifications": [
+          "MongoDB for Python"
+        ],
+        "companies": [
+          "Zomato"
+        ],
+        "links": [],
+        "cgpa": null,
+        "location": "Hyderabad, Telangana"
+      },
+      "expected_entities": {
+        "name": "Arjun Reddy",
+        "email": "arjun.r@institution.ac.in",
+        "phone": null,
+        "cgpa": null,
+        "education": [
+          "B.Tech Computer Science"
+        ],
+        "companies": [
+          "Zomato"
+        ],
+        "skills": [
+          "Ruby on Rails",
+          "PostgreSQL",
+          "Redis",
+          "GraphQL",
+          "REST APIs",
+          "Microservices",
+          "Git",
+          "Docker",
+          "AWS",
+          "Heroku"
+        ],
+        "experience": [
+          {
+            "title": "Backend Engineer",
+            "company": "Zomato",
+            "dates": "Aug 2022 - Dec 2023"
+          }
+        ],
+        "projects": [
+          "Restaurant Management System"
+        ],
+        "certifications": [
+          "MongoDB for Python Developers"
+        ],
+        "location": "Hyderabad, Telangana"
+      },
+      "overall_score": 0.6909090909090909,
+      "pass_rate": 0.7272727272727273
+    }
+  ]
+}

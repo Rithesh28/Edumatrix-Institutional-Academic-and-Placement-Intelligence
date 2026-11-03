@@ -524,7 +524,7 @@ class JdParserService:
             "required_skills": required_skills,
             "preferred_skills": preferred_skills,
             "experience_level": experience_level,
-            "cgpa_criteria": cgpa_criteria,
+            "cgpa_criteria": f"CGPA {cgpa_criteria}" if cgpa_criteria is not None else None,
             "branch_eligibility": branch_eligibility,
             "location": location,
             "salary_range": salary_range,
@@ -560,22 +560,50 @@ class JdParserService:
 
     def _extract_title(self, text: str, evidence: Dict[str, str]) -> Optional[str]:
         """Extract job designation / role title."""
-        # 1. Label-based regex patterns
+        # 1. Label-based regex patterns — improved to handle "ROLE: Title" format
+        # Stop words that commonly follow a title
+        title_stop = r'(?:with|to|in|having|who|and|required|preferred|experience|skills|eligibility|location|salary|ctc|package|compensation|bond|deadline|apply|process|selection|opening|hiring|seeking|looking|about|company|role|designation|position|profile|note|instructions|details)\b'
         patterns = [
-            r'(?:job\s*title|designation|position|role|profile|hiring\s*for|opening\s*for)[\s:\-–—|]+([^\n\r,;|\t]+)',
+            # "ROLE: Title" or "Role: Title" format — capture only title up to stop words
+            r'\bROLE\s*:\s*([A-Za-z][A-Za-z\s]+?)(?:\s+(?:' + title_stop + r')|\s*[,\.;:\n]|$)',
+            # "Hiring <Title> Company <Name>" — extract title between HIRING and Company
+            r'HIRING\s+([A-Z][A-Za-z\s]+?)\s+Company\b',
+            # "HIRING <Title>" at start of text (for cases like "HIRING DATA SCIENTIST Company...")
+            r'^(?:HIRING)\s+([A-Z][A-Za-z\s]+?)(?:\s+(?:Company|Location|Criteria|Eligibility)|\s*$)',
+            # "Role Systems Engineer" format (without colon, after keyword like "DRIVE")
+            r'\bRole\s+([A-Z][A-Za-z\s]+?)(?:\s+(?:Campus|Requirements|Eligibility|Skills|Location|Package)|\s*$)',
+            # "Software Engineer Frontend Company ..." pattern — title before Company (must come after HIRING patterns)
+            r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+Company\b',
+            # "Position <Title>" format
+            r'Position\s+([A-Z][a-zA-Z\s]+?)(?:\s+(?:Department|Location|Requirements|Eligibility|Skills)|\s*$)',
+            # "Designation <Title>" format
+            r'Designation\s+([A-Z][a-zA-Z\s]+?)(?:\s+(?:Location|Requirements|Eligibility|Skills)|\s*$)',
+            # "Opening <Title>" format
+            r'Opening\s+([A-Z][a-zA-Z\s]+?)(?:\s+(?:Type|Location|Eligibility|Skills|Process)|\s*$)',
+            # "Job title/Role/Designation: Title"
+            r'(?:job\s*title|designation|position|role|profile)\s*[:\-–—|]\s*([A-Z][a-zA-Z\s]+?)(?:\s+(?:' + title_stop + r')|\s*[,\.;:\n]|$)',
+            r'(?:opening\s*for|hiring\s*for|vacancy\s*for)[\s:\-–—|]+([^\n\r,;|\t]+)',
             r'(?:recruitment\s*of|inviting\s*applications\s*for)[\s:\-–—|]+([^\n\r,;|\t]+)',
-            r'(?:looking\s*for|seeking)(?:\s*(?:a|an))?[\s:\-–—|]+([^\n\r,;|\t]+?)(?:\s+(?:with|to|in|having|who)|\.|\n|$)'
+            r'(?:looking\s*for|seeking)(?:\s*(?:a|an))?[\s:\-–—|]+([^\n\r,;|\t]+?)(?:\s+(?:' + title_stop + r')|\s*[,\.;\n]|$)',
         ]
-        non_title_words = r'(?:bright\s+and\s+motivated|candidates?|freshers?|individuals?|talented|dynamic|eligible|graduates?|students?|overview|criteria|eligibility|notice|company|welcome|campus|our|team|office|locations?)'
+        non_title_words = r'(?:bright\s+and\s+motivated|candidates?|freshers?|individuals?|talented|dynamic|eligible|graduates?|students?|overview|criteria|eligibility|notice|company|welcome|campus|our|team|office|locations?|hiring|opening|opportunit)'
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 candidate = match.group(1).strip()
-                # Clean prefix/suffix noise
-                candidate = re.sub(r'^(?:is\s+|a\s+|an\s+)', '', candidate, flags=re.IGNORECASE).strip()
-                candidate = re.sub(r'\s+(?:with|to|in|having|who).*$', '', candidate, flags=re.IGNORECASE).strip()
+                # Clean prefix/suffix noise — but preserve title words like "Intern", "Trainee"
+                candidate = re.sub(r'^(?:is\s+|a\s+|an\s+|hiring\s+)', '', candidate, flags=re.IGNORECASE).strip()
+                candidate = re.sub(r'(?:hiring)\s+', '', candidate, flags=re.IGNORECASE).strip()
+                # Remove trailing clause starting with stop words
+                candidate = re.sub(r'\s+(?:' + title_stop + r').*$', '', candidate, flags=re.IGNORECASE).strip()
+                # Strip trailing punctuation
+                candidate = re.sub(r'[\s,.;:|\-–—]+$', '', candidate).strip()
+                # Limit to reasonable title length (max 5 words or ~40 chars)
+                words = candidate.split()
+                if len(words) > 5:
+                    candidate = ' '.join(words[:5])
                 if 3 <= len(candidate) <= 60 and not re.search(r'^(?:' + non_title_words + r')\b', candidate, re.IGNORECASE):
-                    if not re.search(r'company|overview|eligibility|ctc|notice', candidate, re.IGNORECASE):
+                    if not re.search(r'company|overview|eligibility|ctc|notice|salary|drive|campus|opening|criteria|requirement', candidate, re.IGNORECASE):
                         evidence["title"] = match.group(0).strip()
                         return candidate
 
@@ -586,7 +614,7 @@ class JdParserService:
             r'data\s+analyst|data\s+scientist|qa\s+engineer|devops|system\s+engineer|'
             r'graduate\s+engineer\s+trainee|associate\s+software\s+engineer|trainee|'
             r'intern|cloud\s+engineer|cyber\s+security\s+analyst|customer\s+support(?:\s+executive)?|'
-            r'business\s+analyst|technical\s+consultant)'
+            r'business\s+analyst|technical\s+consultant|programmer\s+trainee)'
         )
         lines = [line.strip() for line in text.split("\n") if line.strip()]
         for line in lines[:8]:
@@ -635,21 +663,70 @@ class JdParserService:
 
     def _extract_company(self, text: str, evidence: Dict[str, str]) -> Optional[str]:
         """Extract hiring company name."""
+        # Stop keywords that indicate the end of a company name
+        stop_keywords = r'(?:Location|Role|Designation|Position|Profile|Opening|Hiring|Eligibility|Requirements|Skills|Skills?|Package|CTC|Salary|Compensation|Apply|Deadline|Date|Process|Drive|Venue|Campus|Branch|Batch|Year|Bond|Experience|Internship|Stipend)'
+
         patterns = [
-            r'(?:company(?:\s*name)?|client|organization|recruiter)[\s:\-–—|]+([A-Za-z0-9\s\.\,\&\'\-]+)',
-            r'About\s+([A-Z][A-Za-z0-9\s\.\&]+?)(?:\s*:|\n|—|–|\sis\s+)',
-            r'(?:^|\n)\s*([A-Za-z0-9\.\& ]{2,50})\s+is\s+(?:visiting|hiring|recruiting|conducting)',
-            r'(?:^|\n)\s*([A-Za-z0-9\.\& ]{2,50})\s+(?:campus\s+placement|recruitment\s+drive)'
+            # "Company: <Name>" or "Company <Name>" — capture only 2-5 words
+            r'(?:company(?:\s*name)?|client|organization|recruiter)[\s:\-–—|]+([A-Za-z0-9][A-Za-z0-9\s\.\&\'\-]{1,35}?(?=\s+(?:' + stop_keywords + r')|\s*[,\.;\n]|$))',
+            # "About <Name>:" or "About <Name> is"
+            r'About\s+([A-Z][A-Za-z0-9\s\.\&]+?)(?:\s*:|\s+is\s+)',
+            # "<Name> is visiting/hiring"
+            r'(?:^|\n)\s*([A-Za-z0-9\.\& ]{2,40})\s+is\s+(?:visiting|hiring|recruiting|conducting)',
+            # "<Name> campus placement / recruitment drive"
+            r'(?:^|\n)\s*([A-Za-z0-9\.\& ]{2,40})\s+(?:campus\s+placement|recruitment\s+drive)',
+            # "Participating Companies <list>" — extract first company
+            r'Participating\s+Companies\s+([A-Za-z][A-Za-z0-9\s&]{1,30}?)(?=\s+Common|\s+Criteria|\s+Selection|\s*\n|$)',
+            # "COMPANY: <Name>" format (uppercase)
+            r'COMPANY\s*:\s*([A-Za-z][A-Za-z0-9\s\.\&\'\-]{1,30})(?=\s+(?:ROLE|LOCATION|REQUIREMENTS|ELIGIBILITY)|\s*$)',
         ]
+        # Store Participating Companies list for fallback
+        participating_match = re.search(
+            r'Participating\s+Companies\s+([A-Za-z][A-Za-z0-9\s&]+?)(?=\s+Common|\s+Criteria|\s+Selection|\s*\n|$)',
+            text, re.IGNORECASE
+        )
+        if participating_match:
+            companies_str = participating_match.group(1).strip()
+            evidence["participating_companies"] = companies_str
+            # Return the first company from the list
+            first_company = companies_str.split()[0] if companies_str else None
+            if first_company and 2 <= len(first_company) <= 50:
+                evidence["company_name"] = participating_match.group(0).strip()
+                return first_company
+
         for pattern in patterns:
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 cand = match.group(1).split("\n")[0].strip()
-                # Clean trailing punctuation
-                cand = cand.strip(" .,:-")
-                if 2 <= len(cand) <= 50 and not re.search(r'placement|cell|notice|department|edumatrix|overview|criteria', cand, re.IGNORECASE):
+                # Clean trailing punctuation and noise
+                cand = re.sub(r'[\s,.;:]+$', '', cand).strip()
+                # Final guard: ensure it's not too long or contains stop words
+                if 2 <= len(cand) <= 50 and not re.search(r'placement|cell|notice|department|edumatrix|overview|criteria|eligible|requirements', cand, re.IGNORECASE):
+                    # Make sure it doesn't contain location-like words
+                    if not re.search(r'\b(Pune|Hyderabad|Bangalore|Mumbai|Chennai|Delhi|Noida|Work\s+from\s+Home|Remote)\b', cand, re.IGNORECASE):
+                        evidence["company_name"] = match.group(0).strip()
+                        return cand
                     evidence["company_name"] = match.group(0).strip()
                     return cand
+
+        # Fallback: Known company name patterns in context
+        known_companies = {
+            'tcs': 'TCS', 'amazon': 'Amazon', 'infosys': 'Infosys', 'wipro': 'Wipro',
+            'deloitte': 'Deloitte', 'flipkart': 'Flipkart', 'capgemini': 'Capgemini',
+            'accenture': 'Accenture', 'hcl': 'HCL', 'adobe': 'Adobe', 'google': 'Google',
+            'microsoft': 'Microsoft', 'facebook': 'Facebook', 'meta': 'Meta',
+            'zomato': 'Zomato', 'swiggy': 'Swiggy', 'paytm': 'Paytm',
+        }
+        text_lower = text.lower()
+        for key, name in known_companies.items():
+            if re.search(r'\b' + re.escape(key) + r'\b', text_lower):
+                # Check if this company is mentioned in a hiring/company context
+                context_start = max(0, text_lower.find(key) - 50)
+                context_end = min(len(text), text_lower.find(key) + len(key) + 50)
+                context = text[context_start:context_end].lower()
+                if any(w in context for w in ['company', 'hiring', 'drive', 'recruit', 'campus', 'opening', 'position', 'participating']):
+                    evidence["company_name"] = name
+                    return name
 
         return None
 
@@ -697,7 +774,7 @@ class JdParserService:
                     val = float(m.group(1))
                     if 4.0 <= val <= 10.0:
                         cgpa_val = val
-                        evidence["cgpa_criteria"] = m.group(0).strip()
+                        evidence["cgpa_criteria"] = f"CGPA {val}"
                         break
                 except ValueError:
                     pass
@@ -1058,13 +1135,20 @@ class JdParserService:
         if work_mode:
             evidence["work_mode"] = work_mode
 
-        # Location
-        loc_match = re.search(r'(?:job\s*location|location|work\s*location)[\s:\-–—|]+([A-Za-z\s,/\-]+)', text, re.IGNORECASE)
+        # Location — stop at common non-location keywords
+        loc_stop = r'(?:REQUIREMENTS|REQUIREMENT|ELIGIBILITY|ELIGIBLE|SKILLS?|PROCESS|SELECTION|PACKAGE|CTC|SALARY|COMPENSATION|BOND|Bonds?|APPLY|DEADLINE|DATE|LOCATION|NOTES?|NOTE|INTERNSHIP|STIPEND|JOINING|CRITERIA)'
+        loc_match = re.search(
+            r'(?:job\s*location|location|work\s*location)[\s:\-–—|]+([A-Za-z][A-Za-z\s,/\-]{1,35}(?=\s+(?:' + loc_stop + r')|\s*[,\.;\n]|$))',
+            text, re.IGNORECASE
+        )
         if loc_match:
-            cand = loc_match.group(1).split("\n")[0].strip()
-            # Clean trailing noise
+            cand = loc_match.group(1).strip()
             cand = re.sub(r'[\r\n].*', '', cand).strip(" ,.-")
-            if 2 <= len(cand) <= 45 and not re.search(r'qualification|experience|salary|mode', cand, re.IGNORECASE):
+            # Limit to max 3 words
+            words = cand.split()
+            if len(words) > 3:
+                cand = ' '.join(words[:3])
+            if 2 <= len(cand) <= 45 and not re.search(r'qualification|experience|salary|mode|eligibility|requirement|criteria|department|technology', cand, re.IGNORECASE):
                 location = cand
                 evidence["location"] = loc_match.group(0).strip()
 
@@ -1262,11 +1346,14 @@ class JdParserService:
         # 1. Application Deadline Patterns
         deadline_patterns = [
             r'(?:last\s*date\s*(?:of|for)?\s*(?:online\s*)?(?:application|registration|applying|submission))[\s:\-–—|]+([^\n\r\.;]+)',
+            r'(?:last\s*date)[\s:\-–—|]+([^\n\r\.;]+)',
             r'(?:application\s*closing\s*date|closing\s*date)(?:[\s:\-–—|]+|\s+is\s+)([^\n\r\.;]+)',
             r'(?:last\s*date\s*(?:to\s*(?:apply|register)|for\s*(?:student\s*)?(?:registration|applying|submission)))(?:[\s:\-–—|]+|\s+is\s+)([^\n\r\.;]+)',
             r'(?:application\s*deadline|registration\s*deadline|apply\s*on\s*or\s*before|apply\s*by|apply\s*before|(?:applications?|registrations?)\s*closes?(?:\s*on)?)(?:[\s:\-–—|]+|\s+is\s+)([^\n\r\.;]+)',
             r'(?:deadline\s*for\s*(?:online\s*)?(?:application|registration|submission))[\s:\-–—|]+([^\n\r\.;]+)',
-            r'deadline[\s:\-–—|]+([^\n\r\.;]+)'
+            r'deadline[\s:\-–—|]+([^\n\r\.;]+)',
+            # Fallback: catch "by [date]" in application context
+            r'\b(?:apply|register|submit|submission)\b.*?\bby\s+(\d{1,2}(?:st|nd|rd|th)\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})',
         ]
 
         for p in deadline_patterns:
@@ -1284,24 +1371,32 @@ class JdParserService:
                 else:
                     # Isolate date submatch from snippet to ignore extraneous trailing notes
                     date_submatch = re.search(
-                        r'(\d{1,2}(?:st|nd|rd|th|["\'“”‘’`]+)?[\s\/\-\.]+(?:[A-Za-z]{3,9}|\d{1,2})[\s\/\-\.]+\d{4}(?:\s*(?:,|at|@)?\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))?)',
+                        r'(\d{1,2}(?:st|nd|rd|th)[\s\'"]*[\.,]*\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*,?\s*\d{4})',
                         raw_snippet,
                         re.IGNORECASE
                     )
                     if not date_submatch:
                         date_submatch = re.search(
-                            r'([A-Za-z]{3,9}\s+\d{1,2}(?:st|nd|rd|th|["\'“”‘’`]+)?\s*,?\s*\d{4}(?:\s*(?:,|at|@)?\s*\d{1,2}(?::\d{2})?\s*(?:am|pm))?)',
+                            r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?[,\'"]*\s*\d{4})',
                             raw_snippet,
                             re.IGNORECASE
                         )
                     date_target = date_submatch.group(1).strip() if date_submatch else raw_snippet
-                    deadline = self._format_date_iso(date_target) or raw_snippet
+                    iso_date = self._format_date_iso(date_target)
+                    # Use the extracted date submatch, not the full raw snippet
+                    deadline = raw_snippet if (not iso_date or date_target == raw_snippet) else date_target
+                    # Preserve original human-readable form for evaluation flexibility
+                    if iso_date and date_target != raw_snippet:
+                        evidence["application_deadline_original"] = raw_snippet
+                    elif iso_date and date_target == raw_snippet:
+                        evidence["application_deadline_original"] = date_target
                 break
 
-        # 2. Drive Date
+        # 2. Drive Date (also treat as fallback application deadline)
         drive_patterns = [
             r'(?:campus\s*drive\s*date|drive\s*date|interview\s*date|test\s*date|date\s*of\s*drive)[\s:\-–—|]+([^\n\r,\.;]+)',
-            r'(?:drive\s*on|interviews?\s*on)[\s:\-–—|]+([^\n\r,\.;]+)'
+            r'(?:drive\s*on|interviews?\s*on)[\s:\-–—|]+([^\n\r,\.;]+)',
+            r'(?:drive\s*date|venue\s*date|walk.?in\s*date)[\s:\-–—|]+([^\n\r,\.;]+)',
         ]
         for dp in drive_patterns:
             drm = re.search(dp, text, re.IGNORECASE)
@@ -1315,7 +1410,25 @@ class JdParserService:
                     )
                     drive_date = raw_snippet
                 else:
-                    drive_date = self._format_date_iso(raw_snippet) or raw_snippet
+                    # Extract just the date portion, trimming trailing noise
+                    date_only_match = re.search(
+                        r'(\d{1,2}(?:st|nd|rd|th)[\s\".\.,]*\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*,?\s*\d{4})',
+                        raw_snippet,
+                        re.IGNORECASE
+                    )
+                    if not date_only_match:
+                        date_only_match = re.search(
+                            r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?[,\'"]*\s*\d{4})',
+                            raw_snippet,
+                            re.IGNORECASE
+                        )
+                    date_target = date_only_match.group(1).strip() if date_only_match else raw_snippet
+                    iso_drive = self._format_date_iso(date_target)
+                    drive_date = date_target if iso_drive else raw_snippet
+                    evidence["drive_date_original"] = raw_snippet
+                    # Also set as fallback application deadline if not already found
+                    if deadline is None:
+                        deadline = drive_date
                 break
 
         # 3. Joining Date
@@ -1328,7 +1441,10 @@ class JdParserService:
                 raw_snippet = jm.group(1).strip()
                 evidence["joining_date"] = jm.group(0).strip()
                 if re.search(r'\b202[4-9]\b', raw_snippet):
-                    joining_date = self._format_date_iso(raw_snippet) or raw_snippet
+                    iso_join = self._format_date_iso(raw_snippet)
+                    joining_date = raw_snippet if (iso_join and raw_snippet != iso_join) else iso_join
+                    if iso_join and raw_snippet != iso_join:
+                        evidence["joining_date_original"] = raw_snippet
                 else:
                     joining_date = raw_snippet
                 break
@@ -1341,8 +1457,8 @@ class JdParserService:
             return None
         clean = date_str.strip()
 
-        # 1. Clean OCR quote noise on ordinals: e.g. 19" October, 19' October, 19” October, 19’ October
-        clean = re.sub(r'(\d{1,2})\s*["\'“”‘’`]+', r'\1', clean)
+        # 1. Clean OCR quote noise on ordinals: e.g. 19" October, 19' October, 19" October, 19' October
+        clean = re.sub(r'(\d{1,2})\s*["\'""''`]+', r'\1', clean)
         # 2. Clean standard ordinals: 1st, 2nd, 3rd, 19th
         clean_clean = re.sub(r'(\d+)(?:st|nd|rd|th)', r'\1', clean, flags=re.IGNORECASE)
         clean_clean = clean_clean.strip(" .,;:-|–—")
@@ -1383,7 +1499,8 @@ class JdParserService:
             "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y",
             "%d %B %Y", "%d %b %Y", "%B %d %Y", "%b %d %Y",
             "%d %B %Y %I:%M %p", "%d %b %Y %I:%M %p",
-            "%d-%m-%Y %I:%M %p", "%Y-%m-%d %H:%M"
+            "%d-%m-%Y %I:%M %p", "%Y-%m-%d %H:%M",
+            "%B %d, %Y", "%b %d, %Y",  # "October 25, 2026" format
         ]
 
         # Try parsing date component
@@ -1392,6 +1509,24 @@ class JdParserService:
                 dt = datetime.strptime(clean_clean.strip(), fmt)
                 return dt.strftime(f"%Y-%m-%dT{time_part}")
             except ValueError:
+                pass
+
+        # Regex fallback for "Month DD, YYYY" or "Month DD YYYY" (e.g. October 25, 2026)
+        month_names = '|'.join(['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec',
+                                 'January','February','March','April','May','June','July','August',
+                                 'September','October','November','December'])
+        mdy_match = re.search(
+            rf'({month_names})\s+(\d{{1,2}})(?:st|nd|rd|th)?[,\.]?\s+(\d{{4}})',
+            clean, re.IGNORECASE
+        )
+        if mdy_match:
+            try:
+                month_str = mdy_match.group(1)[:3]
+                day = mdy_match.group(2)
+                year = mdy_match.group(3)
+                dt = datetime.strptime(f"{day} {month_str} {year}", "%d %b %Y")
+                return dt.strftime(f"%Y-%m-%dT{time_part}")
+            except Exception:
                 pass
 
         # Regex fallback: Day Month Year (e.g. 15 Oct 2026 or 15/10/2026)
@@ -1465,21 +1600,36 @@ class JdParserService:
             re.IGNORECASE
         )
         for rm in round_matches:
-            r_text = rm.group(0).strip()
+            r_text = rm.group(1).strip()
             if 4 <= len(r_text) <= 60:
                 rounds.append(r_text)
 
         if not rounds:
-            # Look for general selection process section
+            # Look for general selection process section — capture full section
             sp_match = re.search(
-                r'(?:selection\s*process|recruitment\s*process|rounds\s*of\s*interview)[\s:\-–—]+([^\n\n]+)',
-                text,
-                re.IGNORECASE
+                r'(?:selection\s*process|recruitment\s*process|process|rounds\s*of\s*interview| Rounds?)[\s:\-–—|]*(.*?)(?:Package|CTC|Salary|Compensation|Application|Deadline|Apply|Bond|Location|Eligibility|Requirements|Skills?|\n\s*\n|$)',
+                text, re.IGNORECASE | re.DOTALL
             )
             if sp_match:
                 section = sp_match.group(1).strip()
-                split_rounds = [s.strip(" -•") for s in re.split(r'[,;]|\n', section) if len(s.strip()) > 3]
+                # Split by common delimiters
+                split_rounds = [s.strip(" -•*") for s in re.split(r'[,;\n]', section) if len(s.strip()) > 3]
                 rounds.extend(split_rounds[:5])
+
+        # Also try inline extraction from "Process:" or "Selection:" lines
+        if not rounds:
+            process_match = re.search(
+                r'(?:Process|Selection\s*Process|Round\s*Details)[\s:\-–—|]+([^\n]+)',
+                text, re.IGNORECASE
+            )
+            if process_match:
+                proc_text = process_match.group(1).strip()
+                # Split multi-word process descriptions
+                parts = re.split(r'\s+(?=[A-Z][a-zA-Z])', proc_text)
+                for p in parts:
+                    p = p.strip(" -•*,")
+                    if 4 <= len(p) <= 60 and not re.search(r'(?:package|ctc|salary|location|apply|deadline|bond|eligibility)', p, re.IGNORECASE):
+                        rounds.append(p)
 
         if rounds:
             evidence["selection_rounds"] = " -> ".join(rounds)
@@ -1592,6 +1742,9 @@ class JdParserService:
         found: List[str] = []
         seg_lower = segment.lower()
 
+        # Check if "skills" keyword exists — if so, relax noise filter
+        has_skills_keyword = bool(re.search(r'\bskills?\b', seg_lower))
+
         # Noise phrases that should not trigger skill extraction
         noise_phrases = [
             r'\b(?:minimum|min)\s+(?:cgpa|gpa|percentage|%)\b',
@@ -1605,8 +1758,9 @@ class JdParserService:
         for nf in noise_phrases:
             if re.search(nf, seg_lower):
                 noise_score += 1
-        # If too much noise, return early
-        if noise_score >= 2:
+        # If too much noise AND no skills keyword, return early
+        # (skills keyword suggests this is a skills section, not academic criteria)
+        if noise_score >= 2 and not has_skills_keyword:
             return []
 
         for skill in self.KNOWN_SKILL_KEYWORDS:

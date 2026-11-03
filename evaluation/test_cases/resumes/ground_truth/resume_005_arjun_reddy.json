@@ -1,0 +1,38 @@
+{
+  "name": "Arjun Reddy",
+  "email": "arjun.r@institution.ac.in",
+  "phone": null,
+  "cgpa": null,
+  "education": [
+    "B.Tech Computer Science"
+  ],
+  "companies": [
+    "Zomato"
+  ],
+  "skills": [
+    "Ruby on Rails",
+    "PostgreSQL",
+    "Redis",
+    "GraphQL",
+    "REST APIs",
+    "Microservices",
+    "Git",
+    "Docker",
+    "AWS",
+    "Heroku"
+  ],
+  "experience": [
+    {
+      "title": "Backend Engineer",
+      "company": "Zomato",
+      "dates": "Aug 2022 - Dec 2023"
+    }
+  ],
+  "projects": [
+    "Restaurant Management System"
+  ],
+  "certifications": [
+    "MongoDB for Python Developers"
+  ],
+  "location": "Hyderabad, Telangana"
+}

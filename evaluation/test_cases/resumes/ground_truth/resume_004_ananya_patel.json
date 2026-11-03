@@ -1,0 +1,41 @@
+{
+  "name": "Ananya Patel",
+  "email": "ananya.p@email.com",
+  "phone": "9876543210",
+  "cgpa": 8.8,
+  "education": [
+    "B.Tech Computer Science"
+  ],
+  "companies": [
+    "Microsoft"
+  ],
+  "skills": [
+    "AWS",
+    "Docker",
+    "Kubernetes",
+    "Jenkins",
+    "Terraform",
+    "Python",
+    "Bash",
+    "Go",
+    "Prometheus",
+    "Grafana",
+    "ELK Stack"
+  ],
+  "experience": [
+    {
+      "title": "DevOps Intern",
+      "company": "Microsoft",
+      "dates": "Jul 2024 - Present"
+    }
+  ],
+  "projects": [
+    "Serverless URL Shortener",
+    "K8s Dashboard"
+  ],
+  "certifications": [
+    "AWS Certified Cloud Practitioner",
+    "Docker Certified Associate"
+  ],
+  "location": "Vellore, Tamil Nadu"
+}

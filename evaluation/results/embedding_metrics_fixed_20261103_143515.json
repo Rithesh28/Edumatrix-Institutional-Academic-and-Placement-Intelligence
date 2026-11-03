@@ -1,0 +1,330 @@
+{
+  "model": "all-MiniLM-L6-v2",
+  "embedding_dimension": 384,
+  "evaluation_date": "2026-11-03 14:35:42",
+  "methodology": "Corrected - reports raw cosine similarity distributions; classification metrics at multiple thresholds; no comparison to arbitrary expected values",
+  "dataset": {
+    "total_pairs": 20,
+    "skill_pairs": 13,
+    "query_pairs": 7,
+    "positive_pairs": 17,
+    "negative_pairs": 3,
+    "note": "Labels are manually assigned; dataset is small (n=20); results are indicative only"
+  },
+  "descriptive_statistics": {
+    "all": {
+      "mean": 0.5778,
+      "std": 0.1715,
+      "min": 0.1121,
+      "max": 0.8189,
+      "median": 0.6265,
+      "count": 20
+    },
+    "positive_pairs": {
+      "mean": 0.622,
+      "std": 0.1316,
+      "min": 0.3312,
+      "max": 0.8189,
+      "median": 0.6294,
+      "count": 17
+    },
+    "negative_pairs": {
+      "mean": 0.3274,
+      "std": 0.1557,
+      "min": 0.1121,
+      "max": 0.475,
+      "median": 0.3952,
+      "count": 3
+    },
+    "skill_positive": {
+      "mean": 0.6003,
+      "std": 0.1389,
+      "min": 0.3312,
+      "max": 0.8189,
+      "median": 0.6265,
+      "count": 12
+    },
+    "skill_negative": {
+      "mean": 0.3952,
+      "std": 0.0,
+      "min": 0.3952,
+      "max": 0.3952,
+      "median": 0.3952,
+      "count": 1
+    },
+    "query_positive": {
+      "mean": 0.674,
+      "std": 0.0934,
+      "min": 0.5247,
+      "max": 0.7975,
+      "median": 0.6806,
+      "count": 5
+    },
+    "query_negative": {
+      "mean": 0.2935,
+      "std": 0.1815,
+      "min": 0.1121,
+      "max": 0.475,
+      "median": 0.2935,
+      "count": 2
+    },
+    "skill_total": 13,
+    "query_total": 7,
+    "pos_count": 17,
+    "neg_count": 3
+  },
+  "classification_metrics": {
+    "threshold_0.50": {
+      "tp": 15,
+      "tn": 3,
+      "fp": 0,
+      "fn": 2,
+      "accuracy": 0.9,
+      "precision": 1.0,
+      "recall": 0.8824,
+      "f1": 0.9375
+    },
+    "threshold_0.65": {
+      "tp": 6,
+      "tn": 3,
+      "fp": 0,
+      "fn": 11,
+      "accuracy": 0.45,
+      "precision": 1.0,
+      "recall": 0.3529,
+      "f1": 0.5217
+    },
+    "threshold_0.78": {
+      "tp": 2,
+      "tn": 3,
+      "fp": 0,
+      "fn": 15,
+      "accuracy": 0.25,
+      "precision": 1.0,
+      "recall": 0.1176,
+      "f1": 0.2105
+    }
+  },
+  "results": [
+    {
+      "test_case_id": "TC_EMB_001",
+      "text1": "Python programming language",
+      "text2": "Python coding skills",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.7582,
+      "pred_match_065": true,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_002",
+      "text1": "Machine Learning Engineer",
+      "text2": "ML Developer",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.6328,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_003",
+      "text1": "React.js frontend framework",
+      "text2": "Angular web development",
+      "category": "Skill Match",
+      "expected_match": false,
+      "cosine_similarity": 0.3952,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": false
+    },
+    {
+      "test_case_id": "TC_EMB_004",
+      "text1": "Docker containerization",
+      "text2": "Kubernetes orchestration",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.3556,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": false
+    },
+    {
+      "test_case_id": "TC_EMB_005",
+      "text1": "AWS cloud computing",
+      "text2": "Azure cloud services",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.6144,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_006",
+      "text1": "Student asking about assignment deadline",
+      "text2": "When is the assignment due?",
+      "category": "Query Similarity",
+      "expected_match": true,
+      "cosine_similarity": 0.6806,
+      "pred_match_065": true,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_007",
+      "text1": "Exam schedule for CIE 2",
+      "text2": "When are the exams?",
+      "category": "Query Similarity",
+      "expected_match": true,
+      "cosine_similarity": 0.6294,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_008",
+      "text1": "Company visit notification",
+      "text2": "Placed placement circular PDF",
+      "category": "Query Similarity",
+      "expected_match": false,
+      "cosine_similarity": 0.1121,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": false
+    },
+    {
+      "test_case_id": "TC_EMB_009",
+      "text1": "CGPA requirement 7.0",
+      "text2": "Minimum marks 7.0 CGPA",
+      "category": "Query Similarity",
+      "expected_match": true,
+      "cosine_similarity": 0.7975,
+      "pred_match_065": true,
+      "pred_match_078": true,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_010",
+      "text1": "Java Spring Boot backend development",
+      "text2": "Backend development with Java",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.7251,
+      "pred_match_065": true,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_011",
+      "text1": "Data Science with Python",
+      "text2": "Data analysis using Python",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.8189,
+      "pred_match_065": true,
+      "pred_match_078": true,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_012",
+      "text1": "Web development full stack",
+      "text2": "Frontend and backend development",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.5426,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_013",
+      "text1": "Database management systems",
+      "text2": "SQL database design",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.6327,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_014",
+      "text1": "Cloud computing fundamentals",
+      "text2": "Introduction to cloud services",
+      "category": "Query Similarity",
+      "expected_match": true,
+      "cosine_similarity": 0.7379,
+      "pred_match_065": true,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_015",
+      "text1": "Operating systems concepts",
+      "text2": "OS scheduling algorithms",
+      "category": "Query Similarity",
+      "expected_match": true,
+      "cosine_similarity": 0.5247,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_016",
+      "text1": "Algorithm design and analysis",
+      "text2": "Data structures and algorithms",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.6259,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_017",
+      "text1": "Software engineering principles",
+      "text2": "SDLC methodology",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.3312,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": false
+    },
+    {
+      "test_case_id": "TC_EMB_018",
+      "text1": "Cybersecurity basics",
+      "text2": "Network security concepts",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.6272,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    },
+    {
+      "test_case_id": "TC_EMB_019",
+      "text1": "Artificial intelligence applications",
+      "text2": "AI in healthcare",
+      "category": "Query Similarity",
+      "expected_match": false,
+      "cosine_similarity": 0.475,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": false
+    },
+    {
+      "test_case_id": "TC_EMB_020",
+      "text1": "Machine learning model training",
+      "text2": "Deep learning neural networks",
+      "category": "Skill Match",
+      "expected_match": true,
+      "cosine_similarity": 0.5385,
+      "pred_match_065": false,
+      "pred_match_078": false,
+      "pred_match_050": true
+    }
+  ]
+}

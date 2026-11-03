@@ -1,0 +1,36 @@
+{
+  "name": "John Smith",
+  "email": "john.smith@example.com",
+  "phone": "+91-9876543210",
+  "cgpa": 8.5,
+  "education": [
+    "B.Tech Computer Science"
+  ],
+  "companies": [
+    "Google"
+  ],
+  "skills": [
+    "Python",
+    "Java",
+    "C++",
+    "SQL",
+    "TensorFlow",
+    "Pandas",
+    "Scikit-learn"
+  ],
+  "experience": [
+    {
+      "title": "Software Intern",
+      "company": "Google",
+      "dates": "Jun 2023 - Aug 2023"
+    }
+  ],
+  "projects": [
+    "Recommendation System",
+    "Chat Application"
+  ],
+  "certifications": [
+    "AWS Cloud Practitioner"
+  ],
+  "location": "Bangalore, India"
+}

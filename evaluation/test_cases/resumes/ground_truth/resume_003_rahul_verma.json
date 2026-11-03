@@ -1,0 +1,34 @@
+{
+  "name": "Rahul Verma",
+  "email": "rahul.v@college.edu.in",
+  "phone": "+91-8765432109",
+  "cgpa": 9.1,
+  "education": [
+    "B.Tech Computer Science and Engineering"
+  ],
+  "companies": [
+    "Amazon"
+  ],
+  "skills": [
+    "C",
+    "C++",
+    "Python",
+    "Java",
+    "JavaScript",
+    "Data Structures",
+    "Algorithms"
+  ],
+  "experience": [
+    {
+      "title": "SDE-1",
+      "company": "Amazon",
+      "dates": "June 2023"
+    }
+  ],
+  "projects": [
+    "Online Judge Platform",
+    "Pathfinding Visualizer"
+  ],
+  "certifications": [],
+  "location": "Karnataka"
+}

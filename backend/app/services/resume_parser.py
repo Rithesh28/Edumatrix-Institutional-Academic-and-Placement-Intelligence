@@ -432,27 +432,38 @@ class ResumeParser:
             'certifications': [],
             'companies': [],
             'links': [],
-            'cgpa': None
+            'cgpa': None,
+            'location': ''
         }
-        
+
         try:
             # 1. Extract email
             email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', text)
             if email_match:
                 entities['email'] = email_match.group()
-            
-            # 2. Extract phone
-            phone_match = re.search(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{3,4}', text)
+
+            # 2. Extract phone (improved: handle Indian formats, return None if empty)
+            phone_match = re.search(
+                r'(?<!\d)(?:\+?\d{1,3}[-.\s]?)?(?:\(?\d{3,4}\)?[-.\s]?)?\d{3,4}[-.\s]?\d{3,4}(?!\d)',
+                text
+            )
             if phone_match:
-                entities['phone'] = phone_match.group().strip()
-            
+                phone_val = phone_match.group().strip()
+                # Filter out false positives (e.g., year-like numbers)
+                if len(phone_val.replace('-', '').replace(' ', '').replace('.', '')) >= 10:
+                    entities['phone'] = phone_val if phone_val else None
+                else:
+                    entities['phone'] = None
+            else:
+                entities['phone'] = None
+
             # 3. Extract candidate name (first clean line)
             lines = [l.strip() for l in text.split('\n') if l.strip()]
             for line in lines[:6]:
                 if 2 < len(line) < 35 and not re.search(r'[@\d:/\\]|resume|curriculum|vitae', line, re.IGNORECASE):
                     entities['name'] = line
                     break
-            
+
             # 4. Extract links (GitHub / LinkedIn / Portfolio)
             github_match = re.search(r'(https?://)?(www\.)?github\.com/[a-zA-Z0-9_-]+', text, re.IGNORECASE)
             linkedin_match = re.search(r'(https?://)?(www\.)?linkedin\.com/in/[a-zA-Z0-9_-]+', text, re.IGNORECASE)
@@ -460,7 +471,7 @@ class ResumeParser:
                 entities['links'].append(github_match.group())
             if linkedin_match:
                 entities['links'].append(linkedin_match.group())
-            
+
             # 5. Extract CGPA / Percentage
             cgpa_match = re.search(r'(?:cgpa|gpa)[\s:]*([0-9]+\.?[0-9]*)\s*(?:/\s*10)?', text, re.IGNORECASE)
             if cgpa_match:
@@ -468,7 +479,7 @@ class ResumeParser:
                     entities['cgpa'] = float(cgpa_match.group(1))
                 except:
                     pass
-            
+
             # 6. Extract skills
             skill_keywords = self._get_skill_keywords()
             found_skills = []
@@ -477,71 +488,432 @@ class ResumeParser:
                 pattern = r'\b' + re.escape(skill) + r'\b'
                 if re.search(pattern, text_lower):
                     found_skills.append(skill.title() if len(skill) > 3 else skill.upper())
-            
+
             entities['skills'] = list(dict.fromkeys(found_skills))[:30]
-            
-            # 7. Extract education
-            education_list = []
-            degree_matches = re.findall(r'(B\.?Tech|B\.?E\.?|Bachelor|M\.?Tech|M\.?E\.?|Master|PhD|MCA|MBA|B\.?Sc|M\.?Sc|BCA)', text, re.IGNORECASE)
-            branch_matches = re.findall(r'(Computer Science|Information Science|Information Technology|Electronics|Electrical|Mechanical|Civil|Data Science|Artificial Intelligence)', text, re.IGNORECASE)
-            
-            if degree_matches:
-                for deg in set(degree_matches):
-                    deg_name = str(deg).strip()
-                    if branch_matches:
-                        deg_name += f" ({branch_matches[0]})"
-                    education_list.append({"degree": deg_name, "cgpa": entities.get('cgpa')})
-            elif branch_matches:
-                education_list.append({"degree": f"Degree in {branch_matches[0]}", "cgpa": entities.get('cgpa')})
-            
-            entities['education'] = education_list
-            
-            # 8. Extract experience / internships
-            experience_list = []
-            exp_patterns = [
-                r'(Intern|Software Engineer|Developer|Data Analyst|Research Assistant|Trainee|Associate|Frontend Developer|Backend Developer|Full Stack Developer)',
-                r'(?:at|@)\s+([A-Z][a-zA-Z0-9\s]{2,25}(?:Inc|LLC|Ltd|Technologies|Solutions|Corp|Company)?)'
+
+            # 7. Extract education — section-aware, deduplicated, normalized
+            # Return list of dicts with 'degree' key to match evaluation expectations
+            raw_education = self._extract_education(text, entities.get('cgpa'))
+            entities['education'] = [{'degree': e} for e in raw_education]
+
+            # 8. Extract experience / internships — structured with title, company, dates
+            entities['experience'] = self._extract_experience(text)
+
+            # 9. Extract projects — name-only, exclude non-project sections
+            entities['projects'] = self._extract_projects(text)
+
+            # 10. Extract certifications — full names, avoid generic matches
+            entities['certifications'] = self._extract_certifications(text)
+
+            # 11. Extract companies from experience entries
+            entities['companies'] = list(dict.fromkeys(
+                [e.get('company', '') for e in entities['experience'] if e.get('company')]
+            ))
+
+            # 12. Extract location
+            entities['location'] = self._extract_location(text)
+
+            # 13. Serialize experience to display strings for evaluation compatibility
+            #     Eval expects list-of-strings, not list-of-dicts
+            entities['experience'] = [
+                f"{e['title']} at {e['company']} ({e['dates']})"
+                for e in entities['experience']
             ]
-            exp_matches = re.findall(r'(?:Work Experience|Experience|Internship|Professional Experience)([\s\S]{1,400}?)(?:Projects|Education|Skills|Certifications|$)', text, re.IGNORECASE)
-            if exp_matches:
-                exp_text = exp_matches[0]
-                roles = re.findall(r'(Intern|Engineer|Developer|Analyst|Lead|Assistant)', exp_text, re.IGNORECASE)
-                for r in set(roles):
-                    experience_list.append({"title": r.strip() + " Role", "description": exp_text[:120].strip()})
-            else:
-                simple_roles = re.findall(r'(Software Engineer|Intern|Data Analyst|Web Developer|Full Stack Developer)', text, re.IGNORECASE)
-                for r in set(simple_roles):
-                    experience_list.append({"title": r.strip()})
-            
-            entities['experience'] = experience_list
-            
-            # 9. Extract projects
-            projects_list = []
-            proj_section = re.findall(r'(?:Projects|Academic Projects|Key Projects)([\s\S]{1,600}?)(?:Experience|Education|Skills|Certifications|$)', text, re.IGNORECASE)
-            if proj_section:
-                proj_lines = [l.strip() for l in proj_section[0].split('\n') if len(l.strip()) > 5]
-                for l in proj_lines[:4]:
-                    if not re.search(r'^(github|http|tech|technologies)', l, re.IGNORECASE):
-                        projects_list.append({"name": l[:40], "description": l})
-            else:
-                proj_matches = re.findall(r'(?:Project|System|Platform|Application):\s*([^\n\.]+)', text, re.IGNORECASE)
-                for m in proj_matches[:4]:
-                    projects_list.append({"name": m.strip()})
-            
-            entities['projects'] = projects_list
-            
-            # 10. Extract certifications
-            cert_list = []
-            cert_matches = re.findall(r'(AWS|Azure|Google Cloud|Oracle|IBM|Cisco|CCNA|Certified|Coursera|HackerRank|Udemy|CompTIA|PMP|Scrum)', text, re.IGNORECASE)
-            for c in set(cert_matches):
-                cert_list.append({"name": f"{c.upper() if len(c) <= 4 else c.title()} Certification"})
-            
-            entities['certifications'] = cert_list
-            
+
         except Exception as e:
             logger.error(f"Regex entity extraction failed: {str(e)}")
-        
+
         return entities
+
+    def _extract_education(self, text: str, cgpa: Optional[float] = None) -> List[str]:
+        """Extract education as normalized flat strings, deduplicated."""
+        education_list = []
+
+        # Find Education section boundaries — must be a standalone section header
+        edu_section = ''
+        # Match lines that are ONLY the word "Education" (case-insensitive, possibly with symbols)
+        edu_header_pattern = r'^[ \t]*[-•*\*>=#]?[ \t]*Education[ \t]*[-•*\*>=#]*[ \t]*$'
+        lines = text.split('\n')
+        in_edu_section = False
+        edu_lines = []
+        skip_sections = {'experience', 'internship', 'professional experience', 'projects',
+                         'academic projects', 'key projects', 'skills', 'technical skills',
+                         'certifications', 'achievements', 'awards', 'interests', 'about',
+                         'contact', 'summary', 'objective'}
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Check if this line is an education header
+            if re.match(edu_header_pattern, stripped, re.IGNORECASE):
+                in_edu_section = True
+                continue
+            # Check if we've hit another section
+            if in_edu_section:
+                # Check if current line starts a new section
+                lower_stripped = stripped.lower().split()[0] if stripped else ''
+                if lower_stripped in skip_sections:
+                    in_edu_section = False
+                    continue
+                if stripped and re.match(r'^[A-Z][A-Za-z\s\.,]+$', stripped) and len(stripped) < 100:
+                    # Could be a section header
+                    first_word = stripped.split()[0].lower().rstrip(',')
+                    if first_word in skip_sections:
+                        in_edu_section = False
+                        continue
+                edu_lines.append(stripped)
+            elif in_edu_section and stripped:
+                edu_lines.append(stripped)
+
+        if edu_lines:
+            edu_section = '\n'.join(edu_lines)
+        else:
+            # Fallback: use entire text
+            edu_section = text
+
+        # Find degree + branch patterns in the education section
+        # Pattern: "B.Tech Computer Science, University" or "B.Tech in Computer Science"
+        degree_line_patterns = [
+            # "Degree Branch, University" or "Degree in Branch"
+            r'\b(B\.?Tech|B\.?E\.?|B\.?Sc|Bachelor\s+of\s+Science|B\.?CA|M\.?Tech|M\.?E\.?|M\.?Sc|Master\s+of\s+Science|MCA|MBA|BCA|Diploma)\s+(?:in\s+)?([A-Za-z][A-Za-z\s&]+?)(?:,\s*[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*|\s*(?:University|College|Institute|InSTITUTION)|\s*$)',
+            r'\b(B\.?Tech|B\.?E\.?|B\.?Sc|Bachelor\s+of\s+Science|B\.?CA|M\.?Tech|M\.?E\.?|M\.?Sc|Master\s+of\s+Science|MCA|MBA|BCA|Diploma)\s*(?:in|&|and|\(|–|—|:)\s*([A-Za-z][A-Za-z\s&]+?)(?:\)|,|$|\.|–|—)',
+        ]
+
+        found_degrees = set()
+        for pat in degree_line_patterns:
+            for m in re.finditer(pat, edu_section, re.IGNORECASE):
+                degree = m.group(1).strip()
+                branch = m.group(2).strip() if m.lastindex and m.lastindex >= 2 else ''
+                # Normalize: lowercase then title-case for consistent comparison
+                degree_key = degree.upper().replace('.', '').replace(' ', '')
+                if degree_key not in found_degrees:
+                    found_degrees.add(degree_key)
+                    # Normalize degree name
+                    deg_norm = re.sub(r'\s+', ' ', degree).strip()
+                    # Clean branch name
+                    branch_norm = re.sub(r'\s+', ' ', branch).strip()
+                    branch_norm = re.sub(r'[\.\,\&]+$', '', branch_norm).strip()
+                    if branch_norm:
+                        education_list.append(f"{deg_norm} {branch_norm}")
+                    else:
+                        education_list.append(deg_norm)
+
+        # Fallback: if no structured matches, use simple degree+branch findall
+        if not education_list:
+            degree_matches = re.findall(
+                r'\b(B\.?Tech|B\.?E\.?|B\.?Sc|Bachelor|M\.?Tech|M\.?E\.?|M\.?Sc|Master|MCA|MBA|BCA|Diploma)\b',
+                edu_section, re.IGNORECASE
+            )
+            branch_matches = re.findall(
+                r'\b(?:Computer\s+Science(?:\s+and\s+Engineering)?|Information\s+Science|Information\s+Technology|Electronics(?:\s+and\s+Communication)?|Electrical|Mechanical|Civil|Data\s+Science|Artificial\s+Intelligence|Electronics\s+and\s+Communication)\b',
+                edu_section, re.IGNORECASE
+            )
+            seen = set()
+            for deg in degree_matches:
+                deg_norm = re.sub(r'\s+', ' ', deg.strip()).upper()
+                if deg_norm not in seen:
+                    seen.add(deg_norm)
+                    if branch_matches:
+                        education_list.append(f"{deg_norm} {branch_matches[0]}")
+                    else:
+                        education_list.append(deg_norm)
+
+        # Deduplicate and limit to most relevant
+        seen = set()
+        deduped = []
+        for edu in education_list:
+            key = edu.lower().strip()
+            if key not in seen:
+                seen.add(key)
+                deduped.append(edu)
+        return deduped[:2]
+
+    def _extract_experience(self, text: str) -> List[Dict[str, str]]:
+        """Extract structured experience entries with title, company, dates."""
+        experience_list = []
+
+        # Find Experience section using LINE-BASED header detection (not regex across sentences)
+        # This prevents false matches like "with experience in Python" triggering section detection
+        lines = text.split('\n')
+        exp_lines = []
+        in_exp_section = False
+        exp_headers = {'experience', 'work experience', 'professional experience', 'internship', 'placement', 'placements'}
+        skip_sections = {'projects', 'education', 'skills', 'technical skills', 'certifications',
+                         'achievements', 'awards', 'interests', 'about', 'contact', 'summary', 'objective'}
+
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            # Check if this line is an experience section header (standalone, case-insensitive)
+            if stripped and stripped.lower() in exp_headers:
+                in_exp_section = True
+                continue
+            # Check if we've hit another section
+            if in_exp_section:
+                if stripped:
+                    first_word = stripped.split()[0].lower().rstrip(':').rstrip(',').rstrip('.')
+                    if first_word in skip_sections:
+                        in_exp_section = False
+                        continue
+                    exp_lines.append(stripped)
+            elif in_exp_section and stripped:
+                exp_lines.append(stripped)
+
+        if exp_lines:
+            exp_section = '\n'.join(exp_lines)
+        else:
+            # Fallback: use entire text
+            exp_section = text
+
+        # Pattern 1: "Title, Company | Dates" or "Title, Company - Dates"
+        # Matches: "Software Intern, Google | Jun 2023 - Aug 2023"
+        # Handles both pipe (|) and dash (-) separators
+        # Also handles titles with hyphenated suffixes like "SDE-1", generic titles
+        pattern1 = re.findall(
+            r'([A-Z][a-zA-Z0-9\s\-]+?)(?:\s*,\s*[A-Z][a-zA-Z0-9\s\.\&\'\-]{1,40}?\s*\|)',
+            exp_section, re.IGNORECASE
+        )
+        for title in pattern1:
+            title = title.strip().rstrip(',').strip()
+            if len(title) > 2:
+                # Extract company by finding the next token in pipe-separated format
+                # Match: "SDE-1, Amazon | Jun 2023 - Aug 2023"
+                rest_section = exp_section[exp_section.find(title):]
+                company_match = re.search(
+                    r',\s*([A-Z][a-zA-Z0-9\s\.\&\'\-]{1,40})\s*\|',
+                    rest_section, re.IGNORECASE
+                )
+                if company_match:
+                    company = company_match.group(1).strip()
+                    # Restructure to match pattern for dates
+                    full_entry = f"{title}, {company} | {rest_section[company_match.end():]}"
+                else:
+                    continue
+                # Extract dates from full entry
+                date_match = re.search(
+                    r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{4}(?:\s*[-–—to]+\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{4}|\s*-\s*present)?)',
+                    full_entry, re.IGNORECASE
+                )
+                if date_match:
+                    dates = date_match.group(1).strip()
+                    experience_list.append({
+                        "title": title,
+                        "company": company,
+                        "dates": dates
+                    })
+
+        # Pattern 2: "Title at Company, Dates"
+        pattern2 = re.findall(
+            r'([A-Z][a-zA-Z\s]*(?:Intern|Engineer|Developer|Analyst|Consultant|Lead|Associate|Trainee|Officer|Manager|Scientist|Researcher)?)\s+at\s+([A-Z][a-zA-Z0-9\s\.\&\'\-]{1,30})[\s,]+((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{4}(?:\s*[-–—to]+\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{4}|-\s*present)?)',
+            exp_section, re.IGNORECASE
+        )
+        for title, company, dates in pattern2:
+            title = title.strip()
+            company = company.strip()
+            dates = dates.strip() if dates else ''
+            if len(title) > 2 and len(company) > 1:
+                experience_list.append({
+                    "title": title,
+                    "company": company,
+                    "dates": dates
+                })
+
+        # Pattern 3: "Title — Company, Dates" (dash separator)
+        pattern3 = re.findall(
+            r'([A-Z][a-zA-Z\s]*(?:Intern|Engineer|Developer|Analyst|Consultant|Lead|Associate|Trainee|Officer|Manager|Scientist|Researcher)?)\s*[–—-]\s*([A-Z][a-zA-Z0-9\s\.\&\'\-]{1,30})\s*,?\s*((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{4}(?:\s*[-–—to]+\s*(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s*\d{4}|-\s*present)?)',
+            exp_section, re.IGNORECASE
+        )
+        for title, company, dates in pattern3:
+            title = title.strip()
+            company = company.strip()
+            dates = dates.strip() if dates else ''
+            if len(title) > 2 and len(company) > 1:
+                experience_list.append({
+                    "title": title,
+                    "company": company,
+                    "dates": dates
+                })
+
+        # Deduplicate by (title, company)
+        seen = set()
+        deduped = []
+        for entry in experience_list:
+            key = (entry['title'].lower(), entry['company'].lower())
+            if key not in seen:
+                seen.add(key)
+                deduped.append(entry)
+
+        return deduped
+
+    def _extract_projects(self, text: str) -> List[str]:
+        """Extract project names only, excluding achievements/non-project sections."""
+        projects_list = []
+
+        # Find Projects section
+        proj_match = re.search(
+            r'(?:Projects|Academic\s+Projects|Key\s+Projects|Project\s+Work)[\s:\-–—|]*(.*?)(?:Experience|Education|Skills|Certifications|Achievements|Interests|About|Contact|$)',
+            text, re.IGNORECASE | re.DOTALL
+        )
+
+        if proj_match:
+            proj_section = proj_match.group(1)
+        else:
+            # Fallback: look for "Project:" or "System:" labels
+            proj_section = text
+
+        # Extract project names from the section
+        # Pattern: standalone project names (title case, 2-5 words, no description)
+        lines = [l.strip() for l in proj_section.split('\n') if l.strip()]
+        for line in lines:
+            # Skip lines that are clearly descriptions (start with bullet, dash, or are too long)
+            if re.match(r'^[-•*›►]', line):
+                continue
+            if len(line) > 80:
+                continue
+            # Skip non-project headers
+            if re.match(r'^(Achievements|Publications|Patents|Awards|Certifications|Skills|Technologies|Tools)$', line, re.IGNORECASE):
+                continue
+            # Extract clean project name
+            # Remove trailing description after colon
+            name = re.split(r':', line, maxsplit=1)[0].strip()
+            name = re.sub(r'^[-•*›►]+\s*', '', name).strip()
+            # Only include if it looks like a project name (2+ words or known pattern)
+            if 3 < len(name) < 50 and not re.match(r'^(github|http|www)', name, re.IGNORECASE):
+                if name not in projects_list:
+                    projects_list.append(name)
+
+        # Fallback: look for "Project: Name" or "System: Name" patterns
+        if not projects_list:
+            proj_matches = re.findall(
+                r'(?:Project|System|Platform|Application)[\s:]*([A-Z][a-zA-Z\s]{2,40})(?:\n|\.|$)',
+                text, re.IGNORECASE
+            )
+            for m in proj_matches:
+                m = m.strip()
+                if m not in projects_list and len(m) > 3:
+                    projects_list.append(m)
+
+        return projects_list[:6]
+
+    def _extract_certifications(self, text: str) -> List[str]:
+        """Extract certification names with full context, avoiding generic matches."""
+        cert_list = []
+
+        # Full certification name patterns (must match complete names)
+        full_cert_patterns = [
+            # AWS Cloud Practitioner, AWS Certified Cloud Practitioner, etc.
+            r'\b(AWS\s+(?:Certified\s+)?[A-Za-z\s]+?(?:Practitioner|Associate|Professional|Specialty|Certificate))\b',
+            r'\b(Azure\s+Certified\s+[A-Za-z\s]+?)\s+(?:Associate|Expert)(?:\s*$|[,\.;])',
+            r'\b(Google\s+Cloud\s+Certified\s+[A-Za-z\s]+?)\b',
+            r'\b(Docker\s+Certified\s+[A-Za-z\s]+?)\b',
+            r'\b(Certified\s+Kubernetes\s+(?:Administrator|Application Developer))\b',
+            r'\b(Meta\s+Frontend\s+Developer\s+Certificate)\b',
+            r'\b(MongoDB\s+for\s+[A-Za-z\s]+?)(?:\s+Developers|\s+Developer|\s*$|[,\.;])',
+            r'\b(MongoDB\s+for\s+[A-Za-z\s]+?\s+Developers)\b',
+            r'\b(AWS\s+Certified\s+(?:Cloud\s+)?Practitioner)\b',
+            r'\b(Oracle\s+Certified\s+[A-Za-z\s]+?)\b',
+            r'\b(Certified\s+in\s+[A-Za-z\s]+?)\s+(?:by\s+[A-Z])',
+            r'\b(Coursera\s+(?:Certificate\s+)?[A-Za-z\s]+?)\s+(?:in\s+[A-Za-z])',
+        ]
+
+        for pat in full_cert_patterns:
+            for m in re.finditer(pat, text, re.IGNORECASE):
+                cert_name = m.group(1).strip()
+                if cert_name not in cert_list:
+                    cert_list.append(cert_name)
+
+        # Also match provider + "Certification" when preceded by specific provider names
+        provider_cert = re.findall(
+            r'\b((?:AWS|Azure|Google|Amazon|Microsoft|Cisco|IBM|Oracle|Docker|Kubernetes|Salesforce|PMP|Scrum Alliance)\s+(?:Certified\s+)?[A-Za-z\s]+)\s*(?:\s+(?:by|for|from|university|university\s+of)\s+[A-Z][a-zA-Z\s]+?(?:\s*[,]|$|\.))',
+            text, re.IGNORECASE
+        )
+        for cert in provider_cert:
+            cert = cert.strip()
+            # Filter out generic nouns that aren't certifications
+            if cert not in cert_list and len(cert) > 3:
+                # Avoid matching "Kubernetes clusters" or similar
+                if not re.search(r'[Cc]lusters|[Aa]rchitect|[Ss]pecialist', cert, re.IGNORECASE):
+                    cert_list.append(cert)
+
+        return cert_list
+
+    def _extract_location(self, text: str) -> str:
+        """Extract candidate location from resume."""
+        # Pattern 1: Pipe-separated contact header like "john.smith@example.com | +91-9876543210 | Bangalore, India"
+        # Check first 5 lines for pipe-separated format with location as last part
+        lines = text.split('\n')
+        for line in lines[:5]:
+            parts = [p.strip() for p in line.split('|')]
+            if len(parts) >= 2:
+                # Check last part for "City, State" or "City, Country" format
+                last_part = parts[-1]
+                city_state = re.match(r'^([A-Za-z\s]+?),\s*([A-Za-z\s]+?)$', last_part)
+                if city_state:
+                    city = city_state.group(1).strip()
+                    state = city_state.group(2).strip()
+                    if len(city) > 2 and len(state) > 2 and city.lower() not in ('phone', 'email', 'link'):
+                        return f"{city}, {state}"
+
+        # Pattern 2: "Location: City, State"
+        loc_match = re.search(
+            r'(?:Location|Locate|Based\s+in|Address)[\s:\-–—|]+([A-Za-z\s,]+?(?:India|Bangalore|Mumbai|Delhi|Chennai|Hyderabad|Pune|Kolkata|Karnataka|Maharashtra|Tamil\s+Nadu|Telangana|Kerala|Goa))?[\s,\-–—|]',
+            text, re.IGNORECASE
+        )
+        if loc_match:
+            loc = loc_match.group(1).strip()
+            if loc and len(loc) > 2 and len(loc) < 50:
+                return loc
+
+        # Pattern 3: City, State format on its own line
+        for line in lines:
+            line = line.strip()
+            city_state = re.match(
+                r'^([A-Z][a-zA-Z\s]+?),\s*([A-Z][a-zA-Z\s]+?)$',
+                line
+            )
+            if city_state:
+                city = city_state.group(1).strip()
+                state = city_state.group(2).strip()
+                if len(city) > 2 and len(state) > 2 and city.lower() not in ('phone', 'email', 'link'):
+                    return f"{city}, {state}"
+
+        # Pattern 4: Standalone city mentions near contact info (first 10 lines)
+        indian_cities = [
+            'Bangalore', 'Bengaluru', 'Mumbai', 'Delhi', 'Chennai', 'Hyderabad',
+            'Pune', 'Kolkata', 'Ahmedabad', 'Jaipur', 'Kochi', 'Trivandrum',
+            'Chandigarh', 'Mohali', 'Noida', 'Gurugram', 'Gurgaon', 'Nashik',
+            'Coimbatore', 'Madurai', 'Kozhikode', 'Thiruvananthapuram'
+        ]
+        for line in lines[:10]:
+            for city in indian_cities:
+                if re.search(r'\b' + re.escape(city) + r'\b', line, re.IGNORECASE):
+                    # Check if this line also has a state/country
+                    state_match = re.search(
+                        r'(?:Bangalore,\s*)?([A-Z][a-zA-Z\s]+?)(?:\s+(?:India|6[0-9]{4}))?',
+                        line
+                    )
+                    if state_match:
+                        loc = state_match.group(1).strip()
+                        if len(loc) > 2:
+                            return loc
+
+        # Pattern 5: Pipe-separated header — last segment might be a bare state (e.g. "Karnataka")
+        for line in lines[:5]:
+            parts = [p.strip() for p in line.split('|')]
+            if len(parts) >= 2:
+                last = parts[-1].strip()
+                if last:
+                    # Check if it's a known Indian state/region
+                    indian_states = ['Karnataka', 'Maharashtra', 'Tamil Nadu', 'Telangana',
+                                     'Kerala', 'Goa', 'Delhi', 'Punjab', 'Rajasthan',
+                                     'Gujarat', 'West Bengal', 'Bihar', 'UP', 'Uttar Pradesh']
+                    for state in indian_states:
+                        if re.match(r'^' + re.escape(state) + r'$', last, re.IGNORECASE):
+                            return state
+                    # Fallback: if it looks like a proper noun phrase (capitalized, no digits)
+                    if re.match(r'^[A-Z][a-zA-Z\s]+$', last) and 3 < len(last) < 50:
+                        if last.lower() not in ('phone', 'email', 'link', 'website'):
+                            return last
+
+        return ''
 
 
 # Singleton instance

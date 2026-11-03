@@ -1,0 +1,40 @@
+{
+  "name": "Priya Sharma",
+  "email": "priya.sharma@gmail.com",
+  "phone": "9876543210",
+  "cgpa": null,
+  "education": [
+    "B.Tech Information Technology"
+  ],
+  "companies": [
+    "Flipkart"
+  ],
+  "skills": [
+    "React.js",
+    "Node.js",
+    "Express",
+    "MongoDB",
+    "Redux",
+    "HTML5",
+    "CSS3",
+    "Git",
+    "Docker",
+    "AWS",
+    "Firebase"
+  ],
+  "experience": [
+    {
+      "title": "Frontend Developer",
+      "company": "Flipkart",
+      "dates": "Jan 2023 - Present"
+    }
+  ],
+  "projects": [
+    "E-commerce Platform",
+    "Portfolio Website"
+  ],
+  "certifications": [
+    "Meta Frontend Developer Certificate"
+  ],
+  "location": "Pune, Maharashtra"
+}

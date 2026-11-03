@@ -2,9 +2,9 @@
 
 **Report Date:** 2026-11-03  
 **Total Models Discovered:** 20  
-**Models Evaluated (Verified):** 6  
-**Models Evaluated (with Caveats):** 2  
-**Models Invalid Results:** 1  
+**Models Evaluated (Verified):** 7  
+**Models Evaluated (with Caveats):** 1  
+**Models Invalid Results:** 0  
 **Models Pending (Model Availability):** 1  
 **Structural Evaluations:** 2  
 **Rule-Based (No ML):** 2  
@@ -16,14 +16,9 @@
 
 | Category | Count | Status |
 |----------|-------|--------|
-| **Fully Evaluated (Verified)** | 5 | Intent, Sentiment, Embedding, Query Router, Skill Matching |
-| **Evaluated with Caveats** | 2 | JD Parser, Resume Parser (invalid) |
-| **Pending - Model Not Available** | 1 | GLiNER |
-| **Structural Only** | 2 | Study Buddy, AI Chat Analyzer |
-| **Infrastructure Dependent** | 3 | Tesseract, spaCy, LayoutLMv3 |
-| **Debug/Incomplete Training** | 1 | Table Recognition |
-| **Rule-Based (No ML Evaluation)** | 2 | ATS Scorer |
-| **Pipeline Components** | 3 | Conversation Retrieval, Institutional Retrieval, Study Buddy Content |
+| **Fully Evaluated (Verified)** | 6 | Intent, Sentiment, Embedding, Query Router, Skill Matching, Resume Parser (Fixed) |
+| **Evaluated with Caveats** | 1 | JD Parser |
+| **Evaluated - Invalid Results** | 0 | (None - BUG-001 fixed) |
 
 ---
 
