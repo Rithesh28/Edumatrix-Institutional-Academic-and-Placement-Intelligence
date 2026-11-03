@@ -1,0 +1,145 @@
+# Resume Parser Evaluation Report (Fixed)
+
+**Date:** 2026-11-04 00:33:02
+**Fix Applied:** BUG-001 - Removed vacuous truth, using real DOCX files
+
+## Overall Metrics
+
+- **Total Resumes:** 5
+- **Successful Parses:** 5
+- **Failed Parses:** 0
+- **Parser Unavailable:** 0
+- **Total Fields Evaluated:** 55
+- **Correct Fields:** 54
+- **Field Accuracy:** 98.18%
+- **Average Overall Score:** 92.01%
+- **Pass Rate (>=70%):** 100.00%
+
+## Per-Field Accuracy
+
+| Field | Correct | Total | Accuracy |
+|-------|---------|-------|----------|
+| name | 5 | 5 | 100.00% |
+| email | 5 | 5 | 100.00% |
+| phone | 5 | 5 | 100.00% |
+| cgpa | 5 | 5 | 100.00% |
+| education | 5 | 5 | 100.00% |
+| companies | 5 | 5 | 100.00% |
+| experience | 5 | 5 | 100.00% |
+| projects | 5 | 5 | 100.00% |
+| certifications | 5 | 5 | 100.00% |
+| location | 5 | 5 | 100.00% |
+| skills | 4 | 5 | 80.00% |
+
+## Detailed Results
+
+### resume_001_john_smith.docx
+
+- Status: SUCCESS
+- Success: True
+- Fields: 11/11
+- Pass Rate: 100.00%
+- Overall Score: 0.91
+
+| Field | Correct | Score | Parsed | Expected |
+|-------|---------|-------|--------|----------|
+| name | [PASS] | 1.00 | JOHN SMITH | John Smith |
+| email | [PASS] | 1.00 | john.smith@example.com | john.smith@example.com |
+| phone | [PASS] | 1.00 | +91-9876543210 | +91-9876543210 |
+| cgpa | [PASS] | 0.95 | 8.5 | 8.5 |
+| skills | [PASS] | 0.60 | ['Python', 'Java', 'SQL', 'Node', 'Machine Learnin | ['Python', 'Java', 'C++', 'SQL', 'TensorFlow', 'Pa |
+| education | [PASS] | 1.00 | ['B.Tech Computer Science'] | ['B.Tech Computer Science'] |
+| companies | [PASS] | 1.00 | ['Google'] | ['Google'] |
+| experience | [PASS] | 1.00 | [{'title': 'Software Intern', 'company': 'Google', | [{'title': 'Software Intern', 'company': 'Google', |
+| projects | [PASS] | 0.50 | ['Chat Application'] | ['Recommendation System', 'Chat Application'] |
+| certifications | [PASS] | 1.00 | ['AWS Cloud Practitioner'] | ['AWS Cloud Practitioner'] |
+| location | [PASS] | 1.00 | Bangalore, India | Bangalore, India |
+
+### resume_002_priya_sharma.docx
+
+- Status: SUCCESS
+- Success: True
+- Fields: 10/11
+- Pass Rate: 90.91%
+- Overall Score: 0.90
+
+| Field | Correct | Score | Parsed | Expected |
+|-------|---------|-------|--------|----------|
+| name | [PASS] | 1.00 | PRIYA SHARMA | Priya Sharma |
+| email | [PASS] | 1.00 | priya.sharma@gmail.com | priya.sharma@gmail.com |
+| phone | [PASS] | 1.00 | 9876543210 | 9876543210 |
+| cgpa | [PASS] | 1.00 | None | None |
+| skills | [FAIL] | 0.45 | ['React', 'Node', 'Express', 'GIT', 'Docker', 'AWS | ['React.js', 'Node.js', 'Express', 'MongoDB', 'Red |
+| education | [PASS] | 1.00 | ['B.Tech Information Technology'] | ['B.Tech Information Technology'] |
+| companies | [PASS] | 1.00 | ['Flipkart'] | ['Flipkart'] |
+| experience | [PASS] | 1.00 | [{'title': 'Frontend Developer', 'company': 'Flipk | [{'title': 'Frontend Developer', 'company': 'Flipk |
+| projects | [PASS] | 0.50 | ['Portfolio Website'] | ['E-commerce Platform', 'Portfolio Website'] |
+| certifications | [PASS] | 1.00 | ['Meta Frontend Developer Certificate'] | ['Meta Frontend Developer Certificate'] |
+| location | [PASS] | 1.00 | Pune, Maharashtra | Pune, Maharashtra |
+
+### resume_003_rahul_verma.docx
+
+- Status: SUCCESS
+- Success: True
+- Fields: 11/11
+- Pass Rate: 100.00%
+- Overall Score: 0.91
+
+| Field | Correct | Score | Parsed | Expected |
+|-------|---------|-------|--------|----------|
+| name | [PASS] | 1.00 | RAHUL VERMA | Rahul Verma |
+| email | [PASS] | 1.00 | rahul.v@college.edu.in | rahul.v@college.edu.in |
+| phone | [PASS] | 1.00 | +91-8765432109 | +91-8765432109 |
+| cgpa | [PASS] | 0.95 | 9.1 | 9.1 |
+| skills | [PASS] | 0.56 | ['Python', 'Java', 'Javascript', 'AI', 'GIT', 'Git | ['C', 'C++', 'Python', 'Java', 'JavaScript', 'Data |
+| education | [PASS] | 1.00 | ['B.Tech Computer Science and Engineering'] | ['B.Tech Computer Science and Engineering'] |
+| companies | [PASS] | 1.00 | ['Amazon'] | ['Amazon'] |
+| experience | [PASS] | 1.00 | [{'title': 'SDE-1', 'company': 'Amazon', 'dates':  | [{'title': 'SDE-1', 'company': 'Amazon', 'dates':  |
+| projects | [PASS] | 0.50 | ['Pathfinding Visualizer'] | ['Online Judge Platform', 'Pathfinding Visualizer' |
+| certifications | [PASS] | 1.00 | None | None |
+| location | [PASS] | 1.00 | Karnataka | Karnataka |
+
+### resume_004_ananya_patel.docx
+
+- Status: SUCCESS
+- Success: True
+- Fields: 11/11
+- Pass Rate: 100.00%
+- Overall Score: 0.95
+
+| Field | Correct | Score | Parsed | Expected |
+|-------|---------|-------|--------|----------|
+| name | [PASS] | 1.00 | ANANYA PATEL | Ananya Patel |
+| email | [PASS] | 1.00 | ananya.p@email.com | ananya.p@email.com |
+| phone | [PASS] | 1.00 | 9876543210 | 9876543210 |
+| cgpa | [PASS] | 0.95 | 8.8 | 8.8 |
+| skills | [PASS] | 0.55 | ['Python', 'Docker', 'Kubernetes', 'AWS', 'Bash',  | ['AWS', 'Docker', 'Kubernetes', 'Jenkins', 'Terraf |
+| education | [PASS] | 1.00 | ['B.Tech Computer Science'] | ['B.Tech Computer Science'] |
+| companies | [PASS] | 1.00 | ['Microsoft'] | ['Microsoft'] |
+| experience | [PASS] | 1.00 | [{'title': 'DevOps Intern', 'company': 'Microsoft' | [{'title': 'DevOps Intern', 'company': 'Microsoft' |
+| projects | [PASS] | 1.00 | ['Serverless URL Shortener', 'K8s Dashboard'] | ['Serverless URL Shortener', 'K8s Dashboard'] |
+| certifications | [PASS] | 1.00 | ['AWS Certified Cloud Practitioner', 'Docker Certi | ['AWS Certified Cloud Practitioner', 'Docker Certi |
+| location | [PASS] | 1.00 | Vellore, Tamil Nadu | Vellore, Tamil Nadu |
+
+### resume_005_arjun_reddy.docx
+
+- Status: SUCCESS
+- Success: True
+- Fields: 11/11
+- Pass Rate: 100.00%
+- Overall Score: 0.92
+
+| Field | Correct | Score | Parsed | Expected |
+|-------|---------|-------|--------|----------|
+| name | [PASS] | 1.00 | ARJUN REDDY | Arjun Reddy |
+| email | [PASS] | 1.00 | arjun.r@institution.ac.in | arjun.r@institution.ac.in |
+| phone | [PASS] | 1.00 | None | None |
+| cgpa | [PASS] | 1.00 | None | None |
+| skills | [PASS] | 0.60 | ['Python', 'GIT', 'Docker', 'AWS', 'Mongodb', 'Pos | ['Ruby on Rails', 'PostgreSQL', 'Redis', 'GraphQL' |
+| education | [PASS] | 1.00 | ['B.Tech Computer Science'] | ['B.Tech Computer Science'] |
+| companies | [PASS] | 1.00 | ['Zomato'] | ['Zomato'] |
+| experience | [PASS] | 1.00 | [{'title': 'Backend Engineer', 'company': 'Zomato' | [{'title': 'Backend Engineer', 'company': 'Zomato' |
+| projects | [PASS] | 1.00 | ['Restaurant Management System'] | ['Restaurant Management System'] |
+| certifications | [PASS] | 0.50 | ['MongoDB for Python', 'MongoDB for Python Develop | ['MongoDB for Python Developers'] |
+| location | [PASS] | 1.00 | Hyderabad, Telangana | Hyderabad, Telangana |
+

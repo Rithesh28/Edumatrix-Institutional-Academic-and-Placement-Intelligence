@@ -562,7 +562,7 @@ class JdParserService:
         """Extract job designation / role title."""
         # 1. Label-based regex patterns — improved to handle "ROLE: Title" format
         # Stop words that commonly follow a title
-        title_stop = r'(?:with|to|in|having|who|and|required|preferred|experience|skills|eligibility|location|salary|ctc|package|compensation|bond|deadline|apply|process|selection|opening|hiring|seeking|looking|about|company|role|designation|position|profile|note|instructions|details)\b'
+        title_stop = r'(?:with|to|in|having|who|and|required|preferred|experience|skills|eligibility|location|salary|ctc|package|compensation|bond|deadline|apply|process|selection|opening|hiring|seeking|looking|about|company|role|designation|position|profile|note|instructions|details|department|technology)\b'
         patterns = [
             # "ROLE: Title" or "Role: Title" format — capture only title up to stop words
             r'\bROLE\s*:\s*([A-Za-z][A-Za-z\s]+?)(?:\s+(?:' + title_stop + r')|\s*[,\.;:\n]|$)',
@@ -604,9 +604,12 @@ class JdParserService:
                 if len(words) > 5:
                     candidate = ' '.join(words[:5])
                 if 3 <= len(candidate) <= 60 and not re.search(r'^(?:' + non_title_words + r')\b', candidate, re.IGNORECASE):
-                    if not re.search(r'company|overview|eligibility|ctc|notice|salary|drive|campus|opening|criteria|requirement', candidate, re.IGNORECASE):
-                        evidence["title"] = match.group(0).strip()
-                        return candidate
+                    # Skip titles that are clearly not job titles (noise phrases)
+                    noise_title_patterns = r'(?:varies\s+by|throughout|no\s+backlogs|selection\s+process|common\s+criteria)'
+                    if not re.search(noise_title_patterns, candidate, re.IGNORECASE):
+                        if not re.search(r'company|overview|eligibility|ctc|notice|salary|drive|campus|opening|criteria|requirement', candidate, re.IGNORECASE):
+                            evidence["title"] = match.group(0).strip()
+                            return candidate
 
         # 2. Heuristic search in the first 8 non-empty lines for typical engineering & operational titles
         role_keywords = (
@@ -1574,15 +1577,19 @@ class JdParserService:
     ) -> Optional[str]:
         """Extract service agreement or bond terms."""
         bond_patterns = [
-            r'((?:service\s*agreement|bond)(?:[\s:\-–—|]+|\s+(?:of|for)\s+)[0-9]+\s*(?:years?|months?)[^\n\r\.;]*)',
+            # Match bond with specific duration, stopping before date-like patterns
+            r'((?:service\s*agreement|bond)(?:[\s:\-–—|]+|\s+(?:of|for)\s+)[0-9]+\s*(?:years?|months?))',
             r'([0-9]+\s*(?:years?|months?)\s*(?:service\s*agreement|bond))',
-            r'(?:execute|sign)\s+(?:a\s+)?service\s+agreement\s+(?:of|for)\s+([0-9]+\s*(?:years?|months?)(?:\s*\([^\)]+\))?[^\n\r\.;]*)',
+            r'(?:execute|sign)\s+(?:a\s+)?service\s+agreement\s+(?:of|for)\s+([0-9]+\s*(?:years?|months?)(?:\s*\([^\)]+\))?[^,\.;]*)',
             r'(?:bond\s*period|service\s*commitment)[\s:\-–—|]+([^\n\r\.;]+)'
         ]
         for bp in bond_patterns:
             bm = re.search(bp, text, re.IGNORECASE)
             if bm:
                 bond_str = bm.group(0).strip()
+                # Clean trailing noise like dates, deadlines
+                bond_str = re.sub(r'\s+(?:last\s*date|deadline|apply\s*by|date)\s*[:\s]*[^\n\r]*$', '', bond_str, flags=re.IGNORECASE).strip()
+                bond_str = re.sub(r'[,\.]+$', '', bond_str).strip()
                 evidence["bond_details"] = bond_str
                 review_flags.append(f"Service agreement / bond requirement detected: '{bond_str}'.")
                 return bond_str
@@ -1614,6 +1621,9 @@ class JdParserService:
             )
             if sp_match:
                 section = sp_match.group(1).strip()
+                # Skip if the process is described as "varies" (not a fixed process)
+                if re.search(r'\bvaries\s+by\b', section, re.IGNORECASE):
+                    return []
                 # Split by common delimiters
                 split_rounds = [s.strip(" -•*") for s in re.split(r'[,;\n]', section) if len(s.strip()) > 3]
                 rounds.extend(split_rounds[:5])
@@ -1626,11 +1636,14 @@ class JdParserService:
             )
             if process_match:
                 proc_text = process_match.group(1).strip()
+                # Skip if the process is described as "varies" (not a fixed process)
+                if re.search(r'\bvaries\s+by\b', proc_text, re.IGNORECASE):
+                    return []
                 # Split multi-word process descriptions
                 parts = re.split(r'\s+(?=[A-Z][a-zA-Z])', proc_text)
                 for p in parts:
                     p = p.strip(" -•*,")
-                    if 4 <= len(p) <= 60 and not re.search(r'(?:package|ctc|salary|location|apply|deadline|bond|eligibility)', p, re.IGNORECASE):
+                    if 4 <= len(p) <= 60 and not re.search(r'(?:package|ctc|salary|location|apply|deadline|bond|eligibility|varies)', p, re.IGNORECASE):
                         rounds.append(p)
 
         if rounds:
@@ -1765,9 +1778,50 @@ class JdParserService:
         if noise_score >= 2 and not has_skills_keyword:
             return []
 
+        # Match skills in priority order - longer/more specific patterns first
+        # This prevents "C" from matching inside "C++" and "Rest" from matching inside "REST APIs"
+        priority_skills = [
+            "c++", "c#", "rest api", "restful api", "react native", "node.js",
+            "machine learning", "deep learning", "data science", "computer networks",
+            "object oriented programming"
+        ]
+        seen_skills = set()
+
+        # First pass: extract priority skills
+        for skill in priority_skills:
+            # Use flexible pattern to match variations like "rest api" or "rest apis"
+            escaped = re.escape(skill)
+            pattern = rf'\b{escaped}s?\b'
+            context_pattern = rf'(?:(?:knowledge|proficient|familiar|experience|skills?|required|optional|bonus|desired|must|nice|good)\s+)?{pattern}'
+            if re.search(context_pattern, seg_lower, re.IGNORECASE):
+                surrounding = re.findall(rf'.{{0,30}}{re.escape(skill)}{{0,30}}', segment, re.IGNORECASE)
+                is_noise = any(
+                    re.search(r'[0-9]{1,3}%?', ' '.join(surrounding[i-surrounding.index(skill)-3:surrounding.index(skill)+4]))
+                    for i, s in enumerate(surrounding)
+                    if s.lower() == skill.lower()
+                )
+                if not is_noise and skill not in seen_skills:
+                    found.append(skill)
+                    seen_skills.add(skill)
+
+        # Second pass: extract remaining skills
         for skill in self.KNOWN_SKILL_KEYWORDS:
+            if skill in seen_skills:
+                continue
+            # Skip if this skill is already covered by a priority skill (e.g., skip "rest" if "rest api" was found)
+            already_covered = False
+            for found_skill in seen_skills:
+                if skill in found_skill:
+                    already_covered = True
+                    break
+            if already_covered:
+                continue
+            # Skip "c" if "c++" or "c#" was already found
+            if skill == 'c' and ('c++' in seen_skills or 'c#' in seen_skills):
+                continue
             # Word-boundary regex for exact skill match
-            pattern = r'\b' + re.escape(skill) + r'\b'
+            # Use negative lookahead to prevent matching "C" inside "C++"
+            pattern = r'\b' + re.escape(skill) + r'(?![A-Za-z0-9+#])'
             # Only match if the skill appears in a skill-relevant context
             # (near terms like "knowledge", "proficient", "experience", "skills", "required")
             # but NOT near academic criteria terms
@@ -1783,6 +1837,7 @@ class JdParserService:
                 )
                 if not is_noise:
                     found.append(skill)
+                    seen_skills.add(skill)
 
         return list(dict.fromkeys(found))
 
