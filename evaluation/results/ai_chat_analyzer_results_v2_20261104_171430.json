@@ -1,0 +1,214 @@
+{
+  "total_cases": 10,
+  "evaluated": 10,
+  "intent_accuracy": 1.0,
+  "intent_macro_f1": 1.0,
+  "intent_weighted_f1": 1.0,
+  "intent_avg_confidence": 0.42400000000000004,
+  "sentiment_accuracy": 0.9,
+  "sentiment_macro_f1": 0.803921568627451,
+  "sentiment_weighted_f1": 0.9137254901960784,
+  "sentiment_avg_confidence": 0.6315000000000001,
+  "intent_classification_report": "                precision    recall  f1-score   support\n\n     ask_doubt     1.0000    1.0000    1.0000         1\n ask_exam_info     1.0000    1.0000    1.0000         2\n career_advice     1.0000    1.0000    1.0000         4\ncheck_deadline     1.0000    1.0000    1.0000         1\n         other     1.0000    1.0000    1.0000         2\n\n      accuracy                         1.0000        10\n     macro avg     1.0000    1.0000    1.0000        10\n  weighted avg     1.0000    1.0000    1.0000        10\n",
+  "sentiment_classification_report": "              precision    recall  f1-score   support\n\n    negative     0.5000    1.0000    0.6667         1\n     neutral     1.0000    0.8889    0.9412         9\n\n    accuracy                         0.9000        10\n   macro avg     0.7500    0.9444    0.8039        10\nweighted avg     0.9500    0.9000    0.9137        10\n",
+  "intent_confusion_matrix": [
+    [
+      1,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      2,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      4,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      2
+    ]
+  ],
+  "sentiment_confusion_matrix": [
+    [
+      1,
+      0
+    ],
+    [
+      1,
+      8
+    ]
+  ],
+  "intent_labels": [
+    "ask_doubt",
+    "ask_exam_info",
+    "career_advice",
+    "check_deadline",
+    "other"
+  ],
+  "sentiment_labels": [
+    "negative",
+    "neutral"
+  ],
+  "per_case_results": [
+    {
+      "test_case_id": "TC_AI_001",
+      "query": "When is the DSP exam?",
+      "status": "EVALUATED",
+      "intent_prediction": "ask_exam_info",
+      "intent_confidence": 0.41,
+      "intent_expected": "ask_exam_info",
+      "intent_correct": true,
+      "sentiment_prediction": "neutral",
+      "sentiment_confidence": 0.629,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": true,
+      "category": "deadline_query"
+    },
+    {
+      "test_case_id": "TC_AI_002",
+      "query": "What is the last date for project submission?",
+      "status": "EVALUATED",
+      "intent_prediction": "check_deadline",
+      "intent_confidence": 0.7,
+      "intent_expected": "check_deadline",
+      "intent_correct": true,
+      "sentiment_prediction": "neutral",
+      "sentiment_confidence": 0.694,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": true,
+      "category": "deadline_query"
+    },
+    {
+      "test_case_id": "TC_AI_003",
+      "query": "Which companies are visiting for placement?",
+      "status": "EVALUATED",
+      "intent_prediction": "career_advice",
+      "intent_confidence": 0.52,
+      "intent_expected": "career_advice",
+      "intent_correct": true,
+      "sentiment_prediction": "neutral",
+      "sentiment_confidence": 0.495,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": true,
+      "category": "placement_info"
+    },
+    {
+      "test_case_id": "TC_AI_004",
+      "query": "What are the eligibility criteria for service companies?",
+      "status": "EVALUATED",
+      "intent_prediction": "career_advice",
+      "intent_confidence": 0.38,
+      "intent_expected": "career_advice",
+      "intent_correct": true,
+      "sentiment_prediction": "neutral",
+      "sentiment_confidence": 0.617,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": true,
+      "category": "eligibility_query"
+    },
+    {
+      "test_case_id": "TC_AI_005",
+      "query": "How do I prepare for interviews?",
+      "status": "EVALUATED",
+      "intent_prediction": "career_advice",
+      "intent_confidence": 0.51,
+      "intent_expected": "career_advice",
+      "intent_correct": true,
+      "sentiment_prediction": "neutral",
+      "sentiment_confidence": 0.528,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": true,
+      "category": "advice_query"
+    },
+    {
+      "test_case_id": "TC_AI_006",
+      "query": "What is the weather forecast for tomorrow?",
+      "status": "EVALUATED",
+      "intent_prediction": "other",
+      "intent_confidence": 0.34,
+      "intent_expected": "other",
+      "intent_correct": true,
+      "sentiment_prediction": "neutral",
+      "sentiment_confidence": 0.559,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": true,
+      "category": "off_topic"
+    },
+    {
+      "test_case_id": "TC_AI_007",
+      "query": "Tell me a joke",
+      "status": "EVALUATED",
+      "intent_prediction": "other",
+      "intent_confidence": 0.48,
+      "intent_expected": "other",
+      "intent_correct": true,
+      "sentiment_prediction": "negative",
+      "sentiment_confidence": 0.883,
+      "sentiment_expected": "negative",
+      "sentiment_correct": true,
+      "category": "off_topic"
+    },
+    {
+      "test_case_id": "TC_AI_008",
+      "query": "What is the CIE schedule for this semester?",
+      "status": "EVALUATED",
+      "intent_prediction": "ask_exam_info",
+      "intent_confidence": 0.35,
+      "intent_expected": "ask_exam_info",
+      "intent_correct": true,
+      "sentiment_prediction": "neutral",
+      "sentiment_confidence": 0.632,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": true,
+      "category": "schedule_query"
+    },
+    {
+      "test_case_id": "TC_AI_009",
+      "query": "I need help with my assignment but I am not sure which one",
+      "status": "EVALUATED",
+      "intent_prediction": "ask_doubt",
+      "intent_confidence": 0.22,
+      "intent_expected": "ask_doubt",
+      "intent_correct": true,
+      "sentiment_prediction": "negative",
+      "sentiment_confidence": 0.614,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": false,
+      "category": "ambiguous_query"
+    },
+    {
+      "test_case_id": "TC_AI_010",
+      "query": "What is the placement package for TCS?",
+      "status": "EVALUATED",
+      "intent_prediction": "career_advice",
+      "intent_confidence": 0.33,
+      "intent_expected": "career_advice",
+      "intent_correct": true,
+      "sentiment_prediction": "neutral",
+      "sentiment_confidence": 0.664,
+      "sentiment_expected": "neutral",
+      "sentiment_correct": true,
+      "category": "placement_query"
+    }
+  ]
+}

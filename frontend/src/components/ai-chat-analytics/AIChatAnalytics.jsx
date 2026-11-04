@@ -320,7 +320,58 @@ const AIChatAnalytics = () => {
               )}
             </div>
           </div>
-        </div>
+        )}
+
+        {/* Phase 8 Sentiment Improvement Section */}
+        {metrics?.phase8_sentiment && (
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 rounded-xl border border-emerald-200 dark:border-emerald-800 p-6">
+            <h3 className="font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
+              <TrendingUp className="w-5 h-5 text-emerald-600" />
+              Phase 8 Sentiment Improvement
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-emerald-200 dark:border-emerald-800">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Phase 7 Accuracy</p>
+                <p className="text-2xl font-bold text-gray-600 dark:text-gray-300">
+                  {(metrics.phase8_sentiment.phase7_accuracy * 100).toFixed(1)}%
+                </p>
+              </div>
+              <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-emerald-200 dark:border-emerald-800">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Phase 8 Accuracy</p>
+                <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                  {(metrics.phase8_sentiment.accuracy * 100).toFixed(1)}%
+                </p>
+              </div>
+              <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-emerald-200 dark:border-emerald-800">
+                <p className="text-xs text-gray-500 dark:text-gray-400">Improvement</p>
+                <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                  +{(metrics.phase8_sentiment.improvement * 100).toFixed(1)}%
+                </p>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-emerald-200 dark:border-emerald-800">
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Model: SBERT + LogisticRegression (Class-weighted)
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Results: {metrics.phase8_sentiment.correct}/{metrics.phase8_sentiment.total_cases} correct
+              </p>
+              {metrics.phase8_sentiment.errors?.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                  <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-2">
+                    Errors ({metrics.phase8_sentiment.errors.length}):
+                  </p>
+                  {metrics.phase8_sentiment.errors.map((err, idx) => (
+                    <div key={idx} className="text-xs text-red-600 dark:text-red-400 mb-1">
+                      • {err.test_case_id}: "{err.query}" → predicted {err.predicted} (expected {err.expected})
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
       </div>
 
       {/* Data Source Info */}

@@ -1,0 +1,51 @@
+{
+  "labels": [
+    "negative",
+    "neutral",
+    "positive"
+  ],
+  "classification_report": "              precision    recall  f1-score   support\n\n    negative     0.6250    1.0000    0.7692         5\n     neutral     1.0000    0.7917    0.8837        48\n    positive     0.2222    1.0000    0.3636         2\n\n    accuracy                         0.8182        55\n   macro avg     0.6157    0.9306    0.6722        55\nweighted avg     0.9376    0.8182    0.8544        55\n",
+  "confusion_matrix": [
+    [
+      5,
+      0,
+      0
+    ],
+    [
+      3,
+      38,
+      7
+    ],
+    [
+      0,
+      0,
+      2
+    ]
+  ],
+  "precision_per_class": {
+    "negative": 0.625,
+    "neutral": 1.0,
+    "positive": 0.2222
+  },
+  "recall_per_class": {
+    "negative": 1.0,
+    "neutral": 0.7917,
+    "positive": 1.0
+  },
+  "f1_per_class": {
+    "negative": 0.7692,
+    "neutral": 0.8837,
+    "positive": 0.3636
+  },
+  "support_per_class": {
+    "negative": 5,
+    "neutral": 48,
+    "positive": 2
+  },
+  "macro_precision": 0.6157,
+  "macro_recall": 0.9306,
+  "macro_f1": 0.6722,
+  "weighted_f1": 0.8544,
+  "accuracy": 0.8182,
+  "total_cases": 55
+}

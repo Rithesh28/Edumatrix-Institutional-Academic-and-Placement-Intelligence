@@ -24,11 +24,27 @@ router = APIRouter(prefix="/ai/chat-analytics", tags=["AI Chat Analytics"])
 EVAL_RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'evaluation', 'results')
 
 
+def _get_phase8_sentiment_metrics() -> Dict[str, Any]:
+    """Load Phase 8 sentiment evaluation results."""
+    pattern = os.path.join(EVAL_RESULTS_DIR, 'sentiment_phase8_results_*.json')
+    files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+
+    if not files:
+        return None
+
+    try:
+        with open(files[0], 'r') as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
 def _get_latest_eval_metrics() -> Dict[str, Any]:
     """Load latest AI chat analyzer evaluation metrics from JSON files.
 
     Supports both old format (metrics_*.json) and new v2 format
     (metrics_v2_*.json with intent/sentiment accuracy fields).
+    Also includes Phase 8 sentiment improvement data.
     """
     # Try v2 format first (more detailed metrics)
     pattern_v2 = os.path.join(EVAL_RESULTS_DIR, 'ai_chat_analyzer_metrics_v2_*.json')
@@ -43,6 +59,20 @@ def _get_latest_eval_metrics() -> Dict[str, Any]:
             metrics["last_evaluated"] = os.path.getmtime(files_v2[0])
             metrics["total_cases"] = metrics.get("total_cases", 0)
             metrics["evaluated"] = metrics.get("evaluated", 0)
+
+            # Check for Phase 8 sentiment improvements
+            phase8_metrics = _get_phase8_sentiment_metrics()
+            if phase8_metrics:
+                metrics["phase8_sentiment"] = {
+                    "accuracy": phase8_metrics.get("accuracy", 0),
+                    "phase7_accuracy": phase8_metrics.get("comparison", {}).get("phase7_accuracy", 0),
+                    "improvement": phase8_metrics.get("comparison", {}).get("improvement", 0),
+                    "total_cases": phase8_metrics.get("total_cases", 0),
+                    "correct": phase8_metrics.get("correct", 0),
+                    "confusion_matrix": phase8_metrics.get("confusion_matrix", []),
+                    "errors": phase8_metrics.get("errors", [])
+                }
+
             return metrics
         except Exception:
             pass
