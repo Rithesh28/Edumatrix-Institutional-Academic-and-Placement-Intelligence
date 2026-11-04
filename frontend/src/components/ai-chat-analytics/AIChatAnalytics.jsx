@@ -258,7 +258,7 @@ const AIChatAnalytics = () => {
           )}
         </div>
 
-        {/* Classification Confidence */}
+        {/* Classification Confidence & Evaluation Metrics */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-6">
           <h3 className="font-semibold text-gray-900 dark:text-white mb-4">Classification Quality</h3>
           <div className="space-y-4">
@@ -276,18 +276,47 @@ const AIChatAnalytics = () => {
               max={metrics?.sentiment_confidence?.max || 1}
               color="purple"
             />
-            <div className="pt-4 border-t border-gray-200 dark:border-gray-800">
+            <div className="pt-4 border-t border-gray-200 dark:border-gray-800 space-y-3">
               <div className="flex justify-between text-sm">
                 <span className="text-gray-600 dark:text-gray-400">Evaluation Status</span>
                 <span className={`font-medium ${(metrics?.evaluated || 0) > 0 ? 'text-green-600' : 'text-yellow-600'}`}>
                   {(metrics?.evaluated || 0) > 0 ? 'Evaluated' : 'Pending'}
                 </span>
               </div>
-              {metrics?.avg_grounding !== undefined && (
-                <div className="flex justify-between text-sm mt-2">
-                  <span className="text-gray-600 dark:text-gray-400">Avg Grounding Score</span>
-                  <span className="font-medium">{(metrics?.avg_grounding || 0).toFixed(3)}</span>
+              {/* Evaluation Metrics from Phase 6 */}
+              {metrics?.intent_accuracy !== undefined && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-green-50 dark:bg-green-950/30 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Intent Accuracy</p>
+                    <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                      {(metrics.intent_accuracy * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                  <div className="bg-blue-50 dark:bg-blue-950/30 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Sentiment Accuracy</p>
+                    <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                      {(metrics.sentiment_accuracy * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                  <div className="bg-purple-50 dark:bg-purple-950/30 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Intent Macro F1</p>
+                    <p className="text-lg font-bold text-purple-600 dark:text-purple-400">
+                      {(metrics.intent_macro_f1 * 100).toFixed(1)}%
+                    </p>
+                  </div>
+                  <div className="bg-teal-50 dark:bg-teal-950/30 rounded-lg p-3">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Sentiment Macro F1</p>
+                    <p className="text-lg font-bold text-teal-600 dark:text-teal-400">
+                      {(metrics.sentiment_macro_f1 * 100).toFixed(1)}%
+                    </p>
+                  </div>
                 </div>
+              )}
+              {metrics?.evaluated > 0 && (
+                <p className="text-xs text-gray-400 dark:text-gray-500">
+                  Based on {metrics.evaluated} ground-truth verified test cases •
+                  Evaluated: {new Date(metrics.last_evaluated * 1000).toLocaleString()}
+                </p>
               )}
             </div>
           </div>

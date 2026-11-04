@@ -1,0 +1,11 @@
+test_case_id,model_module,input_query,expected_intent,expected_sentiment,expected_sentiment_label,category,notes
+TC_AI_001,ai_chat_analyzer,"When is the DSP exam?","ask_exam_info","neutral","neutral",deadline_query,Specific exam date inquiry
+TC_AI_002,ai_chat_analyzer,"What is the last date for project submission?","check_deadline","neutral","neutral",deadline_query,Submission deadline
+TC_AI_003,ai_chat_analyzer,"Which companies are visiting for placement?","career_advice","neutral","neutral",placement_info,Placement data query
+TC_AI_004,ai_chat_analyzer,"What are the eligibility criteria for service companies?","career_advice","neutral","neutral",eligibility_query,General criteria
+TC_AI_005,ai_chat_analyzer,"How do I prepare for interviews?","career_advice","neutral","neutral",advice_query,Interview preparation
+TC_AI_006,ai_chat_analyzer,"What is the weather forecast for tomorrow?","other","neutral","neutral",off_topic,Non-academic query
+TC_AI_007,ai_chat_analyzer,"Tell me a joke","","negative","negative",off_topic,Joke request - negative sentiment expected (sarcastic/unexpected)
+TC_AI_008,ai_chat_analyzer,"What is the CIE schedule for this semester?","ask_exam_info","neutral","neutral",schedule_query,Multiple exam dates
+TC_AI_009,ai_chat_analyzer,"I need help with my assignment but I am not sure which one","ask_doubt","neutral","neutral",ambiguous_query,User did not specify subject
+TC_AI_010,ai_chat_analyzer,"What is the placement package for TCS?","career_advice","neutral","neutral",placement_query,Specific company package

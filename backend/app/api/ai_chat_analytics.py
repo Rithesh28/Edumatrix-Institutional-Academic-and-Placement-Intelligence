@@ -25,11 +25,33 @@ EVAL_RESULTS_DIR = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'ev
 
 
 def _get_latest_eval_metrics() -> Dict[str, Any]:
-    """Load latest AI chat analyzer evaluation metrics from JSON files."""
-    pattern = os.path.join(EVAL_RESULTS_DIR, 'ai_chat_analyzer_metrics_*.json')
-    files = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+    """Load latest AI chat analyzer evaluation metrics from JSON files.
 
-    if not files:
+    Supports both old format (metrics_*.json) and new v2 format
+    (metrics_v2_*.json with intent/sentiment accuracy fields).
+    """
+    # Try v2 format first (more detailed metrics)
+    pattern_v2 = os.path.join(EVAL_RESULTS_DIR, 'ai_chat_analyzer_metrics_v2_*.json')
+    files_v2 = sorted(glob.glob(pattern_v2), key=os.path.getmtime, reverse=True)
+
+    if files_v2:
+        try:
+            with open(files_v2[0], 'r') as f:
+                metrics = json.load(f)
+            # Add metadata
+            metrics["data_source"] = "evaluation_v2"
+            metrics["last_evaluated"] = os.path.getmtime(files_v2[0])
+            metrics["total_cases"] = metrics.get("total_cases", 0)
+            metrics["evaluated"] = metrics.get("evaluated", 0)
+            return metrics
+        except Exception:
+            pass
+
+    # Fallback to old format
+    pattern_v1 = os.path.join(EVAL_RESULTS_DIR, 'ai_chat_analyzer_metrics_*.json')
+    files_v1 = sorted(glob.glob(pattern_v1), key=os.path.getmtime, reverse=True)
+
+    if not files_v1:
         return {
             "total_cases": 0,
             "pending_model_eval": 0,
@@ -37,15 +59,17 @@ def _get_latest_eval_metrics() -> Dict[str, Any]:
             "avg_grounding": 0,
             "hallucination_rate": 0.0,
             "ambiguity_detection_rate": 0.0,
-            "data_source": "evaluation",
+            "intent_accuracy": 0.0,
+            "sentiment_accuracy": 0.0,
+            "data_source": "none",
             "last_evaluated": None
         }
 
     try:
-        with open(files[0], 'r') as f:
+        with open(files_v1[0], 'r') as f:
             metrics = json.load(f)
         metrics["data_source"] = "evaluation"
-        metrics["last_evaluated"] = os.path.getmtime(files[0])
+        metrics["last_evaluated"] = os.path.getmtime(files_v1[0])
         return metrics
     except Exception:
         return {
@@ -55,6 +79,8 @@ def _get_latest_eval_metrics() -> Dict[str, Any]:
             "avg_grounding": 0,
             "hallucination_rate": 0.0,
             "ambiguity_detection_rate": 0.0,
+            "intent_accuracy": 0.0,
+            "sentiment_accuracy": 0.0,
             "data_source": "none",
             "last_evaluated": None
         }
