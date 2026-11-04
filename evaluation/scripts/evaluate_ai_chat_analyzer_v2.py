@@ -30,7 +30,7 @@ except ImportError as e:
 
 
 # ============================================================
-# Ground-truth labels (manually verified from test cases)
+# Ground-truth labels (manually verified from extended test cases)
 # ============================================================
 GROUND_TRUTH = {
     'TC_AI_001': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
@@ -43,6 +43,51 @@ GROUND_TRUTH = {
     'TC_AI_008': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
     'TC_AI_009': {'intent': 'ask_doubt', 'sentiment': 'neutral'},
     'TC_AI_010': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_011': {'intent': 'request_notes', 'sentiment': 'neutral'},
+    'TC_AI_012': {'intent': 'ask_doubt', 'sentiment': 'neutral'},
+    'TC_AI_013': {'intent': 'greet', 'sentiment': 'neutral'},
+    'TC_AI_014': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_015': {'intent': 'check_deadline', 'sentiment': 'neutral'},
+    'TC_AI_016': {'intent': 'check_deadline', 'sentiment': 'neutral'},
+    'TC_AI_017': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_018': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_019': {'intent': 'feedback', 'sentiment': 'positive'},
+    'TC_AI_020': {'intent': 'feedback', 'sentiment': 'negative'},
+    'TC_AI_021': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_022': {'intent': 'request_notes', 'sentiment': 'neutral'},
+    'TC_AI_023': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_024': {'intent': 'request_notes', 'sentiment': 'neutral'},
+    'TC_AI_025': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_026': {'intent': 'ask_doubt', 'sentiment': 'neutral'},
+    'TC_AI_027': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_028': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_029': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_030': {'intent': 'request_notes', 'sentiment': 'neutral'},
+    'TC_AI_031': {'intent': 'greet', 'sentiment': 'neutral'},
+    'TC_AI_032': {'intent': 'greet', 'sentiment': 'neutral'},
+    'TC_AI_033': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_034': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_035': {'intent': 'ask_doubt', 'sentiment': 'negative'},
+    'TC_AI_036': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_037': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_038': {'intent': 'other', 'sentiment': 'neutral'},
+    'TC_AI_039': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_040': {'intent': 'ask_doubt', 'sentiment': 'neutral'},
+    'TC_AI_041': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_042': {'intent': 'feedback', 'sentiment': 'negative'},
+    'TC_AI_043': {'intent': 'feedback', 'sentiment': 'positive'},
+    'TC_AI_044': {'intent': 'check_deadline', 'sentiment': 'neutral'},
+    'TC_AI_045': {'intent': 'request_notes', 'sentiment': 'neutral'},
+    'TC_AI_046': {'intent': 'check_deadline', 'sentiment': 'neutral'},
+    'TC_AI_047': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_048': {'intent': 'ask_doubt', 'sentiment': 'negative'},
+    'TC_AI_049': {'intent': 'ask_doubt', 'sentiment': 'neutral'},
+    'TC_AI_050': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_051': {'intent': 'check_deadline', 'sentiment': 'neutral'},
+    'TC_AI_052': {'intent': 'career_advice', 'sentiment': 'neutral'},
+    'TC_AI_053': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_054': {'intent': 'ask_exam_info', 'sentiment': 'neutral'},
+    'TC_AI_055': {'intent': 'request_notes', 'sentiment': 'neutral'},
 }
 
 
@@ -199,7 +244,10 @@ def main():
     print()
 
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    test_cases_path = os.path.join(base_dir, 'test_cases', 'ai_chat_analyzer_cases.csv')
+    # Prefer extended dataset, fall back to original
+    test_cases_path = os.path.join(base_dir, 'test_cases', 'ai_chat_analyzer_extended_test_cases.csv')
+    if not os.path.exists(test_cases_path):
+        test_cases_path = os.path.join(base_dir, 'test_cases', 'ai_chat_analyzer_cases.csv')
     results_dir = os.path.join(base_dir, 'results')
     os.makedirs(results_dir, exist_ok=True)
 

@@ -1,0 +1,10 @@
+{
+  "total_cases": 55,
+  "evaluated": 55,
+  "intent_accuracy": 0.7636363636363637,
+  "intent_macro_f1": 0.774440836940837,
+  "intent_weighted_f1": 0.7579299488390397,
+  "sentiment_accuracy": 0.8181818181818182,
+  "sentiment_macro_f1": 0.6721960210332304,
+  "sentiment_weighted_f1": 0.8544005677198067
+}

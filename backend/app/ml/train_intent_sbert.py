@@ -31,7 +31,7 @@ def load_data():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     file_path = os.path.join(script_dir, "training_data", "intent_data.json")
     
-    print(f"📚 Loading data from: {file_path}")
+    print(f"[INFO] Loading data from: {file_path}")
     
     if not os.path.exists(file_path):
         print(f"❌ Data file not found: {file_path}")
@@ -64,43 +64,43 @@ def train():
         print("❌ No training data found. Exiting.")
         return
     
-    print(f"\n📚 Loaded {len(texts)} examples")
+    print(f"\n[INFO] Loaded {len(texts)} examples")
     
     # Split data
     train_texts, val_texts, train_labels, val_labels = train_test_split(
         texts, labels, test_size=0.2, random_state=42, stratify=labels
     )
-    print(f"📈 Training: {len(train_texts)} examples")
-    print(f"📉 Validation: {len(val_texts)} examples")
+    print(f"[INFO] Training: {len(train_texts)} examples")
+    print(f"[INFO] Validation: {len(val_texts)} examples")
     
     # Load sentence transformer
-    print("\n🤖 Loading Sentence Transformer model...")
+    print("\n[INFO] Loading Sentence Transformer model...")
     model = SentenceTransformer('all-MiniLM-L6-v2')
     
     # Create embeddings
-    print("🔄 Creating embeddings for training data...")
+    print("[INFO] Creating embeddings for training data...")
     train_embeddings = model.encode(train_texts, show_progress_bar=True)
     val_embeddings = model.encode(val_texts, show_progress_bar=True)
     
     # Train classifier
-    print("\n🏋️ Training classifier...")
+    print("\n[INFO] Training classifier...")
     classifier = LogisticRegression(max_iter=1000, C=1.0, random_state=42)
     classifier.fit(train_embeddings, train_labels)
     
     # Evaluate
     predictions = classifier.predict(val_embeddings)
     accuracy = accuracy_score(val_labels, predictions)
-    print(f"\n✅ Validation Accuracy: {accuracy:.2%}")
+    print(f"\n[PASS] Validation Accuracy: {accuracy:.2%}")
     
     # Print classification report
-    print("\n📊 Classification Report:")
+    print("\n[REPORT] Classification Report:")
     print(classification_report(val_labels, predictions, target_names=INTENT_NAMES.values()))
     
     # Save model to /tmp (where we have write permission)
     model_path = "/tmp/intent_model_sbert"
     os.makedirs(model_path, exist_ok=True)
     
-    print(f"\n💾 Saving model to: {model_path}")
+    print(f"\n[SAVING] Saving model to: {model_path}")
     
     # Save the sentence transformer
     model.save(os.path.join(model_path, "embedding_model"))
@@ -113,7 +113,7 @@ def train():
     with open(os.path.join(model_path, "intent_mapping.pkl"), 'wb') as f:
         pickle.dump({"INTENT_MAP": INTENT_MAP, "INTENT_NAMES": INTENT_NAMES}, f)
     
-    print(f"✅ Model saved successfully to {model_path}")
+    print(f"[PASS] Model saved successfully to {model_path}")
     
     return model, classifier
 
@@ -122,11 +122,11 @@ def test_model():
     model_path = "/tmp/intent_model_sbert"
     
     if not os.path.exists(model_path):
-        print("❌ Model not found. Run training first.")
+        print("[FAIL] Model not found. Run training first.")
         print("   Run: python -m app.ml.train_intent_sbert")
         return
     
-    print("\n🤖 Loading model...")
+    print("\n[INFO] Loading model...")
     from sentence_transformers import SentenceTransformer
     
     embedding_model = SentenceTransformer(os.path.join(model_path, "embedding_model"))
@@ -160,7 +160,7 @@ def test_model():
     for i, question in enumerate(test_questions):
         intent = INTENT_NAMES[predictions[i]]
         confidence = max(probabilities[i])
-        print(f"\n📝 Question: {question}")
+        print(f"\n[QUESTION] Question: {question}")
         print(f"   Intent: {intent} (confidence: {confidence:.2f})")
 
 def predict_single(text: str):
