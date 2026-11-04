@@ -1,0 +1,56 @@
+test_case_id,model_module,input_query,expected_intent,expected_sentiment,category,notes
+TC_AI_001,ai_chat_analyzer,"When is the DSP exam?","ask_exam_info","neutral",deadline_query,Specific exam date inquiry
+TC_AI_002,ai_chat_analyzer,"What is the last date for project submission?","check_deadline","neutral",deadline_query,Submission deadline
+TC_AI_003,ai_chat_analyzer,"Which companies are visiting for placement?","career_advice","neutral",placement_info,Placement data query
+TC_AI_004,ai_chat_analyzer,"What are the eligibility criteria for service companies?","career_advice","neutral",eligibility_query,General criteria
+TC_AI_005,ai_chat_analyzer,"How do I prepare for interviews?","career_advice","neutral",advice_query,Interview preparation
+TC_AI_006,ai_chat_analyzer,"What is the weather forecast for tomorrow?","other","neutral",off_topic,Non-academic query
+TC_AI_007,ai_chat_analyzer,"Tell me a joke","other","negative",off_topic,Joke request
+TC_AI_008,ai_chat_analyzer,"What is the CIE schedule for this semester?","ask_exam_info","neutral",schedule_query,Exam schedule inquiry
+TC_AI_009,ai_chat_analyzer,"I need help with my assignment but I am not sure which one","ask_doubt","neutral",ambiguous_query,Assignment help query
+TC_AI_010,ai_chat_analyzer,"What is the placement package for TCS?","career_advice","neutral",placement_query,Specific company package
+TC_AI_011,ai_chat_analyzer,"Can you share the lecture notes for Data Structures?","request_notes","neutral",notes_request,Note sharing request
+TC_AI_012,ai_chat_analyzer,"I don't understand pointers in C language","ask_doubt","neutral",academic_doubt,Programming doubt
+TC_AI_013,ai_chat_analyzer,"Hello, I'm a first year student","greet","neutral",greeting,Student greeting
+TC_AI_014,ai_chat_analyzer,"When is the mid semester exam?","ask_exam_info","neutral",exam_query,Exam timing query
+TC_AI_015,ai_chat_analyzer,"What is the deadline for internship registration?","check_deadline","neutral",deadline_query,Internship deadline
+TC_AI_016,ai_chat_analyzer,"Is there any extension for the project submission?","check_deadline","neutral",deadline_query,Deadline extension request
+TC_AI_017,ai_chat_analyzer,"Which coding platform is best for practice?","career_advice","neutral",career_query,Platform recommendation
+TC_AI_018,ai_chat_analyzer,"How to crack Amazon campus interview?","career_advice","neutral",placement_query,Interview prep query
+TC_AI_019,ai_chat_analyzer,"I really love this chatbot feature","feedback","positive",feedback,Positive feedback
+TC_AI_020,ai_chat_analyzer,"This app is terrible and useless","feedback","negative",feedback,Negative feedback
+TC_AI_021,ai_chat_analyzer,"When is the placement drive for CSE students?","career_advice","neutral",placement_query,Placement drive query
+TC_AI_022,ai_chat_analyzer,"What is the syllabus for 6th semester?","request_notes","neutral",academic_query,Syllabus request
+TC_AI_023,ai_chat_analyzer,"How many credits are required for graduation?","ask_exam_info","neutral",academic_query,Credit requirement query
+TC_AI_024,ai_chat_analyzer,"Can I get a transfer certificate?","request_notes","neutral",admin_query,Document request
+TC_AI_025,ai_chat_analyzer,"What is the fee structure for 2025?","ask_exam_info","neutral",fee_query,Fee structure query
+TC_AI_026,ai_chat_analyzer,"I am confused about branching criteria","ask_doubt","neutral",academic_doubt,Branch confusion
+TC_AI_027,ai_chat_analyzer,"What is the CGPA requirement for placement?","career_advice","neutral",eligibility_query,CGPA criteria query
+TC_AI_028,ai_chat_analyzer,"When will the results be declared?","ask_exam_info","neutral",results_query,Results declaration query
+TC_AI_029,ai_chat_analyzer,"Can you suggest some good colleges for MS?","career_advice","neutral",career_query,Higher education advice
+TC_AI_030,ai_chat_analyzer,"Where can I find previous year question papers?","request_notes","neutral",notes_request,PYQ request
+TC_AI_031,ai_chat_analyzer,"Good morning sir","greet","neutral",greeting,Morning greeting
+TC_AI_032,ai_chat_analyzer,"Hey, can you help me?","greet","neutral",greeting,Help request greeting
+TC_AI_033,ai_chat_analyzer,"What is the cutoff for CSE branch?","ask_exam_info","neutral",academic_query,Cutoff inquiry
+TC_AI_034,ai_chat_analyzer,"How many companies visited last year?","career_advice","neutral",placement_query,Historic placement data
+TC_AI_035,ai_chat_analyzer,"I am failing my subjects what should I do?","ask_doubt","negative",academic_doubt,Academic struggle
+TC_AI_036,ai_chat_analyzer,"What is the eligibility for service based companies?","career_advice","neutral",eligibility_query,Eligibility criteria
+TC_AI_037,ai_chat_analyzer,"When is the convocation ceremony?","ask_exam_info","neutral",event_query,Event date query
+TC_AI_038,ai_chat_analyzer,"Who is the HOD of ECE department?","other","neutral",info_query,Staff information query
+TC_AI_039,ai_chat_analyzer,"What is the attendance criteria?","ask_exam_info","neutral",academic_query,Attendance rules
+TC_AI_040,ai_chat_analyzer,"Can I change my branch from ECE to CSE?","ask_doubt","neutral",academic_doubt,Branch change query
+TC_AI_041,ai_chat_analyzer,"What is the stipend for internships?","career_advice","neutral",career_query,Internship stipend query
+TC_AI_042,ai_chat_analyzer,"I hate this college","feedback","negative",feedback,Complaint
+TC_AI_043,ai_chat_analyzer,"The placement cell is very helpful","feedback","positive",feedback,Positive feedback
+TC_AI_044,ai_chat_analyzer,"What is the last date for fee payment?","check_deadline","neutral",deadline_query,Fee payment deadline
+TC_AI_045,ai_chat_analyzer,"How to apply for hostel?","request_notes","neutral",admin_query,Hostel application
+TC_AI_046,ai_chat_analyzer,"When is the hackathon registration deadline?","check_deadline","neutral",deadline_query,Hackathon deadline
+TC_AI_047,ai_chat_analyzer,"What skills are needed for data science jobs?","career_advice","neutral",career_query,Skills query
+TC_AI_048,ai_chat_analyzer,"I am stressed about placements","ask_doubt","negative",mental_health,Stress query
+TC_AI_049,ai_chat_analyzer,"Can you explain DSA concepts?","ask_doubt","neutral",academic_doubt,Concept explanation request
+TC_AI_050,ai_chat_analyzer,"What is the average package in our college?","career_advice","neutral",placement_query,Average package query
+TC_AI_051,ai_chat_analyzer,"When is the final year project submission?","check_deadline","neutral",deadline_query,Project submission deadline
+TC_AI_052,ai_chat_analyzer,"How is the campus placement process?","career_advice","neutral",placement_query,Placement process query
+TC_AI_053,ai_chat_analyzer,"Is there any scholarship available?","ask_exam_info","neutral",financial_query,Scholarship query
+TC_AI_054,ai_chat_analyzer,"What is the exam pattern for GATE?","ask_exam_info","neutral",exam_query,GATE exam pattern
+TC_AI_055,ai_chat_analyzer,"Can you provide the lab manual PDF?","request_notes","neutral",notes_request,Lab manual request
