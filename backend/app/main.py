@@ -16,7 +16,8 @@ from .api import (
     recruitment_circulars_router,
     recruitment_results_router,
     admin_router,
-    study_buddy_router
+    study_buddy_router,
+    ai_chat_analytics_router
 )
 from contextlib import asynccontextmanager
 import logging
@@ -139,6 +140,9 @@ app.include_router(admin_router)
 app.include_router(study_buddy_router)
 app.include_router(study_buddy_router, prefix="/api/v1")
 app.include_router(study_buddy_router, prefix="/v1")
+app.include_router(ai_chat_analytics_router)
+app.include_router(ai_chat_analytics_router, prefix="/api/v1")
+app.include_router(ai_chat_analytics_router, prefix="/v1")
 
 # Root endpoint
 @app.get("/")
