@@ -6,6 +6,7 @@ import Register from './pages/Register'
 import Landing from './pages/Landing'
 import Unauthorized from './pages/Unauthorized'
 import StudentDashboard from './pages/student/Dashboard'
+import StudentAIChatAnalytics from './pages/student/AIChatAnalyticsPage'
 import LecturerDashboard from './pages/lecturer/Dashboard'
 import HODDashboard from './pages/hod/Dashboard'
 import AdminDashboard from './pages/admin/Dashboard'
@@ -108,6 +109,7 @@ function App() {
             {/* Student Routes (student, admin) */}
             <Route element={<ProtectedRoute allowedRoles={['student', 'admin']} />}>
               <Route path="/student/dashboard" element={<StudentDashboard />} />
+              <Route path="/student/ai-chat-analytics" element={<StudentAIChatAnalytics />} />
               <Route path="/student/jobs" element={<StudentJobs />} />
               <Route path="/student/jobs/circulars/:id" element={<StudentRecruitmentCircularDetails />} />
               <Route path="/student/jobs/:id" element={<StudentJobDetails />} />
