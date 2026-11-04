@@ -1,0 +1,1143 @@
+{
+  "total_cases": 10,
+  "pass_count": 9,
+  "partial_count": 1,
+  "fail_count": 0,
+  "pass_rate": 0.9,
+  "total_fields_evaluated": 77,
+  "correct_fields": 66,
+  "field_accuracy": 0.8571428571428571,
+  "per_field_accuracy": {
+    "location": {
+      "accuracy": 1.0,
+      "correct": 8,
+      "total": 8
+    },
+    "qualification_required": {
+      "accuracy": 0.25,
+      "correct": 1,
+      "total": 4
+    },
+    "selection_rounds": {
+      "accuracy": 0.0,
+      "correct": 0,
+      "total": 6
+    },
+    "skills": {
+      "accuracy": 0.8571428571428571,
+      "correct": 6,
+      "total": 7
+    },
+    "date": {
+      "accuracy": 1.0,
+      "correct": 10,
+      "total": 10
+    },
+    "job_title": {
+      "accuracy": 1.0,
+      "correct": 9,
+      "total": 9
+    },
+    "experience_years": {
+      "accuracy": 0.6666666666666666,
+      "correct": 2,
+      "total": 3
+    },
+    "has_bond": {
+      "accuracy": 1.0,
+      "correct": 1,
+      "total": 1
+    },
+    "cgpa_requirement": {
+      "accuracy": 1.0,
+      "correct": 2,
+      "total": 2
+    },
+    "compensation": {
+      "accuracy": 1.0,
+      "correct": 10,
+      "total": 10
+    },
+    "academic_requirements": {
+      "accuracy": 1.0,
+      "correct": 7,
+      "total": 7
+    },
+    "company": {
+      "accuracy": 1.0,
+      "correct": 10,
+      "total": 10
+    }
+  },
+  "avg_overall_score": 0.8506,
+  "results": [
+    {
+      "test_case_id": "TC_JD_001",
+      "input": "COMPANY: TCS ROLE: Software Trainee LOCATION: Pune REQUIREMENTS: B.Tech CSE IT ECE with 60% througho",
+      "expected": {
+        "company": "TCS",
+        "job_title": "Software Trainee",
+        "location": "Pune",
+        "compensation": "3.36 LPA",
+        "date": "15th March 2024",
+        "academic_requirements": [
+          "B.Tech"
+        ],
+        "qualification_required": [
+          "CSE",
+          "ECE",
+          "IT"
+        ],
+        "selection_rounds": [
+          "Online Assessment",
+          "Technical Interview",
+          "HR"
+        ]
+      },
+      "predicted": {
+        "title": "Software Trainee",
+        "description": "COMPANY: TCS ROLE: Software Trainee LOCATION: Pune",
+        "required_skills": "[]",
+        "preferred_skills": "[]",
+        "experience_level": "None",
+        "cgpa_criteria": "None",
+        "branch_eligibility": "['CSE', 'ECE', 'IT']",
+        "location": "Pune",
+        "salary_range": "3.36 LPA",
+        "raw_text_length": "215",
+        "company_name": "TCS",
+        "job_type": "None",
+        "degree_eligibility": "['B.Tech']",
+        "graduation_years": "[]",
+        "academic_percentages": "{'10th': 60.0, 'tenth': 60.0, '12th': 60.0, 'twelf",
+        "backlog_criteria": "No active backlogs",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': None, 'full_time_ct",
+        "application_deadline": "15th March 2024",
+        "drive_date": "None",
+        "joining_date": "None",
+        "work_mode": "None",
+        "bond_details": "None",
+        "selection_rounds": "['Online Assessment Technical Interview HR']",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Degree requirement specified as percentage (60.0",
+        "field_evidence": "{'title': 'ROLE: Software Trainee LOCATION', 'comp"
+      },
+      "overall_score": 0.875,
+      "fields_matched": 7,
+      "total_fields": 8,
+      "status": "PASS",
+      "category": "Service Based JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "TCS",
+          "expected": "TCS"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Software Trainee",
+          "expected": "Software Trainee"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Pune",
+          "expected": "Pune"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "3.36 LPA",
+          "expected": "3.36 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "15th March 2024",
+          "expected": "15th March 2024"
+        },
+        "academic_requirements": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['B.Tech']",
+          "expected": "['B.Tech']"
+        },
+        "qualification_required": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['CSE', 'ECE', 'IT']",
+          "expected": "['CSE', 'ECE', 'IT']"
+        },
+        "selection_rounds": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['Online Assessment Technical Interview HR']",
+          "expected": "['Online Assessment', 'Technical Interview', 'HR']"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_002",
+      "input": "HIRING Senior Software Engineer Company Amazon Location Hyderabad Eligibility B.Tech 80% aggregate S",
+      "expected": {
+        "company": "Amazon",
+        "job_title": "Senior Software Engineer",
+        "location": "Hyderabad",
+        "compensation": "25-35 LPA",
+        "date": "30th Jan 2024",
+        "academic_requirements": [
+          "B.Tech"
+        ],
+        "skills": [
+          "Python",
+          "AWS",
+          "DSA",
+          "System Design"
+        ],
+        "experience_years": "2+ years",
+        "has_bond": "Bond 2 years"
+      },
+      "predicted": {
+        "title": "Senior Software Engineer",
+        "description": "HIRING Senior Software Engineer Company Amazon Loc",
+        "required_skills": "['Python', 'AWS', 'DSA', 'System Design']",
+        "preferred_skills": "[]",
+        "experience_level": "2+ years experience",
+        "cgpa_criteria": "None",
+        "branch_eligibility": "[]",
+        "location": "Hyderabad",
+        "salary_range": "25-35 LPA",
+        "raw_text_length": "212",
+        "company_name": "Amazon",
+        "job_type": "None",
+        "degree_eligibility": "['B.Tech']",
+        "graduation_years": "[]",
+        "academic_percentages": "{'10th': None, 'tenth': None, '12th': None, 'twelf",
+        "backlog_criteria": "None",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': None, 'full_time_ct",
+        "application_deadline": "30th Jan 2024",
+        "drive_date": "None",
+        "joining_date": "None",
+        "work_mode": "None",
+        "bond_details": "Bond 2 years",
+        "selection_rounds": "[]",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Degree requirement specified as percentage (80.0",
+        "field_evidence": "{'title': 'HIRING Senior Software Engineer Company"
+      },
+      "overall_score": 1.0,
+      "fields_matched": 9,
+      "total_fields": 9,
+      "status": "PASS",
+      "category": "Product Company JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Amazon",
+          "expected": "Amazon"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Senior Software Engineer",
+          "expected": "Senior Software Engineer"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Hyderabad",
+          "expected": "Hyderabad"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "25-35 LPA",
+          "expected": "25-35 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "30th Jan 2024",
+          "expected": "30th Jan 2024"
+        },
+        "academic_requirements": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['B.Tech']",
+          "expected": "['B.Tech']"
+        },
+        "skills": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Python', 'AWS', 'DSA', 'System Design']",
+          "expected": "['Python', 'AWS', 'DSA', 'System Design']"
+        },
+        "experience_years": {
+          "correct": true,
+          "score": 0.8,
+          "parsed": "2+ years experience",
+          "expected": "2+ years"
+        },
+        "has_bond": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Bond 2 years",
+          "expected": "Bond 2 years"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_003",
+      "input": "INFOSYS SPRINGBOARD Opening Python Developer Type Full-time Location Work from Home Eligibility 10th",
+      "expected": {
+        "company": "Infosys",
+        "job_title": "Python Developer",
+        "location": "Work from Home",
+        "compensation": "3.5 LPA",
+        "date": "20th February 2024",
+        "skills": [
+          "Python",
+          "Django",
+          "REST API"
+        ],
+        "selection_rounds": [
+          "OA",
+          "Technical",
+          "HR"
+        ]
+      },
+      "predicted": {
+        "title": "Python Developer",
+        "description": "INFOSYS SPRINGBOARD Opening Python Developer Type ",
+        "required_skills": "['REST API', 'Python', 'Django']",
+        "preferred_skills": "[]",
+        "experience_level": "None",
+        "cgpa_criteria": "None",
+        "branch_eligibility": "[]",
+        "location": "Work from Home",
+        "salary_range": "3.5 LPA",
+        "raw_text_length": "229",
+        "company_name": "Infosys",
+        "job_type": "None",
+        "degree_eligibility": "[]",
+        "graduation_years": "[]",
+        "academic_percentages": "{'10th': 70.0, 'tenth': 70.0, '12th': 70.0, 'twelf",
+        "backlog_criteria": "None",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': None, 'full_time_ct",
+        "application_deadline": "20th February 2024",
+        "drive_date": "20th February 2024",
+        "joining_date": "None",
+        "work_mode": "Remote",
+        "bond_details": "None",
+        "selection_rounds": "['OA Technical HR']",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Degree requirement specified as percentage (65.0",
+        "field_evidence": "{'title': 'Opening Python Developer Type', 'compan"
+      },
+      "overall_score": 0.857,
+      "fields_matched": 6,
+      "total_fields": 7,
+      "status": "PASS",
+      "category": "Infosys JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Infosys",
+          "expected": "Infosys"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Python Developer",
+          "expected": "Python Developer"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Work from Home",
+          "expected": "Work from Home"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "3.5 LPA",
+          "expected": "3.5 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "20th February 2024",
+          "expected": "20th February 2024"
+        },
+        "skills": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['REST API', 'Python', 'Django']",
+          "expected": "['Python', 'Django', 'REST API']"
+        },
+        "selection_rounds": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['OA Technical HR']",
+          "expected": "['OA', 'Technical', 'HR']"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_004",
+      "input": "WIPRO CAMPUS DRIVE Role Systems Engineer Campus Mumbai Requirements Engineering graduate any branch ",
+      "expected": {
+        "company": "Wipro",
+        "job_title": "Systems Engineer",
+        "location": "Mumbai",
+        "compensation": "3.0 LPA",
+        "date": "10th March 2024",
+        "skills": [
+          "Any programming language"
+        ],
+        "selection_rounds": [
+          "Aptitude Test",
+          "Technical",
+          "Group Discussion"
+        ],
+        "qualification_required": [
+          "Any Engineering"
+        ]
+      },
+      "predicted": {
+        "title": "Systems Engineer",
+        "description": "WIPRO CAMPUS DRIVE Role Systems Engineer Campus Mu",
+        "required_skills": "[]",
+        "preferred_skills": "[]",
+        "experience_level": "None",
+        "cgpa_criteria": "None",
+        "branch_eligibility": "[]",
+        "location": "Mumbai",
+        "salary_range": "3.0 LPA",
+        "raw_text_length": "260",
+        "company_name": "Wipro",
+        "job_type": "None",
+        "degree_eligibility": "[]",
+        "graduation_years": "[]",
+        "academic_percentages": "{'10th': 65.0, 'tenth': 65.0, '12th': 65.0, 'twelf",
+        "backlog_criteria": "backlogs Skills Any programming language Selection",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': '\u20b93/month', 'full_t",
+        "application_deadline": "10th March 2024",
+        "drive_date": "10th March 2024",
+        "joining_date": "None",
+        "work_mode": "None",
+        "bond_details": "None",
+        "selection_rounds": "['Aptitude', 'Test', 'Technical', 'Group', 'Discus",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Degree requirement specified as percentage (65.0",
+        "field_evidence": "{'title': 'Role Systems Engineer Campus', 'company"
+      },
+      "overall_score": 0.625,
+      "fields_matched": 5,
+      "total_fields": 8,
+      "status": "PARTIAL",
+      "category": "Wipro JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Wipro",
+          "expected": "Wipro"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Systems Engineer",
+          "expected": "Systems Engineer"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Mumbai",
+          "expected": "Mumbai"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "3.0 LPA",
+          "expected": "3.0 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "10th March 2024",
+          "expected": "10th March 2024"
+        },
+        "skills": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "[]",
+          "expected": "['Any programming language']"
+        },
+        "selection_rounds": {
+          "correct": false,
+          "score": 0.2,
+          "parsed": "['Aptitude', 'Test', 'Technical', 'Group', 'Discus",
+          "expected": "['Aptitude Test', 'Technical', 'Group Discussion']"
+        },
+        "qualification_required": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "[]",
+          "expected": "['Any Engineering']"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_005",
+      "input": "DELOITTE CAMPUS RECRUITMENT 2024 Position Analyst Technology Department Digital Eligibility B.Tech M",
+      "expected": {
+        "company": "Deloitte",
+        "job_title": "Analyst",
+        "compensation": "8-10 LPA",
+        "date": "5th April 2024",
+        "academic_requirements": [
+          "B.Tech",
+          "M.Tech",
+          "MCA"
+        ],
+        "cgpa_requirement": "CGPA 7.5",
+        "skills": [
+          "Java",
+          "Python",
+          "C++"
+        ],
+        "selection_rounds": [
+          "Coding Round",
+          "Technical Interview",
+          "Managerial Round",
+          "HR Round"
+        ]
+      },
+      "predicted": {
+        "title": "Analyst",
+        "description": "DELOITTE CAMPUS RECRUITMENT 2024 Position Analyst ",
+        "required_skills": "['Python', 'Java', 'C++']",
+        "preferred_skills": "[]",
+        "experience_level": "None",
+        "cgpa_criteria": "CGPA 7.5",
+        "branch_eligibility": "[]",
+        "location": "None",
+        "salary_range": "8-10 LPA",
+        "raw_text_length": "283",
+        "company_name": "Deloitte",
+        "job_type": "None",
+        "degree_eligibility": "['B.Tech', 'M.Tech', 'MCA']",
+        "graduation_years": "[]",
+        "academic_percentages": "None",
+        "backlog_criteria": "None",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': None, 'full_time_ct",
+        "application_deadline": "5th April 2024",
+        "drive_date": "None",
+        "joining_date": "None",
+        "work_mode": "None",
+        "bond_details": "None",
+        "selection_rounds": "['Coding Round Technical Interview Managerial Roun",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "[]",
+        "field_evidence": "{'title': 'Position Analyst Technology Department'"
+      },
+      "overall_score": 0.875,
+      "fields_matched": 7,
+      "total_fields": 8,
+      "status": "PASS",
+      "category": "Big 4 JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Deloitte",
+          "expected": "Deloitte"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Analyst",
+          "expected": "Analyst"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "8-10 LPA",
+          "expected": "8-10 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "5th April 2024",
+          "expected": "5th April 2024"
+        },
+        "academic_requirements": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['B.Tech', 'M.Tech', 'MCA']",
+          "expected": "['B.Tech', 'M.Tech', 'MCA']"
+        },
+        "cgpa_requirement": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "CGPA 7.5",
+          "expected": "CGPA 7.5"
+        },
+        "skills": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Python', 'Java', 'C++']",
+          "expected": "['Java', 'Python', 'C++']"
+        },
+        "selection_rounds": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['Coding Round Technical Interview Managerial Roun",
+          "expected": "['Coding Round', 'Technical Interview', 'Manageria"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_006",
+      "input": "HIRING DATA SCIENTIST Company Flipkart Location Bangalore Criteria B.Tech CSE Data Science 75% or M.",
+      "expected": {
+        "company": "Flipkart",
+        "job_title": "Data Scientist",
+        "location": "Bangalore",
+        "compensation": "12-18 LPA",
+        "date": "25th March 2024",
+        "academic_requirements": [
+          "B.Tech",
+          "M.Tech"
+        ],
+        "skills": [
+          "Python",
+          "R",
+          "SQL",
+          "Machine Learning",
+          "Deep Learning",
+          "TensorFlow",
+          "PyTorch"
+        ],
+        "experience_years": "1-3 years",
+        "qualification_required": [
+          "CSE",
+          "Data Science",
+          "Statistics"
+        ]
+      },
+      "predicted": {
+        "title": "DATA SCIENTIST",
+        "description": "HIRING DATA SCIENTIST Company Flipkart Location Ba",
+        "required_skills": "['Machine Learning', 'Deep Learning', 'Python', 'S",
+        "preferred_skills": "[]",
+        "experience_level": "1-3 years",
+        "cgpa_criteria": "None",
+        "branch_eligibility": "['AIDS', 'CSE']",
+        "location": "Bangalore",
+        "salary_range": "12-18 LPA",
+        "raw_text_length": "276",
+        "company_name": "Flipkart",
+        "job_type": "None",
+        "degree_eligibility": "['B.Tech', 'M.Tech']",
+        "graduation_years": "[]",
+        "academic_percentages": "{'10th': None, 'tenth': None, '12th': None, 'twelf",
+        "backlog_criteria": "None",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': None, 'full_time_ct",
+        "application_deadline": "25th March 2024",
+        "drive_date": "None",
+        "joining_date": "None",
+        "work_mode": "None",
+        "bond_details": "None",
+        "selection_rounds": "[]",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Degree requirement specified as percentage (75.0",
+        "field_evidence": "{'title': 'HIRING DATA SCIENTIST Company', 'compan"
+      },
+      "overall_score": 0.889,
+      "fields_matched": 8,
+      "total_fields": 9,
+      "status": "PASS",
+      "category": "Data Science JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Flipkart",
+          "expected": "Flipkart"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "DATA SCIENTIST",
+          "expected": "Data Scientist"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Bangalore",
+          "expected": "Bangalore"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "12-18 LPA",
+          "expected": "12-18 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "25th March 2024",
+          "expected": "25th March 2024"
+        },
+        "academic_requirements": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['B.Tech', 'M.Tech']",
+          "expected": "['B.Tech', 'M.Tech']"
+        },
+        "skills": {
+          "correct": true,
+          "score": 0.8571428571428571,
+          "parsed": "['Machine Learning', 'Deep Learning', 'Python', 'S",
+          "expected": "['Python', 'R', 'SQL', 'Machine Learning', 'Deep L"
+        },
+        "experience_years": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "1-3 years",
+          "expected": "1-3 years"
+        },
+        "qualification_required": {
+          "correct": false,
+          "score": 0.3333333333333333,
+          "parsed": "['AIDS', 'CSE']",
+          "expected": "['CSE', 'Data Science', 'Statistics']"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_007",
+      "input": "CAPGEMINI WALK-IN DRIVE Designation Programmer Trainee Location Chennai Eligibility 10th 75% 12th 75",
+      "expected": {
+        "company": "Capgemini",
+        "job_title": "Programmer Trainee",
+        "location": "Chennai",
+        "compensation": "3.36 LPA",
+        "date": "18th January 2024",
+        "academic_requirements": [
+          "B.E",
+          "B.Tech"
+        ],
+        "selection_rounds": [
+          "Written Test",
+          "Technical",
+          "HR"
+        ]
+      },
+      "predicted": {
+        "title": "Programmer Trainee",
+        "description": "CAPGEMINI WALK-IN DRIVE Designation Programmer Tra",
+        "required_skills": "[]",
+        "preferred_skills": "[]",
+        "experience_level": "None",
+        "cgpa_criteria": "None",
+        "branch_eligibility": "[]",
+        "location": "Chennai",
+        "salary_range": "3.36 LPA",
+        "raw_text_length": "244",
+        "company_name": "Capgemini",
+        "job_type": "None",
+        "degree_eligibility": "['B.E', 'B.Tech']",
+        "graduation_years": "[]",
+        "academic_percentages": "{'10th': 75.0, 'tenth': 75.0, '12th': 75.0, 'twelf",
+        "backlog_criteria": "None",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': None, 'full_time_ct",
+        "application_deadline": "18th January 2024",
+        "drive_date": "18th January 2024",
+        "joining_date": "None",
+        "work_mode": "None",
+        "bond_details": "None",
+        "selection_rounds": "['Written Test Technical HR']",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Degree requirement specified as percentage (65.0",
+        "field_evidence": "{'title': 'Designation Programmer Trainee Location"
+      },
+      "overall_score": 0.857,
+      "fields_matched": 6,
+      "total_fields": 7,
+      "status": "PASS",
+      "category": "Capgemini JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Capgemini",
+          "expected": "Capgemini"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Programmer Trainee",
+          "expected": "Programmer Trainee"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Chennai",
+          "expected": "Chennai"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "3.36 LPA",
+          "expected": "3.36 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "18th January 2024",
+          "expected": "18th January 2024"
+        },
+        "academic_requirements": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['B.E', 'B.Tech']",
+          "expected": "['B.E', 'B.Tech']"
+        },
+        "selection_rounds": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "['Written Test Technical HR']",
+          "expected": "['Written Test', 'Technical', 'HR']"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_008",
+      "input": "SOFTWARE ENGINEER FRONTEND Company Adobe Location Noida Requirements B.Tech 80% aggregate Strong Jav",
+      "expected": {
+        "company": "Adobe",
+        "job_title": "Software Engineer Frontend",
+        "location": "Noida",
+        "compensation": "15-22 LPA",
+        "date": "28th Feb 2024",
+        "academic_requirements": [
+          "B.Tech"
+        ],
+        "skills": [
+          "JavaScript",
+          "TypeScript",
+          "React",
+          "REST API"
+        ],
+        "experience_years": "1+ year",
+        "selection_rounds": [
+          "Online Test",
+          "Coding",
+          "Technical Interview"
+        ]
+      },
+      "predicted": {
+        "title": "ENGINEER FRONTEND",
+        "description": "SOFTWARE ENGINEER FRONTEND Company Adobe Location ",
+        "required_skills": "['REST API', 'JavaScript', 'TypeScript', 'React']",
+        "preferred_skills": "[]",
+        "experience_level": "None",
+        "cgpa_criteria": "None",
+        "branch_eligibility": "[]",
+        "location": "Noida",
+        "salary_range": "15-22 LPA",
+        "raw_text_length": "277",
+        "company_name": "Adobe",
+        "job_type": "None",
+        "degree_eligibility": "['B.Tech']",
+        "graduation_years": "[]",
+        "academic_percentages": "{'10th': None, 'tenth': None, '12th': None, 'twelf",
+        "backlog_criteria": "None",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': None, 'full_time_ct",
+        "application_deadline": "28th Feb 2024",
+        "drive_date": "None",
+        "joining_date": "None",
+        "work_mode": "None",
+        "bond_details": "None",
+        "selection_rounds": "['Online', 'Test', 'Coding', 'Technical', 'Intervi",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Degree requirement specified as percentage (80.0",
+        "field_evidence": "{'title': 'ENGINEER FRONTEND Company', 'company_na"
+      },
+      "overall_score": 0.778,
+      "fields_matched": 7,
+      "total_fields": 9,
+      "status": "PASS",
+      "category": "Adobe JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Adobe",
+          "expected": "Adobe"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 0.8,
+          "parsed": "ENGINEER FRONTEND",
+          "expected": "Software Engineer Frontend"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Noida",
+          "expected": "Noida"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "15-22 LPA",
+          "expected": "15-22 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "28th Feb 2024",
+          "expected": "28th Feb 2024"
+        },
+        "academic_requirements": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['B.Tech']",
+          "expected": "['B.Tech']"
+        },
+        "skills": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['REST API', 'JavaScript', 'TypeScript', 'React']",
+          "expected": "['JavaScript', 'TypeScript', 'React', 'REST API']"
+        },
+        "experience_years": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": null,
+          "expected": "1+ year"
+        },
+        "selection_rounds": {
+          "correct": false,
+          "score": 0.2,
+          "parsed": "['Online', 'Test', 'Coding', 'Technical', 'Intervi",
+          "expected": "['Online Test', 'Coding', 'Technical Interview']"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_009",
+      "input": "MEGA CAMPUS DRIVE 500+ OPENINGS Participating Companies Accenture HCL Infosys TCS Wipro Common Crite",
+      "expected": {
+        "company": "Accenture HCL Infosys TCS Wipro",
+        "compensation": "3.0 to 6.0 LPA",
+        "date": "12th March 2024",
+        "qualification_required": [
+          "Any Engineering"
+        ]
+      },
+      "predicted": {
+        "title": "None",
+        "description": "MEGA CAMPUS DRIVE 500+ OPENINGS Participating Comp",
+        "required_skills": "[]",
+        "preferred_skills": "[]",
+        "experience_level": "None",
+        "cgpa_criteria": "None",
+        "branch_eligibility": "[]",
+        "location": "None",
+        "salary_range": "3.0 to 6.0 LPA",
+        "raw_text_length": "267",
+        "company_name": "Accenture",
+        "job_type": "None",
+        "degree_eligibility": "[]",
+        "graduation_years": "[]",
+        "academic_percentages": "{'10th': 60.0, 'tenth': 60.0, '12th': 60.0, 'twelf",
+        "backlog_criteria": "No backlogs",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': None, 'full_time_ct",
+        "application_deadline": "12th March 2024",
+        "drive_date": "12th March 2024",
+        "joining_date": "None",
+        "work_mode": "None",
+        "bond_details": "None",
+        "selection_rounds": "[]",
+        "application_instructions": "None",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Degree requirement specified as percentage (60.0",
+        "field_evidence": "{'participating_companies': 'Accenture HCL Infosys"
+      },
+      "overall_score": 0.75,
+      "fields_matched": 3,
+      "total_fields": 4,
+      "status": "PASS",
+      "category": "Mega Drive JD",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 0.8,
+          "parsed": "Accenture",
+          "expected": "Accenture HCL Infosys TCS Wipro"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "3.0 to 6.0 LPA",
+          "expected": "3.0 to 6.0 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "12th March 2024",
+          "expected": "12th March 2024"
+        },
+        "qualification_required": {
+          "correct": false,
+          "score": 0.0,
+          "parsed": "[]",
+          "expected": "['Any Engineering']"
+        }
+      }
+    },
+    {
+      "test_case_id": "TC_JD_010",
+      "input": "INTERNSHIP OPPORTUNITY Company Google Role SWE Intern Location Bangalore Hybrid Eligibility B.Tech f",
+      "expected": {
+        "company": "Google",
+        "job_title": "SWE Intern",
+        "location": "Bangalore",
+        "compensation": "1 LPA",
+        "date": "5th April 2024",
+        "academic_requirements": [
+          "B.Tech"
+        ],
+        "cgpa_requirement": "CGPA 8.0",
+        "skills": [
+          "C++",
+          "Java",
+          "Python",
+          "Data Structures",
+          "DSA"
+        ]
+      },
+      "predicted": {
+        "title": "SWE Intern",
+        "description": "INTERNSHIP OPPORTUNITY Company Google Role SWE Int",
+        "required_skills": "['Python', 'Java', 'C++', 'Data Structures', 'DSA'",
+        "preferred_skills": "[]",
+        "experience_level": "None",
+        "cgpa_criteria": "CGPA 8.0",
+        "branch_eligibility": "[]",
+        "location": "Bangalore",
+        "salary_range": "1 LPA",
+        "raw_text_length": "294",
+        "company_name": "Google",
+        "job_type": "Internship",
+        "degree_eligibility": "['B.Tech']",
+        "graduation_years": "[]",
+        "academic_percentages": "None",
+        "backlog_criteria": "None",
+        "certifications": "[]",
+        "compensation_details": "{'currency': 'INR', 'stipend': '\u20b91/month (3 months",
+        "application_deadline": "5th April 2024",
+        "drive_date": "None",
+        "joining_date": "None",
+        "work_mode": "Hybrid",
+        "bond_details": "None",
+        "selection_rounds": "[]",
+        "application_instructions": "Apply via careers.google.com by 5th April 2024",
+        "application_url": "None",
+        "application_url_candidates": "[]",
+        "review_flags": "['Staged compensation detected (\u20b91/month (3 months",
+        "field_evidence": "{'title': 'Role SWE Intern Location', 'company_nam"
+      },
+      "overall_score": 1.0,
+      "fields_matched": 8,
+      "total_fields": 8,
+      "status": "PASS",
+      "category": "Google Internship",
+      "field_scores": {
+        "company": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Google",
+          "expected": "Google"
+        },
+        "job_title": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "SWE Intern",
+          "expected": "SWE Intern"
+        },
+        "location": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "Bangalore",
+          "expected": "Bangalore"
+        },
+        "compensation": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "1 LPA",
+          "expected": "1 LPA"
+        },
+        "date": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "5th April 2024",
+          "expected": "5th April 2024"
+        },
+        "academic_requirements": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['B.Tech']",
+          "expected": "['B.Tech']"
+        },
+        "cgpa_requirement": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "CGPA 8.0",
+          "expected": "CGPA 8.0"
+        },
+        "skills": {
+          "correct": true,
+          "score": 1.0,
+          "parsed": "['Python', 'Java', 'C++', 'Data Structures', 'DSA'",
+          "expected": "['C++', 'Java', 'Python', 'Data Structures', 'DSA'"
+        }
+      }
+    }
+  ]
+}

@@ -572,9 +572,9 @@ class JdParserService:
             r'^(?:HIRING)\s+([A-Z][A-Za-z\s]+?)(?:\s+(?:Company|Location|Criteria|Eligibility)|\s*$)',
             # "Role Systems Engineer" format (without colon, after keyword like "DRIVE")
             r'\bRole\s+([A-Z][A-Za-z\s]+?)(?:\s+(?:Campus|Requirements|Eligibility|Skills|Location|Package)|\s*$)',
-            # "Software Engineer Frontend Company ..." pattern — title before Company (must come after HIRING patterns)
-            # Limit to 2 words max to avoid capturing long phrases like "throughout No backlogs Selection Process"
-            r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)\s+Company\b',
+            # "Software Engineer Frontend Company ..." pattern — capture up to 3 words to handle longer titles
+            # Limit to 3 words max to avoid capturing long phrases like "throughout No backlogs Selection Process"
+            r'\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+){0,2})\s+Company\b',
             # "Position <Title>" format
             r'Position\s+([A-Z][a-zA-Z\s]+?)(?:\s+(?:Department|Location|Requirements|Eligibility|Skills)|\s*$)',
             # "Designation <Title>" format
@@ -608,6 +608,8 @@ class JdParserService:
                     noise_title_patterns = r'(?:varies\s+by|throughout|no\s+backlogs|selection\s+process|common\s+criteria)'
                     if not re.search(noise_title_patterns, candidate, re.IGNORECASE):
                         if not re.search(r'company|overview|eligibility|ctc|notice|salary|drive|campus|opening|criteria|requirement', candidate, re.IGNORECASE):
+                            # Normalize title case: "SOFTWARE ENGINEER FRONTEND" -> "Software Engineer Frontend"
+                            candidate = ' '.join(w.capitalize() for w in candidate.split())
                             evidence["title"] = match.group(0).strip()
                             return candidate
 
@@ -979,6 +981,12 @@ class JdParserService:
             pattern = r'\b' + re.escape(term) + r'\b'
             if re.search(pattern, text_lower):
                 found_branches.add(standard_code)
+
+        # Check for "any branch" / "any engineering" — these mean all branches are eligible
+        if re.search(r'\bany\s+(?:branch(?:es)?|engineering(?:\s+branch)?)\b', text_lower):
+            found_branches.add("Any Engineering")
+        elif re.search(r'\b(?:no\s+)?branch\s+(?:restriction|limitation|criteria)\b', text_lower):
+            found_branches.add("Any Engineering")
 
         # Check for circuital branches
         if re.search(r'\bcircuital\s*branches\b', text_lower):
@@ -1603,53 +1611,126 @@ class JdParserService:
     ) -> List[str]:
         """Extract recruitment selection rounds."""
         rounds: List[str] = []
+
+        # Step 1: Try numbered rounds first (Round 1:, Step 2:, etc.)
         round_matches = re.finditer(
             r'(?:round\s*[0-9]+|step\s*[0-9]+)[\s:\-–—|]+([^\n\r;,]+)',
-            text,
-            re.IGNORECASE
+            text, re.IGNORECASE
         )
         for rm in round_matches:
             r_text = rm.group(1).strip()
             if 4 <= len(r_text) <= 60:
                 rounds.append(r_text)
 
-        if not rounds:
-            # Look for general selection process section — capture full section
-            sp_match = re.search(
-                r'(?:selection\s*process|recruitment\s*process|process|rounds\s*of\s*interview| Rounds?)[\s:\-–—|]*(.*?)(?:Package|CTC|Salary|Compensation|Application|Deadline|Apply|Bond|Location|Eligibility|Requirements|Skills?|\n\s*\n|$)',
-                text, re.IGNORECASE | re.DOTALL
-            )
-            if sp_match:
-                section = sp_match.group(1).strip()
-                # Skip if the process is described as "varies" (not a fixed process)
-                if re.search(r'\bvaries\s+by\b', section, re.IGNORECASE):
-                    return []
-                # Split by common delimiters
-                split_rounds = [s.strip(" -•*") for s in re.split(r'[,;\n]', section) if len(s.strip()) > 3]
-                rounds.extend(split_rounds[:5])
+        # Step 2: Look for selection/process section headers
+        sp_match = re.search(
+            r'(?:selection\s*process|recruitment\s*process|process|rounds\s*of\s*interview| Rounds?)[\s:\-–—|]*(.*?)(?:Package|CTC|Salary|Compensation|Application|Deadline|Apply|Bond|Location|Eligibility|Requirements|Skills?|\n\s*\n|$)',
+            text, re.IGNORECASE | re.DOTALL
+        )
+        if sp_match and not rounds:
+            section = sp_match.group(1).strip()
+            if re.search(r'\bvaries\s+by\b', section, re.IGNORECASE):
+                return []
+            # Split by common delimiters
+            split_rounds = [s.strip(" -•*") for s in re.split(r'[,;\n]', section) if len(s.strip()) > 3]
+            rounds.extend(split_rounds[:5])
 
-        # Also try inline extraction from "Process:" or "Selection:" lines
+        # Step 3: If we have a single long combined string, split it into individual rounds
+        if len(rounds) == 1 and len(rounds[0]) > 30:
+            combined = rounds[0]
+            # Use known round patterns to segment
+            round_types = [
+                'Online Assessment', 'Aptitude Test', 'Technical Interview',
+                'Managerial Round', 'HR Round', 'Coding Round',
+                'Group Discussion', 'Written Test', 'OA',
+                'Technical Round', 'HR Interview', 'Coding Test',
+            ]
+            segmented = []
+            remaining = combined
+            for rt in round_types:
+                pat = rf'\b{re.escape(rt)}\b'
+                m = re.search(pat, remaining, re.IGNORECASE)
+                if m:
+                    seg = remaining[:m.end()].strip()
+                    if 4 <= len(seg) <= 60:
+                        segmented.append(seg)
+                    remaining = remaining[m.end():].strip()
+            if remaining and 4 <= len(remaining) <= 60 and not re.search(r'(?:package|ctc|salary)', remaining, re.IGNORECASE):
+                segmented.append(remaining)
+            if segmented:
+                rounds = segmented
+            else:
+                # Last resort: regex split on round type boundaries
+                parts = re.split(
+                    r'\s+(?=(?:Online\s+)?Assessment|Aptitude\s+Test|Technical\s+(?:Interview|Round)|Managerial\s+Round|HR\s+(?:Round|Interview)|Coding\s+(?:Round|Test)|Group\s+Discussion|Written\s+Test)\b',
+                    combined, flags=re.IGNORECASE
+                )
+                rounds = [p.strip(" -•*,") for p in parts if 4 <= len(p.strip()) <= 60]
+
+        # Step 4: Fallback for inline "Selection <items>" without section header
         if not rounds:
-            process_match = re.search(
-                r'(?:Process|Selection\s*Process|Round\s*Details)[\s:\-–—|]+([^\n]+)',
+            sel_match = re.search(
+                r'Selection[\s:\-–—|]+([A-Za-z\s]+?)(?:\s+(?:Stipend|Package|CTC|Salary|Drive|Location|Requirements|Eligibility|Date|Deadline|Compensation)|\s*$)',
                 text, re.IGNORECASE
             )
-            if process_match:
-                proc_text = process_match.group(1).strip()
-                # Skip if the process is described as "varies" (not a fixed process)
-                if re.search(r'\bvaries\s+by\b', proc_text, re.IGNORECASE):
-                    return []
-                # Split multi-word process descriptions
-                parts = re.split(r'\s+(?=[A-Z][a-zA-Z])', proc_text)
-                for p in parts:
-                    p = p.strip(" -•*,")
-                    if 4 <= len(p) <= 60 and not re.search(r'(?:package|ctc|salary|location|apply|deadline|bond|eligibility|varies)', p, re.IGNORECASE):
-                        rounds.append(p)
+            if sel_match:
+                sel_text = sel_match.group(1).strip()
+                if not re.search(r'\bvaries\s+by\b', sel_text, re.IGNORECASE):
+                    # Match known round patterns
+                    round_pattern_order = [
+                        'Online Assessment', 'Aptitude Test', 'Technical Interview',
+                        'Managerial Round', 'HR Round', 'Coding Round',
+                        'Group Discussion', 'Written Test', 'OA',
+                        'Technical Round', 'HR Interview', 'Coding Test',
+                        'Aptitude', 'Technical', 'HR', 'Coding',
+                    ]
+                    matched_rounds = []
+                    used_spans = []
+                    for rp in round_pattern_order:
+                        pat = rf'\b{re.escape(rp)}\b'
+                        while True:
+                            m = re.search(pat, sel_text, re.IGNORECASE)
+                            if not m:
+                                break
+                            s_start, s_end = m.start(), m.end()
+                            if not any(not (s_end <= us or s_start >= ue) for us, ue in used_spans):
+                                matched_rounds.append(rp)
+                                used_spans.append((s_start, s_end))
+                                sel_text = sel_text[:s_start] + ' ' + sel_text[s_end:]
+                                sel_text = ' '.join(sel_text.split())
+                            else:
+                                break
+                    if matched_rounds:
+                        rounds = matched_rounds
+                    else:
+                        parts = re.split(r'\s+', sel_text)
+                        current = []
+                        for part in parts:
+                            part = part.strip(" -•*,")
+                            if len(part) > 3 and not re.search(r'(?:stipend|package|ctc|salary|drive|location|requirements|eligibility|date|deadline)', part, re.IGNORECASE):
+                                current.append(part)
+                            elif current:
+                                rounds.append(' '.join(current))
+                                current = []
+                        if current:
+                            rounds.append(' '.join(current))
 
-        if rounds:
-            evidence["selection_rounds"] = " -> ".join(rounds)
+        # Final cleanup: deduplicate and prefer individual rounds over combined
+        final_rounds = []
+        for r in rounds:
+            r_clean = r.strip()
+            if not r_clean:
+                continue
+            # Skip combined strings if we have individual components
+            is_combined = len(r_clean) > 30
+            has_compatible = any(len(fr.strip()) <= 30 and fr.strip().lower() in r_clean.lower() for fr in final_rounds)
+            if is_combined and has_compatible:
+                continue
+            if any(r_clean.lower() == fr.lower() for fr in final_rounds):
+                continue
+            final_rounds.append(r_clean)
 
-        return rounds
+        return final_rounds[:5]
 
     def _extract_skills_and_certifications(
         self,
