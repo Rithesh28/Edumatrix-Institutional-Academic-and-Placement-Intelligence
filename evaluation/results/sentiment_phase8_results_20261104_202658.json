@@ -1,0 +1,46 @@
+{
+  "phase": 8,
+  "total_cases": 55,
+  "correct": 53,
+  "accuracy": 0.9636,
+  "errors": [
+    {
+      "test_case_id": "TC_AI_029",
+      "query": "Can you suggest some good colleges for MS?",
+      "expected": "neutral",
+      "predicted": "positive",
+      "confidence": 0.547
+    },
+    {
+      "test_case_id": "TC_AI_031",
+      "query": "Good morning sir",
+      "expected": "neutral",
+      "predicted": "positive",
+      "confidence": 0.755
+    }
+  ],
+  "confusion_matrix": [
+    [
+      5,
+      0,
+      0
+    ],
+    [
+      0,
+      46,
+      2
+    ],
+    [
+      0,
+      0,
+      2
+    ]
+  ],
+  "classification_report": "              precision    recall  f1-score   support\n\n    negative     1.0000    1.0000    1.0000         5\n     neutral     1.0000    0.9583    0.9787        48\n    positive     0.5000    1.0000    0.6667         2\n\n    accuracy                         0.9636        55\n   macro avg     0.8333    0.9861    0.8818        55\nweighted avg     0.9818    0.9636    0.9693        55\n",
+  "timestamp": "20261104_202658",
+  "comparison": {
+    "phase7_accuracy": 0.8182,
+    "phase8_accuracy": 0.9636,
+    "improvement": 0.1454
+  }
+}
